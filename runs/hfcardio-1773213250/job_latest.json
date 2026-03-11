@@ -1,0 +1,40 @@
+{
+  "id": "e2d964ed-6dca-4aac-946a-c893e91a5d83",
+  "study_id": "hfcardio-1773213250",
+  "job_type": "segmentation_v1",
+  "status": "succeeded",
+  "model_tag": "hfcardio-real-mask-v1",
+  "error_message": null,
+  "created_at": "2026-03-11 07:18:16",
+  "started_at": null,
+  "finished_at": "2026-03-11T07:18:20.448Z",
+  "artifacts": [
+    {
+      "id": "ded0cb6f-fe08-4764-8320-6e832be82eef",
+      "artifact_type": "result_json",
+      "bucket": "aortic-mask-out",
+      "object_key": "studies/hfcardio-1773213250/jobs/e2d964ed-6dca-4aac-946a-c893e91a5d83/result.json",
+      "sha256": null,
+      "bytes": 469,
+      "created_at": "2026-03-11 07:18:19"
+    },
+    {
+      "id": "92181da2-24bd-4fcf-9f82-2fe70cce03e5",
+      "artifact_type": "mask_multiclass",
+      "bucket": "aortic-mask-out",
+      "object_key": "studies/hfcardio-1773213250/jobs/e2d964ed-6dca-4aac-946a-c893e91a5d83/mask_multiclass.nii.gz",
+      "sha256": "bc4678acc82b39ba6ac60fc2a4533e325a91444d98f159607593f4bf511f5c8c",
+      "bytes": 93371,
+      "created_at": "2026-03-11 07:18:20"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "3270ef3c-6117-4ea6-9c97-d0b04c536521",
+      "metric_name": "manual_callback_injected",
+      "metric_value": 1,
+      "unit": "flag",
+      "created_at": "2026-03-11 07:18:20"
+    }
+  ]
+}

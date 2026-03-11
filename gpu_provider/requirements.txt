@@ -1,0 +1,9 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+requests==2.32.3
+numpy==2.2.6
+scipy==1.16.1
+nibabel==5.3.2
+SimpleITK==2.5.2
+pydicom==3.0.1
+TotalSegmentator==2.11.0

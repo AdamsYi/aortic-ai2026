@@ -1,0 +1,19 @@
+{
+  "name": "aortic-ai-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "d1:migrate:local": "wrangler d1 migrations apply aortic_meta --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply aortic_meta --remote",
+    "e2e:user": "node scripts/e2e_user_flow.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260303.0",
+    "playwright-core": "^1.58.2",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.12.0"
+  }
+}

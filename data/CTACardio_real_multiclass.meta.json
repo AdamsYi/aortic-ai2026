@@ -1,0 +1,30 @@
+{
+  "input": "/Users/adams/Documents/New project/aortic ai2026/data/CTACardio.nii.gz",
+  "output": "/Users/adams/Documents/New project/aortic ai2026/data/CTACardio_real_multiclass.nii.gz",
+  "spacing_mm": [
+    0.9335939884185791,
+    0.9335939884185791,
+    1.25
+  ],
+  "quality": "high",
+  "seed_z": 203,
+  "stj_z": 247,
+  "asc_end_z": 299,
+  "direction": 1,
+  "voxels": {
+    "root": 10842,
+    "leaflets": 1277,
+    "ascending": 20841
+  },
+  "model_stack": [
+    "TotalSegmentator task=total (open) with ROI subset [aorta, heart, arch branches]",
+    "Centerline-tracked proximal aorta split for root/STJ/ascending separation",
+    "CTA intensity+gradient+radial-gated leaflet proxy refinement in annulus/root band",
+    "Signed-distance smoothing for sub-voxel contour refinement"
+  ],
+  "evidence_hint": [
+    "Centerline-orthogonal and annulus-based planning principle in SCCT/TAVI CT guidance",
+    "Open model provenance from TotalSegmentator (Radiology AI 2023)"
+  ],
+  "note": "Leaflet class is CTA-derived proxy without commercial cusp model; use for research/planning assistance, not standalone diagnosis."
+}

@@ -1,0 +1,321 @@
+{
+  "id": "a2330bfe-bc3d-4643-9784-7958a11c7f92",
+  "study_id": "hqcta-cardio-1773226602",
+  "status": "succeeded",
+  "model_tag": "hqcta-real-mask-v1",
+  "created_at": "2026-03-11 10:58:36",
+  "started_at": "2026-03-11T10:59:06.964Z",
+  "finished_at": "2026-03-11T10:59:08.162Z",
+  "artifacts": [
+    {
+      "id": "c43064fd-8b44-4c0a-b352-ddbb607fcbf3",
+      "artifact_type": "provider_receipt",
+      "bucket": "aortic-mask-out",
+      "object_key": "studies/hqcta-cardio-1773226602/jobs/a2330bfe-bc3d-4643-9784-7958a11c7f92/provider-receipt.json",
+      "sha256": null,
+      "bytes": 613,
+      "created_at": "2026-03-11 10:59:07"
+    },
+    {
+      "id": "2c556516-b4a4-4e68-93ce-390692f98055",
+      "artifact_type": "result_json",
+      "bucket": "aortic-mask-out",
+      "object_key": "studies/hqcta-cardio-1773226602/jobs/a2330bfe-bc3d-4643-9784-7958a11c7f92/result.json",
+      "sha256": null,
+      "bytes": 314,
+      "created_at": "2026-03-11 10:59:07"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "a4692612-3949-4343-a3eb-c7cb52f083da",
+      "metric_name": "provider_inference_seconds",
+      "metric_value": 0.6,
+      "unit": "s",
+      "created_at": "2026-03-11 10:59:08"
+    },
+    {
+      "id": "ee233ab7-9fc9-4ffc-a10f-772e092207de",
+      "metric_name": "provider_total_seconds",
+      "metric_value": 0.9,
+      "unit": "s",
+      "created_at": "2026-03-11 10:59:08"
+    }
+  ],
+  "scalars": {
+    "image_bytes": 63171209,
+    "queue_wait_seconds": 30.964,
+    "process_seconds": 1.198,
+    "total_seconds": 32.162
+  },
+  "links": {
+    "raw_ct": "/studies/hqcta-full-ctacardio/raw",
+    "mask_multiclass": "/studies/hqcta-full-ctacardio-mask/raw",
+    "result_json": "/jobs/a2330bfe-bc3d-4643-9784-7958a11c7f92/artifacts/result_json",
+    "provider_receipt": "/jobs/a2330bfe-bc3d-4643-9784-7958a11c7f92/artifacts/provider_receipt",
+    "job_api": "/jobs/a2330bfe-bc3d-4643-9784-7958a11c7f92"
+  },
+  "study_meta": {
+    "raw_study_id": "hqcta-full-ctacardio",
+    "source_dataset": "supervisely-demo-volumes-CTACardio",
+    "phase": "cardiac-cta-full"
+  },
+  "label_keys": [
+    "0",
+    "1",
+    "2",
+    "3"
+  ],
+  "clinical_targets": {
+    "standard_version": "evidence-standard-2026-03-11",
+    "pears": {
+      "objective": "个体化PEARS术前3D打印网罩设计与安全边界校核",
+      "readiness": {
+        "stage": "partial-ready",
+        "score": 1
+      },
+      "required_outputs": [
+        {
+          "key": "external_surface_root_to_ascending",
+          "status": "available"
+        },
+        {
+          "key": "coronary_ostia_landmarks",
+          "status": "missing"
+        },
+        {
+          "key": "avj_vbr_plane",
+          "status": "missing"
+        },
+        {
+          "key": "stj_ring_and_distal_extent",
+          "status": "available"
+        }
+      ],
+      "key_scalars_mm": [
+        "VBR diameter",
+        "max sinus diameter",
+        "STJ diameter",
+        "distance: VBR to each coronary ostium",
+        "supported segment length"
+      ],
+      "standards": [
+        {
+          "id": "pears_s1",
+          "title": "根部-升主动脉连续外表面",
+          "rule": "必须有 root(1) 与 ascending(3) 的连续分割面，且STJ可识别；直径在中心线正交切面测量",
+          "evidence": "PEARS定制外支撑依赖连续几何外形；血管直径需在中心线垂直平面测量以避免斜切误差"
+        },
+        {
+          "id": "pears_s2",
+          "title": "冠脉开口避让",
+          "rule": "需定位左右冠脉开口中心并保留安全开窗",
+          "evidence": "PEARS制造/术中对冠脉开孔定位是关键安全约束"
+        },
+        {
+          "id": "pears_s3",
+          "title": "早期预防性干预窗口",
+          "rule": "优先用于尚未发生夹层、以保瓣与保留自体血管为目标的人群",
+          "evidence": "PEARS长期随访研究强调在高危遗传性根部扩张中的早期应用价值"
+        }
+      ]
+    },
+    "vsrr": {
+      "objective": "VSRR（David）术前几何重建评估与缝合位点规划",
+      "readiness": {
+        "stage": "partial-ready",
+        "score": 1
+      },
+      "required_outputs": [
+        {
+          "key": "vbr_annulus_geometry",
+          "status": "available"
+        },
+        {
+          "key": "commissural_positions_3d",
+          "status": "missing"
+        },
+        {
+          "key": "commissural_heights",
+          "status": "missing"
+        },
+        {
+          "key": "leaflet_geometric_effective_height",
+          "status": "available"
+        },
+        {
+          "key": "annulus_cusp_mismatch_risk",
+          "status": "missing"
+        }
+      ],
+      "key_scalars_mm": [
+        "VBR area/perimeter/equivalent diameter",
+        "intercommissural distances and angular map",
+        "commissural heights",
+        "leaflet geometric height / effective height",
+        "predicted coaptation reserve"
+      ],
+      "standards": [
+        {
+          "id": "vsrr_s1",
+          "title": "VBR/瓣环-STJ几何匹配",
+          "rule": "必须给出VBR与STJ在双斜位/中心线正交切面的直径及差值，用于移植物尺寸决策",
+          "evidence": "VSRR耐久性与瓣环-管径几何匹配高度相关；双斜位/正交测量可提高几何一致性"
+        },
+        {
+          "id": "vsrr_s2",
+          "title": "Commissure三点定位",
+          "rule": "需提供三交界点角度映射（近似120°拓扑）与高度平面",
+          "evidence": "CT术前预测可显著减少术中反复调整缝合位点"
+        },
+        {
+          "id": "vsrr_s3",
+          "title": "瓣叶对合储备",
+          "rule": "需评估几何高度/有效高度与annulus-cusp mismatch风险",
+          "evidence": "annulus-cusp mismatch与术后返流及再干预风险相关"
+        }
+      ]
+    },
+    "tavi": {
+      "objective": "TAVI术前精准影像规划（瓣环尺寸、冠脉风险、入路评估）",
+      "readiness": {
+        "stage": "partial-ready",
+        "score": 1
+      },
+      "required_outputs": [
+        {
+          "key": "annulus_area_perimeter_diameter_double_oblique",
+          "status": "available"
+        },
+        {
+          "key": "sinus_stj_ascending_geometry",
+          "status": "available"
+        },
+        {
+          "key": "leaflet_calcification_load",
+          "status": "available"
+        },
+        {
+          "key": "coronary_ostia_heights",
+          "status": "missing"
+        },
+        {
+          "key": "vtc_vtstj_virtual_valve",
+          "status": "missing"
+        },
+        {
+          "key": "aorto_iliofemoral_access",
+          "status": "missing"
+        }
+      ],
+      "key_scalars_mm": [
+        "Annulus area/perimeter/equivalent diameter",
+        "Annulus major/minor diameter and eccentricity",
+        "Sinus of Valsalva max diameter",
+        "STJ diameter",
+        "Ascending aorta diameter",
+        "Coronary height (L/R)",
+        "VTC / VTSTJ",
+        "Access route minimal lumen diameter"
+      ],
+      "standards": [
+        {
+          "id": "tavi_s1",
+          "title": "双斜位瓣环测量",
+          "rule": "瓣环面积/周长/直径必须在中心线正交（double-oblique）切面测量",
+          "evidence": "SCCT与TAVI术前CT文献强调双斜位/正交测量可降低斜切误差"
+        },
+        {
+          "id": "tavi_s2",
+          "title": "冠脉阻塞风险评估",
+          "rule": "需提供冠脉开口高度与VTC/VTSTJ，结合窦部/STJ几何评估高危解剖",
+          "evidence": "冠脉阻塞风险文献将冠脉高度、VTC/VTSTJ与窦部几何列为核心指标"
+        },
+        {
+          "id": "tavi_s3",
+          "title": "经股入路评估",
+          "rule": "需评估主动脉-髂股路径最小管径、钙化与迂曲度以判断入路可行性",
+          "evidence": "TAVI术前CT工作流将入路最小管径与血管病变作为关键安全门槛"
+        }
+      ]
+    },
+    "evidence_refs": [
+      {
+        "topic": "Default full CTA demo source (CTACardio)",
+        "url": "https://github.com/supervisely-ecosystem/demo-volumes"
+      },
+      {
+        "topic": "nnU-Net (Nature Methods, 2021)",
+        "url": "https://doi.org/10.1038/s41592-020-01008-z"
+      },
+      {
+        "topic": "TotalSegmentator paper (Radiology: AI, 2023)",
+        "url": "https://doi.org/10.1148/ryai.230024"
+      },
+      {
+        "topic": "Automatic aortic valve cusps segmentation (J Imaging, 2022)",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/35049852/"
+      },
+      {
+        "topic": "SCCT CT imaging consensus for TAVI/TAVR (2019)",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30630686/"
+      },
+      {
+        "topic": "Guide for pre-procedural imaging for TAVR",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7690031/"
+      },
+      {
+        "topic": "TAVI procedural steps and current advances (part 2)",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8212161/"
+      },
+      {
+        "topic": "UK CT-TAVI reporting practice survey",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7254150/"
+      },
+      {
+        "topic": "Coronary obstruction risk: ELOD and cusp height mismatch",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/34917750/"
+      },
+      {
+        "topic": "Aortic diameter by centerline-perpendicular planes (J Card Surg, 2020)",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30673817/"
+      },
+      {
+        "topic": "TEVAR reporting standards (SVS, centerline reconstruction emphasis)",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/32628988/"
+      },
+      {
+        "topic": "AortaSeg24 challenge (CTA multi-class benchmark)",
+        "url": "https://aortaseg24.grand-challenge.org"
+      },
+      {
+        "topic": "ASOCA coronary CTA dataset/challenge",
+        "url": "https://asoca.grand-challenge.org/"
+      },
+      {
+        "topic": "PEARS technique and outcomes",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9205243/"
+      },
+      {
+        "topic": "PEARS intention-to-treat long-term outcomes",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC4033204/"
+      },
+      {
+        "topic": "VSRR CT-based commissural prediction",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39626488/"
+      },
+      {
+        "topic": "Aortic valve repair and cusp effective height concept",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC6562088/"
+      },
+      {
+        "topic": "Annulus-cusp mismatch impact after VSRR",
+        "url": "https://academic.oup.com/icvts/article/40/1/ivaf048/7999382"
+      },
+      {
+        "topic": "CT timing and aortic root measurement before TAVI",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/25708961/"
+      }
+    ]
+  }
+}

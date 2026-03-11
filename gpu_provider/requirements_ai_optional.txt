@@ -1,0 +1,6 @@
+# Optional advanced valve pipeline components (install on GPU workstation)
+# Torch should be installed with matching CUDA build first.
+monai==1.5.0
+nnunetv2==2.6.2
+# VMTK is usually installed via Conda (recommended) due VTK dependencies:
+# conda install -c vmtk vmtk

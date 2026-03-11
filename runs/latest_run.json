@@ -1,0 +1,8 @@
+{
+  "study_id": "openct-1773162357",
+  "job_id": "b70dfca3-a6ef-4096-a361-224a18bd187d",
+  "status": "succeeded",
+  "result_json": "runs/openct-1773162357/job_result.json",
+  "base_url": "https://aortic-ai-api.we085197.workers.dev",
+  "data_url": "https://raw.githubusercontent.com/wasserth/TotalSegmentator/master/tests/reference_files/example_ct.nii.gz"
+}

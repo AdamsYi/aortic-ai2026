@@ -1,0 +1,47 @@
+{
+  "id": "9b1d4097-2d64-498c-80df-32552f1db049",
+  "study_id": "hqcta-cardio-1773163276",
+  "job_type": "segmentation_v1",
+  "status": "succeeded",
+  "model_tag": "hq-cardiac-cta-demo",
+  "error_message": null,
+  "created_at": "2026-03-10 17:21:45",
+  "started_at": "2026-03-10T17:22:16.470Z",
+  "finished_at": "2026-03-10T17:22:20.324Z",
+  "artifacts": [
+    {
+      "id": "5ad02edc-0f7f-4860-82d0-ed5df075534a",
+      "artifact_type": "provider_receipt",
+      "bucket": "aortic-mask-out",
+      "object_key": "studies/hqcta-cardio-1773163276/jobs/9b1d4097-2d64-498c-80df-32552f1db049/provider-receipt.json",
+      "sha256": null,
+      "bytes": 613,
+      "created_at": "2026-03-10 17:22:19"
+    },
+    {
+      "id": "dcf0e409-7450-4de0-a09f-e1b2c7c5115b",
+      "artifact_type": "result_json",
+      "bucket": "aortic-mask-out",
+      "object_key": "studies/hqcta-cardio-1773163276/jobs/9b1d4097-2d64-498c-80df-32552f1db049/result.json",
+      "sha256": null,
+      "bytes": 314,
+      "created_at": "2026-03-10 17:22:20"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "e1d89c8e-ccd9-4177-b9a0-86ea9f19702a",
+      "metric_name": "provider_inference_seconds",
+      "metric_value": 0.6,
+      "unit": "s",
+      "created_at": "2026-03-10 17:22:20"
+    },
+    {
+      "id": "799149fc-aece-46ac-850f-e8ac539f8457",
+      "metric_name": "provider_total_seconds",
+      "metric_value": 0.9,
+      "unit": "s",
+      "created_at": "2026-03-10 17:22:20"
+    }
+  ]
+}
