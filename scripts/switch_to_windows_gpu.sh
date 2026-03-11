@@ -26,4 +26,13 @@ else
   URL="${BASE%/}/infer"
 fi
 
+HOSTPORT="${BASE#http://}"
+HOSTPORT="${HOSTPORT#https://}"
+HOST="${HOSTPORT%%:*}"
+if [[ "$HOST" =~ ^127\. || "$HOST" =~ ^10\. || "$HOST" =~ ^192\.168\. || "$HOST" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+  echo "Warning: $HOST is a private/local IP." >&2
+  echo "Cloudflare Worker (cloud runtime) usually cannot call private LAN addresses directly." >&2
+  echo "Use a public HTTPS endpoint (Cloudflare Tunnel / Tailscale Funnel / reverse proxy) for production." >&2
+fi
+
 exec ./scripts/switch_to_provider.sh "$URL" "$SECRET"

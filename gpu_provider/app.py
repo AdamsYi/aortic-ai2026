@@ -35,6 +35,13 @@ class InferenceMetric(BaseModel):
     unit: Optional[str] = None
 
 
+class InferenceBinaryArtifact(BaseModel):
+    artifact_type: str
+    filename: str
+    content_type: str
+    base64: str
+
+
 class InferenceResponse(BaseModel):
     status: str
     job_id: str
@@ -44,6 +51,7 @@ class InferenceResponse(BaseModel):
     mask_base64: Optional[str] = None
     mask_filename: Optional[str] = None
     mask_content_type: Optional[str] = None
+    artifacts: Optional[List[InferenceBinaryArtifact]] = None
 
 
 app = FastAPI(title="Aortic AI GPU Provider", version="1.0.0")
@@ -114,15 +122,16 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
     )
 
 
-def run_model(input_bytes: bytes, req: InferenceRequest) -> InferenceResponse:
+def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Optional[str] = None) -> InferenceResponse:
     started = time.time()
-    provider_job_id = f"provider-{int(started * 1000)}"
+    if not provider_job_id:
+        provider_job_id = f"provider-{int(started * 1000)}"
 
     with tempfile.TemporaryDirectory(prefix="aortic-provider-") as td:
         td_path = Path(td)
         suffix = guess_input_suffix(req)
         input_path = td_path / f"input{suffix}"
-        output_mask = td_path / "mask_multiclass.nii.gz"
+        output_mask = td_path / "segmentation_mask.nii.gz"
         output_json = td_path / "result.json"
         input_path.write_bytes(input_bytes)
 
@@ -142,6 +151,54 @@ def run_model(input_bytes: bytes, req: InferenceRequest) -> InferenceResponse:
 
         mask_bytes = output_mask.read_bytes()
         result_json = json.loads(output_json.read_text(encoding="utf-8"))
+        extra_artifacts: list[InferenceBinaryArtifact] = []
+
+        # Prefer explicit manifest from pipeline output.
+        manifest = result_json.get("artifacts_manifest")
+        if isinstance(manifest, list):
+            for item in manifest:
+                if not isinstance(item, dict):
+                    continue
+                path_s = str(item.get("path") or "").strip()
+                if not path_s:
+                    continue
+                p = Path(path_s)
+                if not p.exists() or not p.is_file():
+                    continue
+                artifact_type = str(item.get("artifact_type") or p.stem).strip() or p.stem
+                content_type = str(item.get("content_type") or "application/octet-stream").strip() or "application/octet-stream"
+                filename = str(item.get("filename") or p.name).strip() or p.name
+                data = p.read_bytes()
+                extra_artifacts.append(
+                    InferenceBinaryArtifact(
+                        artifact_type=artifact_type,
+                        filename=filename,
+                        content_type=content_type,
+                        base64=base64.b64encode(data).decode("ascii"),
+                    )
+                )
+        else:
+            # Fallback for fixed-known artifacts in output folder.
+            known = [
+                ("measurements_json", "measurements.json", "application/json"),
+                ("planning_report_pdf", "planning_report.pdf", "application/pdf"),
+                ("aortic_root_stl", "aortic_root.stl", "model/stl"),
+                ("centerline_json", "centerline.json", "application/json"),
+                ("annulus_plane_json", "annulus_plane.json", "application/json"),
+            ]
+            for artifact_type, fname, ctype in known:
+                p = output_json.parent / fname
+                if not p.exists() or not p.is_file():
+                    continue
+                data = p.read_bytes()
+                extra_artifacts.append(
+                    InferenceBinaryArtifact(
+                        artifact_type=artifact_type,
+                        filename=fname,
+                        content_type=ctype,
+                        base64=base64.b64encode(data).decode("ascii"),
+                    )
+                )
 
         total_seconds = time.time() - started
         metrics = [
@@ -163,8 +220,9 @@ def run_model(input_bytes: bytes, req: InferenceRequest) -> InferenceResponse:
             result_json=result_json,
             metrics=metrics,
             mask_base64=base64.b64encode(mask_bytes).decode("ascii"),
-            mask_filename="mask_multiclass.nii.gz",
+            mask_filename=output_mask.name,
             mask_content_type="application/gzip",
+            artifacts=extra_artifacts or None,
         )
 
 
@@ -183,6 +241,32 @@ def post_callback(req: InferenceRequest, result: InferenceResponse) -> None:
         resp.raise_for_status()
     except Exception as exc:
         print(f"[callback] failed for job={req.job_id}: {exc}")
+
+
+def post_error_callback(req: InferenceRequest, provider_job_id: str, message: str) -> None:
+    if not req.callback.url:
+        return
+    headers = {"content-type": "application/json"}
+    if req.callback.header and req.callback.secret:
+        headers[req.callback.header] = req.callback.secret
+    payload = {
+        "status": "failed",
+        "job_id": req.job_id,
+        "provider_job_id": provider_job_id,
+        "error_message": message,
+    }
+    try:
+        requests.post(req.callback.url, headers=headers, json=payload, timeout=10).raise_for_status()
+    except Exception as exc:
+        print(f"[callback] failed to post error for job={req.job_id}: {exc}")
+
+
+def run_model_and_callback(req: InferenceRequest, input_bytes: bytes, provider_job_id: str) -> None:
+    try:
+        result = run_model(input_bytes, req, provider_job_id=provider_job_id)
+        post_callback(req, result)
+    except Exception as exc:
+        post_error_callback(req, provider_job_id, str(exc))
 
 
 @app.get("/health")
@@ -209,33 +293,30 @@ def infer(req: InferenceRequest) -> Dict[str, Any]:
     if len(input_bytes) > max_input_bytes:
         raise HTTPException(status_code=413, detail=f"input_too_large:{len(input_bytes)}")
 
-    try:
-        result = run_model(input_bytes, req)
-    except Exception as exc:
-        error_payload = {
-            "status": "failed",
-            "job_id": req.job_id,
-            "provider_job_id": f"provider-failed-{int(time.time() * 1000)}",
-            "error_message": str(exc),
-        }
-        if req.callback.url:
-            headers = {"content-type": "application/json"}
-            if req.callback.header and req.callback.secret:
-                headers[req.callback.header] = req.callback.secret
-            try:
-                requests.post(req.callback.url, headers=headers, json=error_payload, timeout=10)
-            except Exception:
-                pass
-        return error_payload
-
     mode = env("PROVIDER_RESPONSE_MODE", "inline").strip().lower()
     if mode == "callback":
-        t = threading.Thread(target=post_callback, args=(req, result), daemon=True)
+        if not req.callback.url:
+            raise HTTPException(status_code=400, detail="callback_url_required_for_callback_mode")
+        provider_job_id = f"provider-{int(time.time() * 1000)}"
+        t = threading.Thread(target=run_model_and_callback, args=(req, input_bytes, provider_job_id), daemon=True)
         t.start()
         return {
             "status": "accepted",
             "job_id": req.job_id,
-            "provider_job_id": result.provider_job_id,
+            "provider_job_id": provider_job_id,
         }
+
+    try:
+        result = run_model(input_bytes, req)
+    except Exception as exc:
+        provider_job_id = f"provider-failed-{int(time.time() * 1000)}"
+        error_payload = {
+            "status": "failed",
+            "job_id": req.job_id,
+            "provider_job_id": provider_job_id,
+            "error_message": str(exc),
+        }
+        post_error_callback(req, provider_job_id, str(exc))
+        return error_payload
 
     return result.model_dump(exclude_none=True)

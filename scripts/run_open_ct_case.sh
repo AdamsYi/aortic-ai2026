@@ -3,6 +3,8 @@ set -euo pipefail
 
 BASE_URL="${1:-https://aortic-ai-api.we085197.workers.dev}"
 DATA_URL="${2:-https://raw.githubusercontent.com/wasserth/TotalSegmentator/master/tests/reference_files/example_ct.nii.gz}"
+MAX_POLL_ROUNDS="${MAX_POLL_ROUNDS:-240}"
+POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-3}"
 TIME_TAG="$(date +%s)"
 STUDY_ID="openct-${TIME_TAG}"
 OUT_DIR="runs/${STUDY_ID}"
@@ -50,7 +52,7 @@ fi
 printf 'Polling job status: %s\n' "$JOB_ID"
 
 FINAL_JSON=""
-for i in $(seq 1 40); do
+for i in $(seq 1 "$MAX_POLL_ROUNDS"); do
   RESP=$(curl -sS "$BASE_URL/jobs/$JOB_ID")
   STATUS=$(echo "$RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write((JSON.parse(d).status||'')))")
   printf '[%02d] status=%s\n' "$i" "$STATUS"
@@ -59,7 +61,7 @@ for i in $(seq 1 40); do
     FINAL_JSON="$RESP"
     break
   fi
-  sleep 3
+  sleep "$POLL_INTERVAL_SECONDS"
 done
 
 if [[ -z "$FINAL_JSON" ]]; then
@@ -78,6 +80,30 @@ printf 'job_id=%s\n' "$JOB_ID"
 printf 'status=%s\n' "$FINAL_STATUS"
 printf 'artifacts=%s\n' "$ARTIFACT_COUNT"
 printf 'result_json=%s\n' "$OUT_DIR/job_result.json"
+
+printf '\nDownloading job artifacts into %s ...\n' "$OUT_DIR"
+echo "$FINAL_JSON" | node -e '
+let d="";
+process.stdin.on("data",c=>d+=c).on("end",()=>{
+  const j=JSON.parse(d);
+  const arr=Array.isArray(j.artifacts)?j.artifacts:[];
+  for (const a of arr){
+    const t=String(a.artifact_type||"").trim();
+    const k=String(a.object_key||"").trim();
+    if(!t) continue;
+    const fname=(k.split("/").pop()||(`${t}.bin`)).replace(/[^a-zA-Z0-9._-]/g,"_");
+    process.stdout.write(`${t}|${fname}\n`);
+  }
+});
+' | while IFS='|' read -r ART_TYPE ART_FILE; do
+  [[ -z "${ART_TYPE:-}" ]] && continue
+  DEST="$OUT_DIR/$ART_FILE"
+  if curl -fsS "$BASE_URL/jobs/$JOB_ID/artifacts/$ART_TYPE" -o "$DEST"; then
+    printf '  - %s -> %s\n' "$ART_TYPE" "$DEST"
+  else
+    printf '  - %s -> download failed\n' "$ART_TYPE" >&2
+  fi
+done
 
 cat > runs/latest_run.json <<JSON
 {

@@ -27,7 +27,7 @@ if ($InstallOptionalAI) {
 
 $env:MODEL_DEVICE = "gpu"
 $env:PIPELINE_QUALITY = $Quality
-$env:PROVIDER_RESPONSE_MODE = "inline"
+$env:PROVIDER_RESPONSE_MODE = "callback"
 
 Write-Host "Starting GPU provider on $Host:$Port ..."
 Write-Host "MODEL_DEVICE=$env:MODEL_DEVICE"

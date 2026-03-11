@@ -5,6 +5,8 @@
 1. DICOM/ZIP -> NIfTI（`dcm2niix`）  
 2. 多类分割（`TotalSegmentator` + `build_real_multiclass_mask.py`）  
 3. 自动测量与术前指标 JSON（`pipeline_runner.py`）
+4. 中心线提取（VMTK 优先，失败回退到几何质心中心线）
+5. 导出 STL + PDF + measurements.json
 
 本服务已禁用 placeholder/stub 输出：没有真实推理链路会直接报错。
 
@@ -18,11 +20,19 @@
 .\run_windows_gpu.ps1 -Quality fast
 ```
 
+或用一键升级+启动脚本（推荐）：
+
+```powershell
+.\upgrade_windows_provider.ps1 -Quality fast
+```
+
 默认监听 `0.0.0.0:8000`，健康检查：
 
 ```powershell
 curl http://127.0.0.1:8000/health
 ```
+
+推荐用于 Cloudflare Tunnel 的长任务模式：`PROVIDER_RESPONSE_MODE=callback`（已在脚本默认启用），避免长时间同步响应导致 524。
 
 ---
 
@@ -83,5 +93,13 @@ Worker 需要指向你的 Win GPU 服务公网/内网地址（推荐 Tailscale/Z
 
 ## 6) 备注
 
-当前测量链路已经是“真实分割 + 真实几何计算”；  
-冠脉开口高度、瓣叶三尖精细几何等高级指标，需要专门瓣膜/冠脉模型进一步增强（不做伪造）。
+当前测量链路是“真实分割 + 中心线正交几何计算”，输出以下关键工件：
+- `segmentation_mask.nii.gz`
+- `measurements.json`
+- `planning_report.pdf`
+- `aortic_root.stl`
+- `centerline.json`
+- `annulus_plane.json`
+
+冠脉开口高度目前为基于阈值+几何规则的自动估计，仍需人工复核；  
+瓣叶三尖/交界点精细几何（effective height、coaptation height）需专门瓣膜模型进一步增强（不做伪造）。

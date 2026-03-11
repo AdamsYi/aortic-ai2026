@@ -4,7 +4,15 @@ This repository now targets a real web-driven pipeline:
 - browser upload and orchestration
 - Cloudflare Worker gateway
 - Windows GPU FastAPI inference backend
-- real segmentation masks + real geometry measurements (no placeholders)
+- real segmentation masks + centerline-orthogonal geometry measurements (no placeholders)
+
+Core exports per case:
+- `segmentation_mask.nii.gz`
+- `measurements.json`
+- `planning_report.pdf`
+- `aortic_root.stl`
+- `centerline.json`
+- `annulus_plane.json`
 
 ## 1) What is included
 
@@ -146,6 +154,10 @@ One-shot attach + validation (recommended):
 ```bash
 ./scripts/attach_windows_gpu_and_validate.sh http://<win-gpu-host>:8000
 ```
+
+Important:
+- If Worker runs on Cloudflare (not local dev), `192.168.x.x` / `10.x.x.x` private IP is not directly reachable from cloud runtime.
+- Expose your Windows provider as a public HTTPS endpoint first (Cloudflare Tunnel / Tailscale Funnel), then switch webhook to that public URL.
 
 3. Submit a case and check job status:
 

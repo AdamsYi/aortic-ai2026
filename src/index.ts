@@ -358,10 +358,50 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
 
 async function getLatestDemoCase(env: Env): Promise<Response> {
   const job = await env.DB.prepare(
-    `SELECT j.id, j.study_id, j.status, j.model_tag, j.created_at, j.started_at, j.finished_at
+    `SELECT
+       j.id,
+       j.study_id,
+       j.status,
+       j.model_tag,
+       j.created_at,
+       j.started_at,
+       j.finished_at,
+       EXISTS(
+         SELECT 1 FROM artifacts a
+         WHERE a.job_id = j.id AND a.artifact_type IN ('segmentation_mask_nifti', 'mask_output', 'mask_multiclass')
+       ) AS has_seg,
+       EXISTS(
+         SELECT 1 FROM artifacts a
+         WHERE a.job_id = j.id AND a.artifact_type = 'measurements_json'
+       ) AS has_measurements,
+       EXISTS(
+         SELECT 1 FROM artifacts a
+         WHERE a.job_id = j.id AND a.artifact_type = 'aortic_root_stl'
+       ) AS has_stl
      FROM jobs j
      WHERE j.status = 'succeeded'
      ORDER BY
+       CASE
+         WHEN
+           EXISTS(
+             SELECT 1 FROM artifacts a
+             WHERE a.job_id = j.id AND a.artifact_type IN ('segmentation_mask_nifti', 'mask_output', 'mask_multiclass')
+           )
+           AND EXISTS(
+             SELECT 1 FROM artifacts a
+             WHERE a.job_id = j.id AND a.artifact_type = 'measurements_json'
+           )
+         THEN 0
+         ELSE 1
+       END,
+       CASE
+         WHEN EXISTS(
+           SELECT 1 FROM artifacts a
+           WHERE a.job_id = j.id AND a.artifact_type IN ('segmentation_mask_nifti', 'mask_output', 'mask_multiclass')
+         )
+         THEN 0
+         ELSE 1
+       END,
        CASE
          WHEN j.study_id LIKE 'hqcta-cardio-%' THEN 0
          WHEN j.study_id LIKE 'openct-%' OR j.study_id LIKE 'colab-openct-%' THEN 1
@@ -380,15 +420,8 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
   const jobStudy = await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
     .bind(studyId)
     .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>();
-  const fullCtaStudy = await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
-    .bind("hqcta-full-ctacardio")
-    .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>();
-
-  const preferredStudy = fullCtaStudy?.image_key ? fullCtaStudy : jobStudy;
+  const preferredStudy = jobStudy;
   const rawStudyId = preferredStudy?.id || studyId;
-  const maskStudy = await env.DB.prepare(`SELECT id, image_key FROM studies WHERE id = ?1`)
-    .bind("hqcta-full-ctacardio-mask")
-    .first<{ id: string; image_key: string }>();
 
   const artifacts = await env.DB.prepare(
     `SELECT id, artifact_type, bucket, object_key, sha256, bytes, created_at
@@ -441,9 +474,15 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
     },
     links: {
       raw_ct: `/studies/${rawStudyId}/raw`,
-      mask_multiclass: maskStudy?.image_key ? `/studies/${maskStudy.id}/raw` : null,
+      mask_multiclass: `/jobs/${jobId}/artifacts/mask_output`,
+      segmentation_mask_nifti: `/jobs/${jobId}/artifacts/segmentation_mask_nifti`,
       result_json: `/jobs/${jobId}/artifacts/result_json`,
       provider_receipt: `/jobs/${jobId}/artifacts/provider_receipt`,
+      measurements_json: `/jobs/${jobId}/artifacts/measurements_json`,
+      planning_report_pdf: `/jobs/${jobId}/artifacts/planning_report_pdf`,
+      aortic_root_stl: `/jobs/${jobId}/artifacts/aortic_root_stl`,
+      centerline_json: `/jobs/${jobId}/artifacts/centerline_json`,
+      annulus_plane_json: `/jobs/${jobId}/artifacts/annulus_plane_json`,
       job_api: `/jobs/${jobId}`
     },
     study_meta: {
@@ -705,6 +744,15 @@ async function applyInferenceOutputToJob(
       studyId,
       "mask_output",
       maskFilename,
+      maskBytes,
+      payload.mask_content_type || "application/octet-stream"
+    );
+    await writeBinaryArtifact(
+      env,
+      jobId,
+      studyId,
+      "segmentation_mask_nifti",
+      "segmentation_mask.nii.gz",
       maskBytes,
       payload.mask_content_type || "application/octet-stream"
     );
@@ -1226,6 +1274,10 @@ const DEMO_HTML = `<!doctype html>
     .btn.active { border-color: #38bdf8; background: #10304d; }
     .btn:disabled { opacity: .55; cursor: not-allowed; border-color: #2b3b52; }
     .layout { display: grid; grid-template-columns: 320px 1fr 380px; gap: 12px; }
+    .layout-bottom { margin-top: 12px; }
+    .bottom-table { width: 100%; border-collapse: collapse; }
+    .bottom-table th, .bottom-table td { border-bottom: 1px solid var(--line); padding: 7px 5px; text-align: left; font-size: 12px; }
+    .bottom-table th { color: var(--muted); font-weight: 700; }
     .panel {
       background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
       border: 1px solid var(--line); border-radius: 14px; padding: 12px;
@@ -1249,6 +1301,34 @@ const DEMO_HTML = `<!doctype html>
       border-radius: 12px;
       background: #02060d;
       cursor: grab;
+      display: block;
+      image-rendering: auto;
+    }
+    .mpr-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .mpr-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 6px;
+      background: rgba(8, 14, 24, .9);
+    }
+    .mpr-title {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    #viewerSagittal, #viewerCoronal {
+      width: 100%;
+      height: 190px;
+      border: 1px solid #21324a;
+      border-radius: 8px;
+      background: #040a14;
       display: block;
       image-rendering: auto;
     }
@@ -1407,7 +1487,11 @@ const DEMO_HTML = `<!doctype html>
         <div class="sec">
           <div class="k" id="kFiles">Case Files</div>
           <div class="small"><a id="rawLink" href="#">下载原始CT</a></div>
+          <div class="small"><a id="segMaskLink" href="#">下载分割掩码 NIfTI</a></div>
           <div class="small"><a id="resultLink" href="#">下载分割结果JSON</a></div>
+          <div class="small"><a id="measurementsLink" href="#">下载测量结果 JSON</a></div>
+          <div class="small"><a id="reportPdfLink" href="#">下载规划报告 PDF</a></div>
+          <div class="small"><a id="rootStlLink" href="#">下载主动脉根部 STL</a></div>
           <div class="small"><a id="receiptLink" href="#">下载Provider回执</a></div>
           <div class="small"><a id="jobApiLink" href="#">查看Job API</a></div>
         </div>
@@ -1430,6 +1514,16 @@ const DEMO_HTML = `<!doctype html>
           <div><span id="badgeLabelVoxel">Voxel(mm)</span>: <span id="badgeVoxel">-</span></div>
           <div><span id="badgeLabelSeg">Auto-Seg</span>: <span id="badgeSeg">pending</span></div>
           <div><span id="badgeLabelKey">Key Slice</span>: <span id="badgeKey" class="badge-key">-</span></div>
+        </div>
+        <div class="mpr-grid">
+          <div class="mpr-card">
+            <div class="mpr-title">Sagittal MPR</div>
+            <canvas id="viewerSagittal"></canvas>
+          </div>
+          <div class="mpr-card">
+            <div class="mpr-title">Coronal MPR</div>
+            <canvas id="viewerCoronal"></canvas>
+          </div>
         </div>
         <div class="sec recon3d-tools">
           <div class="k" id="kRecon3d">CTA 3D Reconstruction</div>
@@ -1513,6 +1607,20 @@ const DEMO_HTML = `<!doctype html>
         </div>
       </div>
     </div>
+    <div class="panel layout-bottom">
+      <div class="k" id="kBottomMeasure">Live Measurement Board</div>
+      <table class="bottom-table">
+        <thead>
+          <tr>
+            <th id="bottomThMetric">Metric</th>
+            <th id="bottomThValue">Value</th>
+            <th id="bottomThUnit">Unit</th>
+            <th id="bottomThSource">Source</th>
+          </tr>
+        </thead>
+        <tbody id="bottomMeasurements"></tbody>
+      </table>
+    </div>
   </div>
 
   <script type="module">
@@ -1559,6 +1667,9 @@ const DEMO_HTML = `<!doctype html>
       keySliceMap: {},
       lastPlanKind: 'pears',
       stats: null,
+      pipelineResult: null,
+      centerlineData: null,
+      annulusPlaneData: null,
       bodyBounds: null,
       recon3d: {
         lib: null,
@@ -1651,9 +1762,18 @@ const DEMO_HTML = `<!doctype html>
         badgeLabelSeg: '自动分割',
         badgeLabelKey: '关键切片',
         rawLink: '下载原始CT',
+        segMaskLink: '下载分割掩码 NIfTI',
         resultLink: '下载分割结果JSON',
+        measurementsLink: '下载测量结果 JSON',
+        reportPdfLink: '下载规划报告 PDF',
+        rootStlLink: '下载主动脉根部 STL',
         receiptLink: '下载Provider回执',
         jobApiLink: '查看Job API',
+        kBottomMeasure: '实时测量面板',
+        bottomThMetric: '指标',
+        bottomThValue: '数值',
+        bottomThUnit: '单位',
+        bottomThSource: '来源',
         thName: '名称',
         thValue: '数值',
         thUnit: '单位',
@@ -1774,9 +1894,18 @@ const DEMO_HTML = `<!doctype html>
         badgeLabelSeg: 'Auto-Seg',
         badgeLabelKey: 'Key Slice',
         rawLink: 'Download Raw CT',
+        segMaskLink: 'Download Segmentation Mask NIfTI',
         resultLink: 'Download Segmentation JSON',
+        measurementsLink: 'Download Measurements JSON',
+        reportPdfLink: 'Download Planning Report PDF',
+        rootStlLink: 'Download Aortic Root STL',
         receiptLink: 'Download Provider Receipt',
         jobApiLink: 'Open Job API',
+        kBottomMeasure: 'Live Measurement Board',
+        bottomThMetric: 'Metric',
+        bottomThValue: 'Value',
+        bottomThUnit: 'Unit',
+        bottomThSource: 'Source',
         thName: 'Name',
         thValue: 'Value',
         thUnit: 'Unit',
@@ -1827,10 +1956,18 @@ const DEMO_HTML = `<!doctype html>
 
     const canvas = $('viewer');
     const ctx = canvas.getContext('2d');
+    const canvasSag = $('viewerSagittal');
+    const ctxSag = canvasSag ? canvasSag.getContext('2d') : null;
+    const canvasCor = $('viewerCoronal');
+    const ctxCor = canvasCor ? canvasCor.getContext('2d') : null;
     const off = document.createElement('canvas');
     const offCtx = off.getContext('2d');
     const ov = document.createElement('canvas');
     const ovCtx = ov.getContext('2d');
+    const offSag = document.createElement('canvas');
+    const offSagCtx = offSag.getContext('2d');
+    const offCor = document.createElement('canvas');
+    const offCorCtx = offCor.getContext('2d');
 
     function setCanvasSize() {
       const ratio = window.devicePixelRatio || 1;
@@ -1838,6 +1975,18 @@ const DEMO_HTML = `<!doctype html>
       canvas.width = Math.max(2, Math.floor(rect.width * ratio));
       canvas.height = Math.max(2, Math.floor(rect.height * ratio));
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      if (canvasSag && ctxSag) {
+        const rs = canvasSag.getBoundingClientRect();
+        canvasSag.width = Math.max(2, Math.floor(rs.width * ratio));
+        canvasSag.height = Math.max(2, Math.floor(rs.height * ratio));
+        ctxSag.setTransform(ratio, 0, 0, ratio, 0, 0);
+      }
+      if (canvasCor && ctxCor) {
+        const rc = canvasCor.getBoundingClientRect();
+        canvasCor.width = Math.max(2, Math.floor(rc.width * ratio));
+        canvasCor.height = Math.max(2, Math.floor(rc.height * ratio));
+        ctxCor.setTransform(ratio, 0, 0, ratio, 0, 0);
+      }
       render();
     }
 
@@ -2076,10 +2225,11 @@ const DEMO_HTML = `<!doctype html>
         'btnJumpVbr', 'btnJumpStj', 'btnJumpLeaf', 'btnJumpRootMax', 'btnJumpAscMax', 'btnJumpBest',
         'btnDispCt', 'btnDispPanel',
         'kCase', 'kCloud', 'kViewer', 'kKeySlices', 'kDisplayMode', 'kFiles', 'kLegend', 'kPears', 'kVsrr', 'kTavi', 'kRecon3d', 'kPlan', 'kMetrics', 'kEvidence', 'kLatest',
+        'kBottomMeasure',
         'lblJob', 'lblStatus', 'lblDataset', 'lblPhase', 'lblSlice', 'lblWw', 'lblWl', 'lblOverlay',
         'viewerHint', 'keySliceHint', 'cloudHint', 'recon3dHint',
         'badgeLabelSlice', 'badgeLabelZoom', 'badgeLabelVoxel', 'badgeLabelSeg', 'badgeLabelKey',
-        'thName', 'thValue', 'thUnit', 'btnLangModalZh', 'btnLangModalEn'
+        'thName', 'thValue', 'thUnit', 'bottomThMetric', 'bottomThValue', 'bottomThUnit', 'bottomThSource', 'btnLangModalZh', 'btnLangModalEn'
       ];
       for (const id of ids) setText(id, id);
 
@@ -2087,7 +2237,11 @@ const DEMO_HTML = `<!doctype html>
       $('legendRoot').innerHTML = '<span class="dot" style="background:#ef4444"></span>' + t('legendRoot');
       $('legendAsc').innerHTML = '<span class="dot" style="background:#22d3ee"></span>' + t('legendAsc');
       $('rawLink').textContent = t('rawLink');
+      $('segMaskLink').textContent = t('segMaskLink');
       $('resultLink').textContent = t('resultLink');
+      $('measurementsLink').textContent = t('measurementsLink');
+      $('reportPdfLink').textContent = t('reportPdfLink');
+      $('rootStlLink').textContent = t('rootStlLink');
       $('receiptLink').textContent = t('receiptLink');
       $('jobApiLink').textContent = t('jobApiLink');
       updateKeySliceButtons();
@@ -2211,6 +2365,95 @@ const DEMO_HTML = `<!doctype html>
       }
     }
 
+    function finiteOrNull(v) {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : null;
+    }
+
+    function mapBackendRiskFlags(flags) {
+      const list = Array.isArray(flags) ? flags : [];
+      const out = [];
+      for (const f of list) {
+        const id = String(f?.id || f || '').trim();
+        if (!id) continue;
+        if (id === 'heavy_valve_calcification') out.push('calc_high');
+        else if (id === 'small_sinus') out.push('stj_rel_small');
+        else if (id === 'low_coronary_height') out.push('low_coronary_height');
+        else out.push(id);
+      }
+      return out;
+    }
+
+    function applyBackendMeasurements(resultJson) {
+      state.pipelineResult = resultJson && typeof resultJson === 'object' ? resultJson : null;
+      if (!state.stats || !state.pipelineResult) return;
+      const m = state.pipelineResult?.measurements || {};
+      const cal = m?.valve_calcium_burden || {};
+      const annulus = finiteOrNull(m.annulus_diameter_mm);
+      const annulusArea = finiteOrNull(m.annulus_area_mm2);
+      const annulusPerim = finiteOrNull(m.annulus_perimeter_mm);
+      const sinus = finiteOrNull(m.sinus_of_valsalva_diameter_mm ?? m.sinus_diameter_mm);
+      const stj = finiteOrNull(m.stj_diameter_mm);
+      const asc = finiteOrNull(m.ascending_aorta_diameter_mm);
+      const lvot = finiteOrNull(m.lvot_diameter_mm);
+      const leftH = finiteOrNull(m.coronary_height_left_mm);
+      const rightH = finiteOrNull(m.coronary_height_right_mm);
+      const calcVol = finiteOrNull(cal.calc_volume_ml);
+      const calcThr = finiteOrNull(cal.threshold_hu);
+
+      if (annulus !== null) state.stats.vbrDiameterMm = annulus;
+      if (annulusArea !== null) state.stats.vbrAreaMm2 = annulusArea;
+      if (annulusPerim !== null) state.stats.vbrPerimeterMm = annulusPerim;
+      if (sinus !== null) state.stats.rootMaxDiameterMm = sinus;
+      if (stj !== null) state.stats.stjDiameterMm = stj;
+      if (asc !== null) state.stats.ascMaxDiameterMm = asc;
+      if (lvot !== null) state.stats.lvotDiameterMm = lvot;
+      state.stats.taviCoronaryHeightLeftMm = leftH;
+      state.stats.taviCoronaryHeightRightMm = rightH;
+      state.stats.taviCoronaryHeightMm = (leftH !== null && rightH !== null) ? Math.min(leftH, rightH) : (leftH ?? rightH ?? null);
+      if (calcVol !== null) {
+        state.stats.rootLeafCalcVolumeMl = calcVol;
+      }
+      if (calcThr !== null) {
+        state.stats.calcificationThresholdHU = calcThr;
+      }
+      state.stats.taviRiskFlags = mapBackendRiskFlags(state.pipelineResult?.risk_flags);
+
+      const annulusPlane = state.pipelineResult?.landmarks?.annulus_plane;
+      if (annulusPlane && typeof annulusPlane === 'object') {
+        state.annulusPlaneData = annulusPlane;
+        const oz = finiteOrNull(annulusPlane?.origin_voxel?.[2]);
+        if (oz !== null) {
+          state.stats.vbrZ = oz;
+        }
+      }
+    }
+
+    async function loadAuxArtifacts(data) {
+      state.centerlineData = null;
+      state.annulusPlaneData = null;
+      const centerlineUrl = findArtifactLink(data, ['centerline_json']);
+      const annulusUrl = findArtifactLink(data, ['annulus_plane_json']);
+      if (centerlineUrl) {
+        try {
+          const r = await fetch(centerlineUrl, { cache: 'no-store' });
+          if (r.ok) {
+            const obj = await r.json();
+            state.centerlineData = obj;
+          }
+        } catch {}
+      }
+      if (annulusUrl) {
+        try {
+          const r = await fetch(annulusUrl, { cache: 'no-store' });
+          if (r.ok) {
+            const obj = await r.json();
+            state.annulusPlaneData = obj;
+          }
+        } catch {}
+      }
+    }
+
     function bindCasePanel(data) {
       state.caseData = data;
       $('studyId').textContent = data.study_id || '-';
@@ -2219,7 +2462,11 @@ const DEMO_HTML = `<!doctype html>
       $('datasetName').textContent = data.study_meta?.source_dataset || 'public-cta';
       $('datasetPhase').textContent = data.study_meta?.phase || 'unknown';
       $('rawLink').href = absLink(data.links?.raw_ct);
+      $('segMaskLink').href = absLink(data.links?.segmentation_mask_nifti);
       $('resultLink').href = absLink(data.links?.result_json);
+      $('measurementsLink').href = absLink(data.links?.measurements_json);
+      $('reportPdfLink').href = absLink(data.links?.planning_report_pdf);
+      $('rootStlLink').href = absLink(data.links?.aortic_root_stl);
       $('receiptLink').href = absLink(data.links?.provider_receipt);
       $('jobApiLink').href = absLink(data.links?.job_api);
       setReadinessChip('pearsState', data.clinical_targets?.pears?.readiness?.stage || 'partial-ready');
@@ -2235,6 +2482,7 @@ const DEMO_HTML = `<!doctype html>
         const hit = list.find((a) => String(a?.artifact_type || '') === type);
         if (hit) return absLink('/jobs/' + encodeURIComponent(data.id) + '/artifacts/' + encodeURIComponent(type));
       }
+      if (list.length > 0) return null;
       const fromLinks = preferredTypes
         .map((type) => data?.links?.[type])
         .find((x) => typeof x === 'string' && x.trim());
@@ -2258,14 +2506,19 @@ const DEMO_HTML = `<!doctype html>
       }
       const out = new Uint8Array(mx * my * mz);
       const zCounts = new Uint32Array(mz);
+      let fgCount = 0;
       for (let i = 0; i < out.length; i += 1) {
         const v = Number(typed[i] ?? 0);
         const cls = v < 0.5 ? 0 : (v < 1.5 ? 1 : (v < 2.5 ? 2 : 3));
         out[i] = cls;
         if (cls > 0) {
+          fgCount += 1;
           const z = Math.floor(i / (mx * my));
           zCounts[z] += 1;
         }
+      }
+      if (fgCount < 100) {
+        throw new Error('mask_empty_or_invalid');
       }
       state.seg = out;
       state.segReady = true;
@@ -2273,6 +2526,7 @@ const DEMO_HTML = `<!doctype html>
       state.contourCache.clear();
       $('badgeSeg').textContent = t('segDoneReal');
       state.stats = computeStats(out);
+      applyBackendMeasurements(state.pipelineResult);
       const orthBestZ = Number.isFinite(state.stats?.rootMaxZ) ? state.stats.rootMaxZ : -1;
       let bestZ = state.slice;
       let bestCount = 0;
@@ -2307,9 +2561,15 @@ const DEMO_HTML = `<!doctype html>
     async function loadCaseData(data) {
       bindCasePanel(data);
       $('planPreview').textContent = t('waitPlan');
-      await loadResultPreview(absLink(data.links?.result_json));
+      const resultJson = await loadResultPreview(absLink(data.links?.result_json));
+      state.pipelineResult = resultJson;
       await loadNiftiVolume(absLink(data.links?.raw_ct));
       await loadValidatedSegmentation(data, { appendErrorToPreview: true });
+      await loadAuxArtifacts(data);
+      applyBackendMeasurements(resultJson);
+      fillPlanningTables();
+      renderPlan(state.lastPlanKind || 'pears');
+      render();
     }
 
     async function loadLatestCase() {
@@ -2337,8 +2597,14 @@ const DEMO_HTML = `<!doctype html>
 
       const links = {
         raw_ct: '/studies/' + studyId + '/raw',
+        segmentation_mask_nifti: '/jobs/' + jobId + '/artifacts/segmentation_mask_nifti',
         result_json: '/jobs/' + jobId + '/artifacts/result_json',
         provider_receipt: '/jobs/' + jobId + '/artifacts/provider_receipt',
+        measurements_json: '/jobs/' + jobId + '/artifacts/measurements_json',
+        planning_report_pdf: '/jobs/' + jobId + '/artifacts/planning_report_pdf',
+        aortic_root_stl: '/jobs/' + jobId + '/artifacts/aortic_root_stl',
+        centerline_json: '/jobs/' + jobId + '/artifacts/centerline_json',
+        annulus_plane_json: '/jobs/' + jobId + '/artifacts/annulus_plane_json',
         job_api: '/jobs/' + jobId
       };
       const resultJson = await loadResultPreview(absLink(links.result_json));
@@ -2464,6 +2730,8 @@ const DEMO_HTML = `<!doctype html>
       state.bestSlice = state.slice;
       state.keySliceMap = {};
       state.stats = null;
+      state.centerlineData = null;
+      state.annulusPlaneData = null;
       state.bodyBounds = null;
       $('badgeSeg').textContent = t('segPending');
       setRecon3dStatus('recon3dStatusIdle');
@@ -2661,6 +2929,8 @@ const DEMO_HTML = `<!doctype html>
         state.recon3d.renderer.render(state.recon3d.scene, state.recon3d.camera);
       }
       updateKeySliceButtons();
+      const bm = $('bottomMeasurements');
+      if (bm) bm.innerHTML = '';
       syncControlLabels();
       render();
       if (reason) appendResultNote('mask_load_error: ' + String(reason));
@@ -2672,7 +2942,7 @@ const DEMO_HTML = `<!doctype html>
         markNoValidatedSegmentation('volume_or_case_missing');
         return false;
       }
-      const maskUrl = findArtifactLink(data, ['mask_multiclass', 'mask_output']);
+      const maskUrl = findArtifactLink(data, ['segmentation_mask_nifti', 'mask_multiclass', 'mask_output']);
       if (!maskUrl) {
         markNoValidatedSegmentation('no_mask_artifact');
         return false;
@@ -3097,7 +3367,7 @@ const DEMO_HTML = `<!doctype html>
 
       let annulusCalcVox = 0;
       let rootLeafCalcVox = 0;
-      const huThr = 500;
+      const huThr = 130;
       for (let i = 0; i < seg.length; i += 1) {
         const cls = seg[i];
         if (cls !== 1 && cls !== 2) continue;
@@ -3112,7 +3382,10 @@ const DEMO_HTML = `<!doctype html>
       stats.calcificationThresholdHU = huThr;
       stats.rootLeafCalcVolumeMl = rootLeafCalcVox * voxelMl;
       stats.annulusCalcVolumeMl = annulusCalcVox * voxelMl;
+      stats.lvotDiameterMm = null;
       stats.taviCoronaryHeightMm = null;
+      stats.taviCoronaryHeightLeftMm = null;
+      stats.taviCoronaryHeightRightMm = null;
       stats.taviVtcMm = null;
       stats.taviVtstjMm = null;
       stats.taviAccessMinLumenMm = null;
@@ -3158,7 +3431,8 @@ const DEMO_HTML = `<!doctype html>
       const map = {
         calc_high: L('根部/瓣叶钙化负荷偏高', 'High root/leaflet calcification burden'),
         annulus_ecc_high: L('瓣环偏心较明显', 'Marked annulus eccentricity'),
-        stj_rel_small: L('STJ 相对偏小，需关注冠脉阻塞风险', 'Relatively narrow STJ; review coronary obstruction risk')
+        stj_rel_small: L('STJ 相对偏小，需关注冠脉阻塞风险', 'Relatively narrow STJ; review coronary obstruction risk'),
+        low_coronary_height: L('冠脉开口高度偏低', 'Low coronary ostial height')
       };
       return list.map((x) => map[x] || String(x)).join('；');
     }
@@ -3436,6 +3710,7 @@ const DEMO_HTML = `<!doctype html>
       const vsrrRows = [
         [L('测量方法', 'Measurement method'), L('中心线正交切面（double-oblique）', 'Centerline-orthogonal cross-sections (double-oblique)')],
         [L('瓣环/VBR 直径', 'Annulus/VBR diameter'), fmt(s.vbrDiameterMm) + ' mm'],
+        [L('LVOT 直径', 'LVOT diameter'), fmt(s.lvotDiameterMm) + ' mm'],
         [L('STJ 直径', 'STJ diameter'), fmt(s.stjDiameterMm) + ' mm'],
         [L('根部最大直径', 'Root max diameter'), fmt(s.rootMaxDiameterMm) + ' mm'],
         [L('根部长/短轴', 'Root major/minor'), fmt(s.rootMaxMajorDiameterMm) + ' / ' + fmt(s.rootMaxMinorDiameterMm) + ' mm'],
@@ -3452,20 +3727,55 @@ const DEMO_HTML = `<!doctype html>
         [L('瓣环面积（VBR）', 'Annulus area (VBR)'), fmt(s.vbrAreaMm2) + ' mm2'],
         [L('瓣环周长（VBR）', 'Annulus perimeter (VBR)'), fmt(s.vbrPerimeterMm) + ' mm'],
         [L('瓣环等效直径', 'Annulus equivalent diameter'), fmt(s.vbrDiameterMm) + ' mm'],
+        [L('LVOT 直径', 'LVOT diameter'), fmt(s.lvotDiameterMm) + ' mm'],
         [L('瓣环长/短轴', 'Annulus major/minor'), fmt(s.vbrMajorDiameterMm) + ' / ' + fmt(s.vbrMinorDiameterMm) + ' mm'],
         [L('瓣环偏心率', 'Annulus eccentricity'), fmt(s.vbrEccentricity, 3)],
         [L('窦部最大直径', 'Sinus of Valsalva max diameter'), fmt(s.rootMaxDiameterMm) + ' mm'],
         [L('STJ 直径', 'STJ diameter'), fmt(s.stjDiameterMm) + ' mm'],
         [L('升主动脉直径', 'Ascending aorta diameter'), fmt(s.ascMaxDiameterMm) + ' mm'],
         [L('根轴角（相对体轴）', 'Root axis angle (vs body z-axis)'), fmt(s.aorticRootAxisAngleDeg, 1) + ' deg'],
-        [L('瓣环区钙化体积（HU≥500）', 'Annulus calc volume (HU>=500)'), fmt(s.annulusCalcVolumeMl, 3) + ' mL'],
-        [L('根部/瓣叶钙化体积（HU≥500）', 'Root/leaflet calc volume (HU>=500)'), fmt(s.rootLeafCalcVolumeMl, 3) + ' mL'],
-        [L('冠脉高度（左/右）', 'Coronary heights (L/R)'), L('待补充（需冠脉开口地标）', 'pending (needs coronary ostia landmarks)')],
+        [L('瓣环区钙化体积（HU>' + fmtInt(s.calcificationThresholdHU || 130) + '）', 'Annulus calc volume (HU>' + fmtInt(s.calcificationThresholdHU || 130) + ')'), fmt(s.annulusCalcVolumeMl, 3) + ' mL'],
+        [L('根部/瓣叶钙化体积（HU>' + fmtInt(s.calcificationThresholdHU || 130) + '）', 'Root/leaflet calc volume (HU>' + fmtInt(s.calcificationThresholdHU || 130) + ')'), fmt(s.rootLeafCalcVolumeMl, 3) + ' mL'],
+        [L('冠脉高度（左/右）', 'Coronary heights (L/R)'), fmt(s.taviCoronaryHeightLeftMm, 2) + ' / ' + fmt(s.taviCoronaryHeightRightMm, 2) + ' mm'],
         [L('VTC / VTSTJ', 'VTC / VTSTJ'), L('待补充（需虚拟瓣膜模型）', 'pending (needs virtual valve model)')],
         [L('外周入路最小管径', 'Access route minimal lumen diameter'), L('待补充（需全主动脉-髂股动脉分割）', 'pending (needs full aorto-iliofemoral segmentation)')],
         [L('TAVI 风险提示', 'TAVI risk flags'), formatTaviRiskFlags(s.taviRiskFlags)]
       ];
       $('taviMetrics').innerHTML = taviRows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('');
+      renderBottomMeasurements();
+    }
+
+    function renderBottomMeasurements() {
+      const tbody = $('bottomMeasurements');
+      if (!tbody) return;
+      if (!state.stats) {
+        tbody.innerHTML = '';
+        return;
+      }
+      const s = state.stats;
+      const backend = state.pipelineResult?.measurements || {};
+      const backendCalc = backend?.valve_calcium_burden || {};
+      const hasBackend = (k) => Number.isFinite(Number(backend?.[k]));
+      const src = (k) => hasBackend(k) ? 'backend(centerline-orthogonal)' : 'ui(fallback)';
+      const calcSrc = Number.isFinite(Number(backendCalc?.calc_volume_ml))
+        ? 'backend(HU>130)'
+        : 'ui/fallback';
+
+      const rows = [
+        [L('瓣环直径', 'Annulus Diameter'), fmt(s.vbrDiameterMm), 'mm', src('annulus_diameter_mm')],
+        [L('瓣环面积', 'Annulus Area'), fmt(s.vbrAreaMm2), 'mm2', src('annulus_area_mm2')],
+        [L('瓣环周长', 'Annulus Perimeter'), fmt(s.vbrPerimeterMm), 'mm', src('annulus_perimeter_mm')],
+        [L('窦部直径', 'Sinus of Valsalva Diameter'), fmt(s.rootMaxDiameterMm), 'mm', src('sinus_of_valsalva_diameter_mm')],
+        [L('STJ 直径', 'STJ Diameter'), fmt(s.stjDiameterMm), 'mm', src('stj_diameter_mm')],
+        [L('升主动脉直径', 'Ascending Aorta Diameter'), fmt(s.ascMaxDiameterMm), 'mm', src('ascending_aorta_diameter_mm')],
+        [L('LVOT 直径', 'LVOT Diameter'), fmt(s.lvotDiameterMm), 'mm', src('lvot_diameter_mm')],
+        [L('左冠开口高度', 'Coronary Height Left'), fmt(s.taviCoronaryHeightLeftMm), 'mm', src('coronary_height_left_mm')],
+        [L('右冠开口高度', 'Coronary Height Right'), fmt(s.taviCoronaryHeightRightMm), 'mm', src('coronary_height_right_mm')],
+        [L('瓣膜钙化负荷', 'Valve Calcium Burden'), fmt(s.rootLeafCalcVolumeMl, 3), 'mL', calcSrc]
+      ];
+      tbody.innerHTML = rows
+        .map((r) => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td><td>' + r[2] + '</td><td>' + r[3] + '</td></tr>')
+        .join('');
     }
 
     function defaultStandards(kind) {
@@ -3520,7 +3830,12 @@ const DEMO_HTML = `<!doctype html>
       if (!s) return { level: 'not-ready', note: L('未完成自动分割，无法评估。', 'Segmentation not completed; cannot assess.') };
       const hasCore = Number.isFinite(s.vbrAreaMm2) && Number.isFinite(s.vbrPerimeterMm) && Number.isFinite(s.stjDiameterMm);
       if (!hasCore) return { level: 'not-ready', note: L('瓣环/根部关键几何不足。', 'Missing key annulus/root geometry.') };
-      const hasCoronary = Number.isFinite(s.taviCoronaryHeightMm) || Number.isFinite(s.taviVtcMm) || Number.isFinite(s.taviVtstjMm);
+      const hasCoronary =
+        Number.isFinite(s.taviCoronaryHeightMm) ||
+        Number.isFinite(s.taviCoronaryHeightLeftMm) ||
+        Number.isFinite(s.taviCoronaryHeightRightMm) ||
+        Number.isFinite(s.taviVtcMm) ||
+        Number.isFinite(s.taviVtstjMm);
       const hasAccess = Number.isFinite(s.taviAccessMinLumenMm);
       if (hasCoronary && hasAccess) {
         return { level: 'ready', note: L('已具备瓣环、冠脉风险与入路三大评估模块。', 'Annulus, coronary-risk and access-route modules are available.') };
@@ -3551,14 +3866,17 @@ const DEMO_HTML = `<!doctype html>
         lines.push('- ' + L('瓣环面积（VBR）', 'Annulus area (VBR)') + ': ' + fmt(s.vbrAreaMm2) + ' mm2');
         lines.push('- ' + L('瓣环周长（VBR）', 'Annulus perimeter (VBR)') + ': ' + fmt(s.vbrPerimeterMm) + ' mm');
         lines.push('- ' + L('瓣环等效直径', 'Annulus equivalent diameter') + ': ' + fmt(s.vbrDiameterMm) + ' mm');
+        lines.push('- ' + L('LVOT 直径', 'LVOT diameter') + ': ' + fmt(s.lvotDiameterMm) + ' mm');
         lines.push('- ' + L('瓣环长/短轴', 'Annulus major/minor') + ': ' + fmt(s.vbrMajorDiameterMm) + ' / ' + fmt(s.vbrMinorDiameterMm) + ' mm');
         lines.push('- ' + L('窦部最大直径', 'Sinus of Valsalva max diameter') + ': ' + fmt(s.rootMaxDiameterMm) + ' mm');
         lines.push('- ' + L('STJ 直径', 'STJ diameter') + ': ' + fmt(s.stjDiameterMm) + ' mm');
         lines.push('- ' + L('根轴角（相对体轴）', 'Root axis angle (vs body z-axis)') + ': ' + fmt(s.aorticRootAxisAngleDeg, 1) + ' deg');
-        lines.push('- ' + L('瓣环区钙化体积（HU≥500）', 'Annulus calc volume (HU>=500)') + ': ' + fmt(s.annulusCalcVolumeMl, 3) + ' mL');
+        lines.push('- ' + L('根部/瓣叶钙化体积（HU>' + fmtInt(s.calcificationThresholdHU || 130) + '）', 'Root/leaflet calc volume (HU>' + fmtInt(s.calcificationThresholdHU || 130) + ')') + ': ' + fmt(s.rootLeafCalcVolumeMl, 3) + ' mL');
+        lines.push('- ' + L('冠脉高度（左/右）', 'Coronary heights (L/R)') + ': ' + fmt(s.taviCoronaryHeightLeftMm, 2) + ' / ' + fmt(s.taviCoronaryHeightRightMm, 2) + ' mm');
         lines.push('- ' + L('风险提示', 'Risk flags') + ': ' + formatTaviRiskFlags(s.taviRiskFlags));
       } else {
         lines.push('- ' + L('VBR 直径（正交）', 'VBR diameter (orthogonal)') + ': ' + fmt(s.vbrDiameterMm) + ' mm');
+        lines.push('- ' + L('LVOT 直径', 'LVOT diameter') + ': ' + fmt(s.lvotDiameterMm) + ' mm');
         lines.push('- ' + L('STJ 直径（正交）', 'STJ diameter (orthogonal)') + ': ' + fmt(s.stjDiameterMm) + ' mm');
         lines.push('- ' + L('根部最大直径（正交）', 'Root max diameter (orthogonal)') + ': ' + fmt(s.rootMaxDiameterMm) + ' mm');
         lines.push('- ' + L('根部长/短轴', 'Root major/minor') + ': ' + fmt(s.rootMaxMajorDiameterMm) + ' / ' + fmt(s.rootMaxMinorDiameterMm) + ' mm');
@@ -3577,9 +3895,119 @@ const DEMO_HTML = `<!doctype html>
       $('planPreview').textContent = lines.join('\\n');
     }
 
+    function pickMprCrosshair(z) {
+      let cx = Math.floor((state.dims.x || 1) / 2);
+      let cy = Math.floor((state.dims.y || 1) / 2);
+      if (state.segReady && state.seg) {
+        const b = getSliceClassBounds(1, z) || getSliceClassBounds(3, z) || getSliceClassBounds(2, z);
+        if (b) {
+          cx = clamp(Math.round(b.cx), 0, state.dims.x - 1);
+          cy = clamp(Math.round(b.cy), 0, state.dims.y - 1);
+        }
+      } else if (state.annulusPlaneData?.origin_voxel) {
+        const p = state.annulusPlaneData.origin_voxel;
+        if (Array.isArray(p) && p.length >= 2) {
+          cx = clamp(Math.round(Number(p[0]) || cx), 0, state.dims.x - 1);
+          cy = clamp(Math.round(Number(p[1]) || cy), 0, state.dims.y - 1);
+        }
+      }
+      return { x: cx, y: cy };
+    }
+
+    function renderMprViews(axialZ) {
+      if (!state.vol || !ctxSag || !ctxCor || !canvasSag || !canvasCor) return;
+      const nx = state.dims.x;
+      const ny = state.dims.y;
+      const nz = state.dims.z;
+      if (!(nx > 1 && ny > 1 && nz > 1)) return;
+      const cross = pickMprCrosshair(axialZ);
+      const lo = state.wl - state.ww / 2;
+      const hi = state.wl + state.ww / 2;
+      const inv = hi === lo ? 1 : 255.0 / (hi - lo);
+      const alpha = Math.floor(255 * state.overlayOpacity * 0.58);
+
+      // Sagittal: Y (x-axis on canvas) vs Z (y-axis on canvas), at fixed X.
+      offSag.width = ny;
+      offSag.height = nz;
+      const sagImg = offSagCtx.createImageData(ny, nz);
+      const sPix = sagImg.data;
+      for (let z = 0; z < nz; z += 1) {
+        for (let y = 0; y < ny; y += 1) {
+          const idx = indexOf(cross.x, y, z);
+          let g = ((Number(state.vol[idx]) * state.slope + state.inter) - lo) * inv;
+          g = clamp(g, 0, 255);
+          const p = (z * ny + y) * 4;
+          sPix[p] = g;
+          sPix[p + 1] = g;
+          sPix[p + 2] = g;
+          sPix[p + 3] = 255;
+          if (state.segReady && state.seg) {
+            const cls = state.seg[idx];
+            if (cls === 1) { sPix[p] = 239; sPix[p + 1] = 68; sPix[p + 2] = 68; sPix[p + 3] = alpha; }
+            else if (cls === 2) { sPix[p] = 250; sPix[p + 1] = 204; sPix[p + 2] = 21; sPix[p + 3] = alpha; }
+            else if (cls === 3) { sPix[p] = 34; sPix[p + 1] = 211; sPix[p + 2] = 238; sPix[p + 3] = alpha; }
+          }
+        }
+      }
+      offSagCtx.putImageData(sagImg, 0, 0);
+      const rs = canvasSag.getBoundingClientRect();
+      ctxSag.clearRect(0, 0, rs.width, rs.height);
+      ctxSag.drawImage(offSag, 0, 0, ny, nz, 0, 0, rs.width, rs.height);
+      ctxSag.strokeStyle = '#93c5fd';
+      ctxSag.lineWidth = 1.2;
+      const zy = (axialZ / Math.max(1, nz - 1)) * rs.height;
+      const yy = (cross.y / Math.max(1, ny - 1)) * rs.width;
+      ctxSag.beginPath();
+      ctxSag.moveTo(0, zy);
+      ctxSag.lineTo(rs.width, zy);
+      ctxSag.moveTo(yy, 0);
+      ctxSag.lineTo(yy, rs.height);
+      ctxSag.stroke();
+
+      // Coronal: X (x-axis on canvas) vs Z (y-axis on canvas), at fixed Y.
+      offCor.width = nx;
+      offCor.height = nz;
+      const corImg = offCorCtx.createImageData(nx, nz);
+      const cPix = corImg.data;
+      for (let z = 0; z < nz; z += 1) {
+        for (let x = 0; x < nx; x += 1) {
+          const idx = indexOf(x, cross.y, z);
+          let g = ((Number(state.vol[idx]) * state.slope + state.inter) - lo) * inv;
+          g = clamp(g, 0, 255);
+          const p = (z * nx + x) * 4;
+          cPix[p] = g;
+          cPix[p + 1] = g;
+          cPix[p + 2] = g;
+          cPix[p + 3] = 255;
+          if (state.segReady && state.seg) {
+            const cls = state.seg[idx];
+            if (cls === 1) { cPix[p] = 239; cPix[p + 1] = 68; cPix[p + 2] = 68; cPix[p + 3] = alpha; }
+            else if (cls === 2) { cPix[p] = 250; cPix[p + 1] = 204; cPix[p + 2] = 21; cPix[p + 3] = alpha; }
+            else if (cls === 3) { cPix[p] = 34; cPix[p + 1] = 211; cPix[p + 2] = 238; cPix[p + 3] = alpha; }
+          }
+        }
+      }
+      offCorCtx.putImageData(corImg, 0, 0);
+      const rc = canvasCor.getBoundingClientRect();
+      ctxCor.clearRect(0, 0, rc.width, rc.height);
+      ctxCor.drawImage(offCor, 0, 0, nx, nz, 0, 0, rc.width, rc.height);
+      ctxCor.strokeStyle = '#93c5fd';
+      ctxCor.lineWidth = 1.2;
+      const zy2 = (axialZ / Math.max(1, nz - 1)) * rc.height;
+      const xx2 = (cross.x / Math.max(1, nx - 1)) * rc.width;
+      ctxCor.beginPath();
+      ctxCor.moveTo(0, zy2);
+      ctxCor.lineTo(rc.width, zy2);
+      ctxCor.moveTo(xx2, 0);
+      ctxCor.lineTo(xx2, rc.height);
+      ctxCor.stroke();
+    }
+
     function render() {
       if (!state.vol || !state.dims.z) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (ctxSag && canvasSag) ctxSag.clearRect(0, 0, canvasSag.width, canvasSag.height);
+        if (ctxCor && canvasCor) ctxCor.clearRect(0, 0, canvasCor.width, canvasCor.height);
         return;
       }
       const { x: nx, y: ny } = state.dims;
@@ -3673,6 +4101,8 @@ const DEMO_HTML = `<!doctype html>
         if (state.measureDisplay === 'ct') {
           drawCurrentSliceMeasurements(z);
         }
+        drawCenterlineOverlay(z);
+        drawAnnulusPlaneOverlay(z);
       }
 
       if (state.stats && Math.abs(z - state.stats.commissureZ) <= 1) {
@@ -3692,6 +4122,7 @@ const DEMO_HTML = `<!doctype html>
       }
 
       ctx.restore();
+      renderMprViews(z);
       syncControlLabels();
     }
 
@@ -3876,6 +4307,74 @@ const DEMO_HTML = `<!doctype html>
         const label = t(sp.key) + ': ' + fmt(mm, 1) + ' mm';
         drawLineLabel(line, sp.color, label);
       }
+    }
+
+    function drawCenterlineOverlay(z) {
+      const cl = state.centerlineData?.points;
+      if (!Array.isArray(cl) || !cl.length) return;
+      const ptsNear = [];
+      for (const p of cl) {
+        const v = p?.voxel;
+        if (!Array.isArray(v) || v.length < 3) continue;
+        const pz = Number(v[2]);
+        if (!Number.isFinite(pz)) continue;
+        if (Math.abs(pz - z) > 1.5) continue;
+        const px = Number(v[0]);
+        const py = Number(v[1]);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+        ptsNear.push({ x: px, y: py, z: pz });
+      }
+      if (!ptsNear.length) return;
+      ptsNear.sort((a, b) => a.z - b.z);
+      ctx.strokeStyle = 'rgba(147, 197, 253, 0.92)';
+      ctx.lineWidth = Math.max(0.8, 2.0 / Math.max(1, state.zoom));
+      ctx.beginPath();
+      ctx.moveTo(ptsNear[0].x, ptsNear[0].y);
+      for (let i = 1; i < ptsNear.length; i += 1) {
+        ctx.lineTo(ptsNear[i].x, ptsNear[i].y);
+      }
+      ctx.stroke();
+      for (const p of ptsNear) {
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(191, 219, 254, 0.95)';
+        ctx.arc(p.x, p.y, Math.max(1.2, 2.2 / Math.max(1, state.zoom)), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawAnnulusPlaneOverlay(z) {
+      const pl = state.annulusPlaneData || state.pipelineResult?.landmarks?.annulus_plane || null;
+      if (!pl || typeof pl !== 'object') return;
+      const ov = pl?.origin_voxel;
+      if (!Array.isArray(ov) || ov.length < 3) return;
+      const pz = Number(ov[2]);
+      if (!Number.isFinite(pz)) return;
+      if (Math.abs(pz - z) > 1.1) return;
+      const px = Number(ov[0]);
+      const py = Number(ov[1]);
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+      const r = Math.max(8, 16 / Math.max(1, state.zoom));
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.95)';
+      ctx.lineWidth = Math.max(0.9, 2.2 / Math.max(1, state.zoom));
+      ctx.beginPath();
+      ctx.moveTo(px - r, py);
+      ctx.lineTo(px + r, py);
+      ctx.moveTo(px, py - r);
+      ctx.lineTo(px, py + r);
+      ctx.stroke();
+      const label = state.lang === 'zh' ? 'Annulus plane' : 'Annulus plane';
+      ctx.font = '700 ' + Math.max(8, 11 / Math.max(1, state.zoom)) + 'px ui-sans-serif, -apple-system, Segoe UI, Roboto';
+      const w = ctx.measureText(label).width + 8 / Math.max(1, state.zoom);
+      const h = Math.max(10, 14 / Math.max(1, state.zoom));
+      const bx = px + 6 / Math.max(1, state.zoom);
+      const by = py - h - 6 / Math.max(1, state.zoom);
+      ctx.fillStyle = 'rgba(4, 10, 20, 0.8)';
+      ctx.fillRect(bx, by, w, h);
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.95)';
+      ctx.lineWidth = Math.max(0.4, 1.0 / Math.max(1, state.zoom));
+      ctx.strokeRect(bx, by, w, h);
+      ctx.fillStyle = 'rgba(191, 219, 254, 0.98)';
+      ctx.fillText(label, bx + 4 / Math.max(1, state.zoom), by + h - 4 / Math.max(1, state.zoom));
     }
 
     function findCentroidForClassOnSlice(cls, z) {

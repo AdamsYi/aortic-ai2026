@@ -29,6 +29,15 @@ fi
 
 PROVIDER_INFER_URL="${PROVIDER_BASE}/infer"
 PROVIDER_HEALTH_URL="${PROVIDER_BASE}/health"
+HOSTPORT="${PROVIDER_BASE#http://}"
+HOSTPORT="${HOSTPORT#https://}"
+HOST="${HOSTPORT%%:*}"
+
+if [[ "$HOST" =~ ^127\. || "$HOST" =~ ^10\. || "$HOST" =~ ^192\.168\. || "$HOST" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+  echo "Warning: provider host ${HOST} is private/local."
+  echo "Cloudflare Worker usually cannot call private LAN IP directly."
+  echo "Use a public HTTPS endpoint (Cloudflare Tunnel / Tailscale Funnel) for end-to-end cloud execution."
+fi
 
 echo "[1/4] Checking Windows provider health: ${PROVIDER_HEALTH_URL}"
 curl -fsS "${PROVIDER_HEALTH_URL}" | tee runs/provider_health_latest.json >/dev/null
