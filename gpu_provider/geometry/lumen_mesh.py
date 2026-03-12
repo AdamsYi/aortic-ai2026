@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -172,22 +173,36 @@ def write_vtk_polydata(mesh: SurfaceMesh, out_path: Path) -> None:
 
 def write_ascii_stl(mesh: SurfaceMesh, out_path: Path, solid_name: str) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(f"solid {solid_name}\n")
-        normals = mesh.normals_world if mesh.normals_world.shape[0] == mesh.faces.shape[0] else compute_face_normals(mesh.vertices_world, mesh.faces)
+    header = bytearray(80)
+    name_bytes = solid_name.encode("ascii", errors="ignore")[:79]
+    header[: len(name_bytes)] = name_bytes
+    normals = mesh.normals_world if mesh.normals_world.shape[0] == mesh.faces.shape[0] else compute_face_normals(mesh.vertices_world, mesh.faces)
+    with out_path.open("wb") as f:
+        f.write(bytes(header))
+        f.write(struct.pack("<I", int(mesh.faces.shape[0])))
         for idx, tri in enumerate(mesh.faces):
             n = normals[idx] if idx < normals.shape[0] else np.array([0.0, 0.0, 1.0], dtype=np.float64)
             v1 = mesh.vertices_world[int(tri[0])]
             v2 = mesh.vertices_world[int(tri[1])]
             v3 = mesh.vertices_world[int(tri[2])]
-            f.write(f"  facet normal {n[0]:.7e} {n[1]:.7e} {n[2]:.7e}\n")
-            f.write("    outer loop\n")
-            f.write(f"      vertex {v1[0]:.7e} {v1[1]:.7e} {v1[2]:.7e}\n")
-            f.write(f"      vertex {v2[0]:.7e} {v2[1]:.7e} {v2[2]:.7e}\n")
-            f.write(f"      vertex {v3[0]:.7e} {v3[1]:.7e} {v3[2]:.7e}\n")
-            f.write("    endloop\n")
-            f.write("  endfacet\n")
-        f.write(f"endsolid {solid_name}\n")
+            f.write(
+                struct.pack(
+                    "<12fH",
+                    float(n[0]),
+                    float(n[1]),
+                    float(n[2]),
+                    float(v1[0]),
+                    float(v1[1]),
+                    float(v1[2]),
+                    float(v2[0]),
+                    float(v2[1]),
+                    float(v2[2]),
+                    float(v3[0]),
+                    float(v3[1]),
+                    float(v3[2]),
+                    0,
+                )
+            )
 
 
 def mesh_meta(mesh: SurfaceMesh, out_path: Path) -> dict[str, object]:

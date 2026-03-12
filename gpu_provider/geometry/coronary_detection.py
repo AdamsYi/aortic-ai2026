@@ -77,29 +77,36 @@ def detect_coronary_ostia(
     if annulus is None or stj is None or sinus is None:
         return {"left": _empty_side("not_found"), "right": _empty_side("not_found"), "detected": [], "method": "frangi_branch_wall_intersection"}
 
-    nz = lumen_mask.shape[2]
+    centers = np.vstack([annulus.center_voxel, sinus.center_voxel, stj.center_voxel]).astype(np.float64)
+    x0 = max(0, int(np.floor(np.min(centers[:, 0]) - 64)))
+    x1 = min(lumen_mask.shape[0], int(np.ceil(np.max(centers[:, 0]) + 65)))
+    y0 = max(0, int(np.floor(np.min(centers[:, 1]) - 64)))
+    y1 = min(lumen_mask.shape[1], int(np.ceil(np.max(centers[:, 1]) + 65)))
     z0 = max(0, int(round(min(annulus.center_voxel[2], sinus.center_voxel[2])) - mm_to_vox_z(4.0, spacing_mm)))
-    z1 = min(nz - 1, int(round(max(stj.center_voxel[2], sinus.center_voxel[2])) + mm_to_vox_z(18.0, spacing_mm)))
-    roi = np.zeros_like(lumen_mask, dtype=bool)
-    roi[:, :, z0 : z1 + 1] = True
+    z1 = min(lumen_mask.shape[2], int(round(max(stj.center_voxel[2], sinus.center_voxel[2])) + mm_to_vox_z(18.0, spacing_mm) + 1))
 
-    shell_inner = ndimage.binary_dilation(lumen_mask, iterations=mm_to_vox_xy(1.5, spacing_mm)) & (~lumen_mask)
-    shell_outer = ndimage.binary_dilation(lumen_mask, iterations=mm_to_vox_xy(4.5, spacing_mm)) & (~ndimage.binary_dilation(lumen_mask, iterations=mm_to_vox_xy(1.0, spacing_mm)))
-    search = roi & shell_outer
+    lumen_roi = np.asarray(lumen_mask[x0:x1, y0:y1, z0:z1], dtype=bool)
+    ct_roi = np.asarray(ct_hu[x0:x1, y0:y1, z0:z1], dtype=np.float32)
+    roi_crop = np.ones_like(lumen_roi, dtype=bool)
+
+    shell_inner = ndimage.binary_dilation(lumen_roi, iterations=mm_to_vox_xy(1.5, spacing_mm)) & (~lumen_roi)
+    shell_mid = ndimage.binary_dilation(lumen_roi, iterations=mm_to_vox_xy(1.0, spacing_mm))
+    shell_outer = ndimage.binary_dilation(lumen_roi, iterations=mm_to_vox_xy(4.5, spacing_mm)) & (~shell_mid)
+    search = roi_crop & shell_outer
     coords = np.argwhere(search)
     if coords.shape[0] == 0:
         return {"left": _empty_side("not_found"), "right": _empty_side("not_found"), "detected": [], "method": "frangi_branch_wall_intersection"}
 
     min_xyz = np.maximum(coords.min(axis=0) - np.array([12, 12, 2]), 0)
-    max_xyz = np.minimum(coords.max(axis=0) + np.array([12, 12, 2]), np.array(lumen_mask.shape) - 1)
+    max_xyz = np.minimum(coords.max(axis=0) + np.array([12, 12, 2]), np.array(lumen_roi.shape) - 1)
     xs = slice(int(min_xyz[0]), int(max_xyz[0]) + 1)
     ys = slice(int(min_xyz[1]), int(max_xyz[1]) + 1)
     zs = slice(int(min_xyz[2]), int(max_xyz[2]) + 1)
 
-    ct_crop = ct_hu[xs, ys, zs]
+    ct_crop = ct_roi[xs, ys, zs]
     shell_inner_crop = shell_inner[xs, ys, zs]
     shell_outer_crop = shell_outer[xs, ys, zs]
-    roi_crop = roi[xs, ys, zs]
+    roi_crop = roi_crop[xs, ys, zs]
     vesselness_crop = _frangi_volume(ct_crop)
     cand_crop = roi_crop & shell_outer_crop & (ct_crop >= 140.0)
     if np.any(cand_crop):
@@ -124,18 +131,18 @@ def detect_coronary_ostia(
             continue
         wall_pts = pts[shell_inner_crop[pts[:, 0], pts[:, 1], pts[:, 2]]]
         local_pts = pts
-        pts = pts + np.array([int(min_xyz[0]), int(min_xyz[1]), int(min_xyz[2])], dtype=np.int32)
+        pts = pts + np.array([int(min_xyz[0]) + x0, int(min_xyz[1]) + y0, int(min_xyz[2]) + z0], dtype=np.int32)
         world = nib.affines.apply_affine(affine, pts.astype(np.float64))
         plane_h = np.asarray([plane_signed_distance(p, annulus_origin, annulus_normal) for p in world], dtype=np.float64)
         if float(np.max(plane_h)) < 0.5:
             continue
-        local_pts = pts - np.array([int(min_xyz[0]), int(min_xyz[1]), int(min_xyz[2])], dtype=np.int32)
+        local_pts = pts - np.array([x0 + int(min_xyz[0]), y0 + int(min_xyz[1]), z0 + int(min_xyz[2])], dtype=np.int32)
         score = vesselness_crop[local_pts[:, 0], local_pts[:, 1], local_pts[:, 2]]
         if wall_pts.shape[0] > 0:
             wall_scores = vesselness_crop[wall_pts[:, 0], wall_pts[:, 1], wall_pts[:, 2]]
             wall_best_local = wall_pts[int(np.argmax(wall_scores))]
             best_local = wall_best_local
-            best_global = best_local + np.array([int(min_xyz[0]), int(min_xyz[1]), int(min_xyz[2])], dtype=np.int32)
+            best_global = best_local + np.array([x0 + int(min_xyz[0]), y0 + int(min_xyz[1]), z0 + int(min_xyz[2])], dtype=np.int32)
             ostium_world = nib.affines.apply_affine(affine, best_global.astype(np.float64))
             ostium_voxel = best_global.astype(np.float64)
             best_score = float(np.max(wall_scores)) if wall_scores.size else 0.0

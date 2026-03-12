@@ -487,6 +487,7 @@ def run_geometry_pipeline(
         "aortic_root_computational_model": {
             "type": root_model.model_type,
             "annulus_ring": root_model.annulus_ring,
+            "hinge_curve": root_model.hinge_curve,
             "commissures": root_model.commissures,
             "sinus_peaks": root_model.sinus_peaks,
             "sinotubular_junction": root_model.sinotubular_junction,

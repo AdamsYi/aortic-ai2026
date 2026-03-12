@@ -15,6 +15,7 @@ from .profile_analysis import SectionMetrics
 class AorticRootComputationalModel:
     model_type: str
     annulus_ring: dict[str, Any]
+    hinge_curve: dict[str, Any]
     commissures: list[dict[str, Any]]
     sinus_peaks: list[dict[str, Any]]
     sinotubular_junction: dict[str, Any]
@@ -27,6 +28,15 @@ class AorticRootComputationalModel:
 
 
 AorticRootModel = AorticRootComputationalModel
+
+
+def _sample_curve_points(world: np.ndarray, voxel: np.ndarray, max_points: int = 96) -> tuple[list[list[float]], list[list[float]]]:
+    if world.shape[0] == 0:
+        return [], []
+    step = max(1, int(np.ceil(world.shape[0] / max_points)))
+    world_s = world[::step]
+    voxel_s = voxel[::step]
+    return [[float(v) for v in p] for p in world_s], [[float(v) for v in p] for p in voxel_s]
 
 
 def _pca_plane(points_world: np.ndarray, fallback_normal: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -122,24 +132,27 @@ def estimate_hinge_annulus(
     ascending_mask: np.ndarray,
     affine: np.ndarray,
 ) -> dict[str, Any]:
-    root_wall = np.asarray(root_mask | ascending_mask, dtype=bool)
-    contact = ndimage.binary_dilation(leaflet_mask, structure=np.ones((3, 3, 3), dtype=bool), iterations=1) & root_wall
     cx, cy, cz = [int(round(v)) for v in annulus.center_voxel]
     x0 = max(0, cx - 56)
-    x1 = min(contact.shape[0], cx + 57)
+    x1 = min(root_mask.shape[0], cx + 57)
     y0 = max(0, cy - 56)
-    y1 = min(contact.shape[1], cy + 57)
+    y1 = min(root_mask.shape[1], cy + 57)
     z0 = max(0, cz - 16)
-    z1 = min(contact.shape[2], cz + 17)
-    contact_roi = contact[x0:x1, y0:y1, z0:z1]
+    z1 = min(root_mask.shape[2], cz + 17)
+    root_wall_roi = np.asarray((root_mask | ascending_mask)[x0:x1, y0:y1, z0:z1], dtype=bool)
+    leaflet_roi = np.asarray(leaflet_mask[x0:x1, y0:y1, z0:z1], dtype=bool)
+    contact_roi = ndimage.binary_dilation(leaflet_roi, structure=np.ones((3, 3, 3), dtype=bool), iterations=1) & root_wall_roi
     hinge_world, hinge_voxel = _roi_points_near_annulus(contact_roi, annulus, affine, offset_voxel=(x0, y0, z0))
     method = "hinge_curve_pca"
     if hinge_world.shape[0] < 18:
         method = "leaflet_roi_pca"
-        leaflet_roi = np.asarray(leaflet_mask[x0:x1, y0:y1, z0:z1], dtype=bool)
         hinge_world, hinge_voxel = _roi_points_near_annulus(leaflet_roi, annulus, affine, axial_window_mm=(-8.0, 14.0), offset_voxel=(x0, y0, z0))
 
     if hinge_world.shape[0] < 18:
+        hinge_curve_world, hinge_curve_voxel = _sample_curve_points(
+            np.asarray(annulus.contour_world, dtype=np.float64),
+            np.asarray(annulus.contour_voxel, dtype=np.float64),
+        )
         return {
             "origin_world": [float(x) for x in annulus.center_world],
             "origin_voxel": [float(x) for x in annulus.center_voxel],
@@ -148,6 +161,8 @@ def estimate_hinge_annulus(
             "basis_v_world": [float(x) for x in annulus.basis_v_world],
             "ring_points_world": [[float(v) for v in p] for p in annulus.contour_world],
             "ring_points_voxel": [[float(v) for v in p] for p in annulus.contour_voxel],
+            "hinge_points_world": hinge_curve_world,
+            "hinge_points_voxel": hinge_curve_voxel,
             "method": "radius_minimum_fallback",
             "confidence": 0.35,
             "hinge_point_count": int(hinge_world.shape[0]),
@@ -158,6 +173,7 @@ def estimate_hinge_annulus(
     projected_ring_world = _project_to_plane(annulus.contour_world, origin, normal)
     affine_inv = np.linalg.inv(affine)
     ring_voxel = nib.affines.apply_affine(affine_inv, projected_ring_world)
+    hinge_curve_world, hinge_curve_voxel = _sample_curve_points(hinge_world, hinge_voxel)
     planarity = float(eigvals[1] / max(1e-6, eigvals[2])) if eigvals.shape[0] >= 3 else 0.0
     confidence = float(np.clip(0.45 + 0.25 * min(1.0, hinge_world.shape[0] / 60.0) + 0.30 * (1.0 - min(1.0, planarity)), 0.0, 0.99))
     return {
@@ -168,6 +184,8 @@ def estimate_hinge_annulus(
         "basis_v_world": [float(x) for x in basis_v],
         "ring_points_world": [[float(v) for v in p] for p in projected_ring_world],
         "ring_points_voxel": [[float(v) for v in p] for p in ring_voxel],
+        "hinge_points_world": hinge_curve_world,
+        "hinge_points_voxel": hinge_curve_voxel,
         "method": method,
         "confidence": confidence,
         "hinge_point_count": int(hinge_world.shape[0]),
@@ -432,6 +450,13 @@ def build_aortic_root_model(
         affine=affine,
     )
     annulus_ring = _ring_payload(annulus, plane_override=annulus_plane, label="annulus_ring")
+    hinge_curve = {
+        "points_world": annulus_plane.get("hinge_points_world", []),
+        "points_voxel": annulus_plane.get("hinge_points_voxel", []),
+        "point_count": int(len(annulus_plane.get("hinge_points_world", []))),
+        "method": annulus_plane.get("method"),
+        "confidence": float(annulus_plane.get("confidence", 0.0)),
+    }
     stj_ring = _ring_payload(stj, label="sinotubular_junction")
     sinus_ring = _ring_payload(sinus, label="sinus_section")
     ascending_ring = _ring_payload(ascending, label="ascending_reference")
@@ -456,6 +481,7 @@ def build_aortic_root_model(
     model = AorticRootComputationalModel(
         model_type="AorticRootComputationalModel-v2",
         annulus_ring=annulus_ring,
+        hinge_curve=hinge_curve,
         commissures=commissures,
         sinus_peaks=sinus_peaks,
         sinotubular_junction=stj_ring,
