@@ -1,42 +1,69 @@
 #!/usr/bin/env python3
 """
-Research-grade CTA aortic planning pipeline (real processing, no placeholders):
+Geometry-driven CTA aortic planning pipeline (research-grade, no placeholders):
 1) DICOM(.zip/.dcm series) -> NIfTI via dcm2niix (if needed)
 2) Multiclass segmentation via TotalSegmentator-based builder
-3) Aortic centerline extraction (VMTK if available, otherwise robust centroid fallback)
-4) Centerline-orthogonal cross-sectional measurements
-5) Annulus/STJ/sinus/LVOT/ascending metrics + coronary ostia height estimate + calcium burden
-6) Aortic root STL export (marching cubes)
-7) Planning report export (PDF)
+3) Lumen extraction and cleanup
+4) Surface mesh generation (marching cubes + smoothing)
+5) Distance-transform skeleton centerline extraction
+6) Geometry profile analysis and landmark detection
+7) Structured aortic root model + parametric leaflet model
+8) Clinical measurements, STL/VTK/JSON/PDF export
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import shutil
 import subprocess
 import tempfile
 import time
-import xml.etree.ElementTree as ET
 import zipfile
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import nibabel as nib
 import numpy as np
-from scipy import ndimage
 
 try:
-    from skimage import measure as sk_measure
-except Exception:  # pragma: no cover - handled at runtime
-    sk_measure = None
+    from .geometry.centerline import compute_centerline
+    from .geometry.common import sanitize_for_json, voxel_volume_mm3
+    from .geometry.landmarks import detect_landmarks_from_profile, pick_section_bundle
+    from .geometry.leaflet_model import build_leaflet_model
+    from .geometry.lumen_mesh import (
+        extract_lumen_mask,
+        generate_surface_mesh,
+        mesh_meta,
+        save_mask_nifti,
+        write_ascii_stl,
+        write_vtk_polydata,
+    )
+    from .geometry.measurements import build_measurements
+    from .geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
+    from .geometry.root_model import build_aortic_root_model
+except ImportError:
+    from geometry.centerline import compute_centerline
+    from geometry.common import sanitize_for_json, voxel_volume_mm3
+    from geometry.landmarks import detect_landmarks_from_profile, pick_section_bundle
+    from geometry.leaflet_model import build_leaflet_model
+    from geometry.lumen_mesh import (
+        extract_lumen_mask,
+        generate_surface_mesh,
+        mesh_meta,
+        save_mask_nifti,
+        write_ascii_stl,
+        write_vtk_polydata,
+    )
+    from geometry.measurements import build_measurements
+    from geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
+    from geometry.root_model import build_aortic_root_model
 
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas as pdf_canvas
-except Exception:  # pragma: no cover - handled at runtime
+except Exception:  # pragma: no cover
     A4 = None
     pdf_canvas = None
 
@@ -56,40 +83,6 @@ def find_bin(name: str) -> str:
     if not found:
         raise FileNotFoundError(f"Required binary not found: {name}")
     return found
-
-
-def mm_to_vox_z(mm: float, spacing_mm: tuple[float, float, float]) -> int:
-    s = max(0.2, float(spacing_mm[2]))
-    return max(1, int(round(mm / s)))
-
-
-def mm_to_vox_xy(mm: float, spacing_mm: tuple[float, float, float]) -> int:
-    s = max(0.2, float(min(spacing_mm[0], spacing_mm[1])))
-    return max(1, int(round(mm / s)))
-
-
-def normalize(v: np.ndarray) -> np.ndarray:
-    n = float(np.linalg.norm(v))
-    if n <= 1e-8 or not np.isfinite(n):
-        return np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    return (v / n).astype(np.float64)
-
-
-def ellipse_perimeter_from_diameters(major_mm: float | None, minor_mm: float | None) -> float | None:
-    if major_mm is None or minor_mm is None:
-        return None
-    if major_mm <= 0 or minor_mm <= 0:
-        return None
-    a = max(major_mm, minor_mm) * 0.5
-    b = min(major_mm, minor_mm) * 0.5
-    term = max(0.0, (3 * a + b) * (a + 3 * b))
-    return float(math.pi * (3 * (a + b) - math.sqrt(term)))
-
-
-def eq_diameter_from_area(area_mm2: float | None) -> float | None:
-    if area_mm2 is None or area_mm2 <= 0:
-        return None
-    return float(2.0 * math.sqrt(area_mm2 / math.pi))
 
 
 def prepare_nifti_input(input_path: Path, work_dir: Path) -> tuple[Path, dict[str, Any]]:
@@ -132,444 +125,9 @@ def parse_builder_meta(path: Path) -> dict[str, Any]:
         return {}
 
 
-def points_voxel_to_world(ijk: np.ndarray, affine: np.ndarray) -> np.ndarray:
-    if ijk.size == 0:
-        return np.zeros((0, 3), dtype=np.float64)
-    return nib.affines.apply_affine(affine, ijk.astype(np.float64))
-
-
-def points_world_to_voxel(xyz: np.ndarray, affine_inv: np.ndarray) -> np.ndarray:
-    if xyz.size == 0:
-        return np.zeros((0, 3), dtype=np.float64)
-    return nib.affines.apply_affine(affine_inv, xyz.astype(np.float64))
-
-
-def parse_vtp_points_ascii(vtp_path: Path) -> np.ndarray:
-    try:
-        tree = ET.parse(str(vtp_path))
-        root = tree.getroot()
-        points_node = root.find(".//Points")
-        if points_node is None:
-            return np.zeros((0, 3), dtype=np.float64)
-        da = points_node.find("DataArray")
-        if da is None or da.text is None:
-            return np.zeros((0, 3), dtype=np.float64)
-        vals = np.fromstring(da.text, sep=" ", dtype=np.float64)
-        if vals.size < 3:
-            return np.zeros((0, 3), dtype=np.float64)
-        vals = vals[: (vals.size // 3) * 3]
-        return vals.reshape((-1, 3))
-    except Exception:
-        return np.zeros((0, 3), dtype=np.float64)
-
-
-def extract_centerline_vmtk(
-    aorta_union: np.ndarray,
-    affine: np.ndarray,
-    work_dir: Path,
-) -> tuple[np.ndarray, str]:
-    if (work_dir / "disable_vmtk.flag").exists():
-        return np.zeros((0, 3), dtype=np.float64), "disabled"
-
-    vmtk_mc = shutil.which("vmtkmarchingcubes")
-    vmtk_cl = shutil.which("vmtkcenterlines")
-    if not vmtk_mc or not vmtk_cl:
-        return np.zeros((0, 3), dtype=np.float64), "vmtk_not_found"
-
-    try:
-        mask_path = work_dir / "aorta_union.nii.gz"
-        surf_path = work_dir / "aorta_surface.vtp"
-        cl_path = work_dir / "aorta_centerline.vtp"
-        nib.save(nib.Nifti1Image(aorta_union.astype(np.uint8), affine), str(mask_path))
-
-        run_cmd([vmtk_mc, "-ifile", str(mask_path), "-ofile", str(surf_path), "-l", "0.5"])
-        run_cmd([vmtk_cl, "-ifile", str(surf_path), "-seedselector", "openprofiles", "-ofile", str(cl_path)])
-
-        pts_world = parse_vtp_points_ascii(cl_path)
-        if pts_world.shape[0] < 8:
-            return np.zeros((0, 3), dtype=np.float64), "vmtk_centerline_empty"
-        return pts_world, "vmtk_openprofiles"
-    except Exception as exc:
-        return np.zeros((0, 3), dtype=np.float64), f"vmtk_failed:{exc}"
-
-
-def extract_centerline_centroid(aorta_union: np.ndarray) -> np.ndarray:
-    nz = int(aorta_union.shape[2])
-    raw: list[list[float]] = []
-    for z in range(nz):
-        sl = aorta_union[:, :, z]
-        pts = np.argwhere(sl)
-        if pts.shape[0] < 10:
-            continue
-        cx = float(pts[:, 0].mean())
-        cy = float(pts[:, 1].mean())
-        raw.append([cx, cy, float(z)])
-
-    if len(raw) < 2:
-        return np.zeros((0, 3), dtype=np.float64)
-
-    arr = np.asarray(raw, dtype=np.float64)
-
-    z_all = np.arange(int(arr[0, 2]), int(arr[-1, 2]) + 1, dtype=np.float64)
-    x_interp = np.interp(z_all, arr[:, 2], arr[:, 0])
-    y_interp = np.interp(z_all, arr[:, 2], arr[:, 1])
-    x_s = ndimage.gaussian_filter1d(x_interp, sigma=1.2)
-    y_s = ndimage.gaussian_filter1d(y_interp, sigma=1.2)
-    out = np.column_stack([x_s, y_s, z_all]).astype(np.float64)
-
-    dedup = [out[0]]
-    for i in range(1, out.shape[0]):
-        if float(np.linalg.norm(out[i] - dedup[-1])) >= 0.2:
-            dedup.append(out[i])
-    return np.asarray(dedup, dtype=np.float64)
-
-
-def extract_centerline_synthetic(aorta_union: np.ndarray) -> np.ndarray:
-    pts = np.argwhere(aorta_union)
-    if pts.shape[0] < 2:
-        return np.zeros((0, 3), dtype=np.float64)
-    cx = float(np.mean(pts[:, 0]))
-    cy = float(np.mean(pts[:, 1]))
-    zmin = int(np.min(pts[:, 2]))
-    zmax = int(np.max(pts[:, 2]))
-    if zmin == zmax:
-        nz = int(aorta_union.shape[2])
-        z2 = zmin + 1 if zmin + 1 < nz else zmin - 1
-        if z2 == zmin:
-            return np.zeros((0, 3), dtype=np.float64)
-        return np.asarray([[cx, cy, float(zmin)], [cx, cy, float(z2)]], dtype=np.float64)
-    return np.asarray([[cx, cy, float(zmin)], [cx, cy, float(zmax)]], dtype=np.float64)
-
-
-def resample_polyline(vox_pts: np.ndarray, world_pts: np.ndarray, step_mm: float = 1.5) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if vox_pts.shape[0] < 2:
-        if vox_pts.shape[0] == 1:
-            return vox_pts.copy(), world_pts.copy(), np.array([0.0], dtype=np.float64)
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64), np.zeros((0,), dtype=np.float64)
-
-    dif = world_pts[1:] - world_pts[:-1]
-    seg_len = np.linalg.norm(dif, axis=1)
-    s = np.zeros((world_pts.shape[0],), dtype=np.float64)
-    s[1:] = np.cumsum(seg_len)
-    total = float(s[-1])
-    if total <= 1e-6:
-        return vox_pts.copy(), world_pts.copy(), s
-
-    n = max(2, int(math.ceil(total / max(0.5, step_mm))) + 1)
-    sr = np.linspace(0.0, total, n, dtype=np.float64)
-
-    out_vox = np.zeros((n, 3), dtype=np.float64)
-    out_world = np.zeros((n, 3), dtype=np.float64)
-    for dim in range(3):
-        out_vox[:, dim] = np.interp(sr, s, vox_pts[:, dim])
-        out_world[:, dim] = np.interp(sr, s, world_pts[:, dim])
-
-    return out_vox, out_world, sr
-
-
-def tangents_from_polyline(world_pts: np.ndarray) -> np.ndarray:
-    n = world_pts.shape[0]
-    if n == 0:
-        return np.zeros((0, 3), dtype=np.float64)
-    if n == 1:
-        return np.array([[0.0, 0.0, 1.0]], dtype=np.float64)
-
-    t = np.zeros_like(world_pts, dtype=np.float64)
-    for i in range(n):
-        i0 = max(0, i - 1)
-        i1 = min(n - 1, i + 1)
-        t[i] = normalize(world_pts[i1] - world_pts[i0])
-    return t
-
-
-def orth_basis_from_tangent(t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    ref = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    if abs(float(np.dot(t, ref))) > 0.9:
-        ref = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-    u = np.cross(t, ref)
-    u = normalize(u)
-    v = normalize(np.cross(t, u))
-    return u, v
-
-
-def section_metrics_from_points(
-    points_world: np.ndarray,
-    center_world: np.ndarray,
-    tangent_world: np.ndarray,
-    voxel_volume_mm3: float,
-    plane_thickness_mm: float,
-    radius_mm: float,
-    affine_inv: np.ndarray,
-) -> dict[str, Any] | None:
-    if points_world.shape[0] < 20:
-        return None
-
-    t = normalize(tangent_world)
-    d = (points_world - center_world[None, :]) @ t
-    sel = np.abs(d) <= (plane_thickness_mm * 0.5)
-    if int(np.count_nonzero(sel)) < 16:
-        sel = np.abs(d) <= max(1.4, plane_thickness_mm)
-    if int(np.count_nonzero(sel)) < 16:
-        return None
-
-    pts = points_world[sel]
-    u, v = orth_basis_from_tangent(t)
-    rel = pts - center_world[None, :]
-    uu = rel @ u
-    vv = rel @ v
-
-    r2 = uu * uu + vv * vv
-    keep = r2 <= (radius_mm * radius_mm)
-    if int(np.count_nonzero(keep)) < 12:
-        return None
-
-    uu = uu[keep]
-    vv = vv[keep]
-    n = int(uu.shape[0])
-
-    area_mm2 = float((n * voxel_volume_mm3) / max(0.8, plane_thickness_mm))
-    eq_diam_mm = eq_diameter_from_area(area_mm2)
-
-    u0 = uu - float(uu.mean())
-    v0 = vv - float(vv.mean())
-    cov = np.array(
-        [
-            [float(np.mean(u0 * u0)), float(np.mean(u0 * v0))],
-            [float(np.mean(u0 * v0)), float(np.mean(v0 * v0))],
-        ],
-        dtype=np.float64,
-    )
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    order = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[order]
-    eigvecs = eigvecs[:, order]
-    l1 = max(0.0, float(eigvals[0]))
-    l2 = max(0.0, float(eigvals[1])) if eigvals.shape[0] > 1 else 0.0
-    major_mm = float(4.0 * math.sqrt(l1)) if l1 > 0 else (eq_diam_mm or 0.0)
-    minor_mm = float(4.0 * math.sqrt(l2)) if l2 > 0 else (eq_diam_mm or 0.0)
-    perimeter_mm = ellipse_perimeter_from_diameters(major_mm, minor_mm)
-
-    vec_uv = eigvecs[:, 0] if eigvecs.shape[1] > 0 else np.array([1.0, 0.0], dtype=np.float64)
-    dir_world = normalize(u * vec_uv[0] + v * vec_uv[1])
-    half = 0.5 * major_mm
-    p1w = center_world - dir_world * half
-    p2w = center_world + dir_world * half
-    p1v = nib.affines.apply_affine(affine_inv, p1w)
-    p2v = nib.affines.apply_affine(affine_inv, p2w)
-
-    return {
-        "area_mm2": area_mm2,
-        "eq_diameter_mm": eq_diam_mm,
-        "major_diameter_mm": major_mm,
-        "minor_diameter_mm": minor_mm,
-        "perimeter_mm": perimeter_mm,
-        "line_world": {
-            "x1": float(p1w[0]),
-            "y1": float(p1w[1]),
-            "z1": float(p1w[2]),
-            "x2": float(p2w[0]),
-            "y2": float(p2w[1]),
-            "z2": float(p2w[2]),
-        },
-        "line_voxel": {
-            "x1": float(p1v[0]),
-            "y1": float(p1v[1]),
-            "z1": float(p1v[2]),
-            "x2": float(p2v[0]),
-            "y2": float(p2v[1]),
-            "z2": float(p2v[2]),
-        },
-        "count": n,
-    }
-
-
-def nearest_centerline_index_by_z(vox_pts: np.ndarray, z_val: float) -> int:
-    if vox_pts.shape[0] == 0:
-        return -1
-    dz = np.abs(vox_pts[:, 2] - float(z_val))
-    return int(np.argmin(dz))
-
-
-def move_idx_by_distance(s_mm: np.ndarray, start_idx: int, step_sign: int, distance_mm: float) -> int:
-    if s_mm.size == 0:
-        return -1
-    i = int(start_idx)
-    if i < 0 or i >= s_mm.size:
-        return -1
-    target = float(distance_mm)
-    acc = 0.0
-    while 0 <= i + step_sign < s_mm.size and acc < target:
-        a = i
-        b = i + step_sign
-        acc += abs(float(s_mm[b] - s_mm[a]))
-        i = b
-    return int(i)
-
-
-def directed_distance_from_annulus(s_mm: np.ndarray, annulus_idx: int, idx: int, direction: int) -> float:
-    if s_mm.size == 0 or annulus_idx < 0 or idx < 0:
-        return float("nan")
-    if direction >= 0:
-        return float(s_mm[idx] - s_mm[annulus_idx])
-    return float(s_mm[annulus_idx] - s_mm[idx])
-
-
-def detect_coronary_ostia_heights(
-    ct_hu: np.ndarray,
-    root_mask: np.ndarray,
-    annulus_z: int,
-    stj_z: int,
-    direction: int,
-    spacing: tuple[float, float, float],
-    cl_vox: np.ndarray,
-    cl_world: np.ndarray,
-    cl_s_mm: np.ndarray,
-    annulus_idx: int,
-    affine: np.ndarray,
-) -> dict[str, Any]:
-    nx, ny, nz = root_mask.shape
-    if annulus_z < 0 or stj_z < 0:
-        return {
-            "left_height_mm": None,
-            "right_height_mm": None,
-            "detected": [],
-            "method": "shell_threshold_fallback",
-        }
-
-    shell = ndimage.binary_dilation(root_mask, iterations=mm_to_vox_xy(2.0, spacing)) & (~root_mask)
-    vessel = shell & (ct_hu > 180.0)
-
-    z_pad = mm_to_vox_z(25.0, spacing)
-    z_band = np.zeros((nz,), dtype=bool)
-    if direction >= 0:
-        lo = max(0, min(annulus_z, stj_z) - 1)
-        hi = min(nz - 1, max(annulus_z, stj_z) + z_pad)
-    else:
-        lo = max(0, min(annulus_z, stj_z) - z_pad)
-        hi = min(nz - 1, max(annulus_z, stj_z) + 1)
-    z_band[lo : hi + 1] = True
-    vessel &= z_band[None, None, :]
-
-    lab, num = ndimage.label(vessel)
-    if num == 0:
-        return {
-            "left_height_mm": None,
-            "right_height_mm": None,
-            "detected": [],
-            "method": "shell_threshold_fallback",
-        }
-
-    affine_inv = np.linalg.inv(affine)
-    candidates: list[dict[str, Any]] = []
-    for cid in range(1, num + 1):
-        pts = np.argwhere(lab == cid)
-        n = int(pts.shape[0])
-        if n < 20:
-            continue
-        c_vox = pts.mean(axis=0).astype(np.float64)
-        c_world = nib.affines.apply_affine(affine, c_vox)
-        if cl_world.shape[0] == 0:
-            continue
-        dist = np.linalg.norm(cl_world - c_world[None, :], axis=1)
-        idx = int(np.argmin(dist))
-        h = directed_distance_from_annulus(cl_s_mm, annulus_idx, idx, direction)
-        if not np.isfinite(h):
-            continue
-        if h < 0.5 or h > 45.0:
-            continue
-        candidates.append(
-            {
-                "component_id": cid,
-                "voxels": n,
-                "height_mm": float(h),
-                "center_voxel": [float(c_vox[0]), float(c_vox[1]), float(c_vox[2])],
-                "center_world": [float(c_world[0]), float(c_world[1]), float(c_world[2])],
-                "centerline_idx": idx,
-            }
-        )
-
-    if not candidates:
-        return {
-            "left_height_mm": None,
-            "right_height_mm": None,
-            "detected": [],
-            "method": "shell_threshold_fallback",
-        }
-
-    # Keep the most plausible two ostia: low height and sizable component.
-    candidates.sort(key=lambda x: (x["height_mm"], -x["voxels"]))
-    top = candidates[:4]
-    top.sort(key=lambda x: x["center_world"][0])
-
-    left = top[0] if len(top) >= 1 else None
-    right = top[-1] if len(top) >= 2 else None
-
-    return {
-        "left_height_mm": float(left["height_mm"]) if left else None,
-        "right_height_mm": float(right["height_mm"]) if right else None,
-        "detected": top,
-        "method": "shell_threshold_fallback",
-    }
-
-
-def compute_calcium_burden(
-    ct_hu: np.ndarray,
-    valve_region_mask: np.ndarray,
-    voxel_volume_mm3: float,
-    threshold_hu: float = 130.0,
-) -> dict[str, Any]:
-    calc_mask = valve_region_mask & (ct_hu >= threshold_hu)
-    vox = int(calc_mask.sum())
-    vol_ml = float((vox * voxel_volume_mm3) / 1000.0)
-    return {
-        "threshold_hu": float(threshold_hu),
-        "calc_voxels": vox,
-        "calc_volume_ml": vol_ml,
-    }
-
-
-def write_ascii_stl_from_mask(mask: np.ndarray, affine: np.ndarray, out_path: Path) -> dict[str, Any]:
-    if sk_measure is None:
-        raise RuntimeError("scikit-image is required for marching cubes STL export")
-    if not mask.any():
-        with out_path.open("w", encoding="utf-8") as f:
-            f.write("solid aortic_root\n")
-            f.write("endsolid aortic_root\n")
-        return {"vertices": 0, "faces": 0, "path": str(out_path), "empty_mesh": True}
-
-    verts, faces, _normals, _values = sk_measure.marching_cubes(mask.astype(np.float32), level=0.5, spacing=(1.0, 1.0, 1.0))
-    verts_world = points_voxel_to_world(verts, affine)
-
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write("solid aortic_root\n")
-        for tri in faces:
-            v1 = verts_world[int(tri[0])]
-            v2 = verts_world[int(tri[1])]
-            v3 = verts_world[int(tri[2])]
-            n = np.cross(v2 - v1, v3 - v1)
-            n = normalize(n)
-            f.write(f"  facet normal {n[0]:.7e} {n[1]:.7e} {n[2]:.7e}\n")
-            f.write("    outer loop\n")
-            f.write(f"      vertex {v1[0]:.7e} {v1[1]:.7e} {v1[2]:.7e}\n")
-            f.write(f"      vertex {v2[0]:.7e} {v2[1]:.7e} {v2[2]:.7e}\n")
-            f.write(f"      vertex {v3[0]:.7e} {v3[1]:.7e} {v3[2]:.7e}\n")
-            f.write("    endloop\n")
-            f.write("  endfacet\n")
-        f.write("endsolid aortic_root\n")
-
-    return {
-        "vertices": int(verts_world.shape[0]),
-        "faces": int(faces.shape[0]),
-        "path": str(out_path),
-    }
-
-
 def write_planning_report_pdf(out_path: Path, title: str, lines: list[str]) -> None:
     if pdf_canvas is None or A4 is None:
-        out_path.write_text(
-            "PDF generation requires reportlab.\n\n" + "\n".join(lines),
-            encoding="utf-8",
-        )
+        _write_minimal_pdf(out_path, title, lines)
         return
 
     c = pdf_canvas.Canvas(str(out_path), pagesize=A4)
@@ -584,425 +142,147 @@ def write_planning_report_pdf(out_path: Path, title: str, lines: list[str]) -> N
             c.showPage()
             c.setFont("Helvetica", 9)
             y = height - 42
-        c.drawString(36, y, line[:180])
+        c.drawString(36, y, str(line)[:180])
         y -= 12
     c.save()
 
 
-def sanitize_for_json(v: Any) -> Any:
-    if isinstance(v, dict):
-        return {str(k): sanitize_for_json(val) for k, val in v.items()}
-    if isinstance(v, list):
-        return [sanitize_for_json(x) for x in v]
-    if isinstance(v, np.generic):
-        return v.item()
-    if isinstance(v, np.ndarray):
-        return v.tolist()
-    if isinstance(v, float):
-        if math.isnan(v) or math.isinf(v):
-            return None
-        return float(v)
-    return v
+def _pdf_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def measure_from_multiclass(
+def _write_minimal_pdf(out_path: Path, title: str, lines: list[str]) -> None:
+    page_width = 595
+    page_height = 842
+    margin_x = 40
+    margin_top = 42
+    line_height = 13
+    first_line_y = page_height - margin_top
+    usable_lines = max(8, int((page_height - 2 * margin_top) // line_height) - 1)
+    all_lines = [title, ""] + [str(line) for line in lines]
+    pages = [all_lines[i : i + usable_lines] for i in range(0, len(all_lines), usable_lines)] or [[title]]
+
+    object_ids: list[tuple[int, int]] = []
+    next_obj = 3
+    for _ in pages:
+        object_ids.append((next_obj, next_obj + 1))
+        next_obj += 2
+    font_obj = next_obj
+
+    objects: list[bytes] = []
+    kids_refs = " ".join(f"{page_id} 0 R" for page_id, _ in object_ids)
+    objects.append(f"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".encode("ascii"))
+    objects.append(f"2 0 obj\n<< /Type /Pages /Count {len(pages)} /Kids [{kids_refs}] >>\nendobj\n".encode("ascii"))
+
+    for page_lines, (page_id, content_id) in zip(pages, object_ids):
+        text_ops = ["BT", f"/F1 10 Tf", f"{margin_x} {first_line_y} Td", f"{line_height} TL"]
+        for idx, line in enumerate(page_lines):
+            if idx == 0:
+                text_ops.append(f"({_pdf_escape(line)}) Tj")
+            else:
+                text_ops.append("T*")
+                text_ops.append(f"({_pdf_escape(line)}) Tj")
+        text_ops.append("ET")
+        content_stream = "\n".join(text_ops).encode("latin-1", errors="replace")
+        objects.append(
+            (
+                f"{page_id} 0 obj\n"
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+                f"/Resources << /Font << /F1 {font_obj} 0 R >> >> /Contents {content_id} 0 R >>\n"
+                f"endobj\n"
+            ).encode("ascii")
+        )
+        objects.append(
+            f"{content_id} 0 obj\n<< /Length {len(content_stream)} >>\nstream\n".encode("ascii")
+            + content_stream
+            + b"\nendstream\nendobj\n"
+        )
+
+    objects.append(f"{font_obj} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".encode("ascii"))
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj)
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(offsets)}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for off in offsets[1:]:
+        pdf.extend(f"{off:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        (
+            f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    out_path.write_bytes(bytes(pdf))
+
+
+def _record_artifact(manifest: list[dict[str, Any]], artifact_type: str, filename: str, content_type: str, path: Path) -> None:
+    manifest.append(
+        {
+            "artifact_type": artifact_type,
+            "filename": filename,
+            "content_type": content_type,
+            "path": str(path),
+        }
+    )
+
+
+def _flatten_measurements(measurements_payload: dict[str, Any]) -> dict[str, Any]:
+    annulus = measurements_payload.get("annulus", {})
+    lvot = measurements_payload.get("lvot", {})
+    sinus = measurements_payload.get("sinus_of_valsalva", {})
+    stj = measurements_payload.get("stj", {})
+    asc = measurements_payload.get("ascending_aorta", {})
+    cor = measurements_payload.get("coronary_heights_mm", {})
+    cal = measurements_payload.get("calcium_burden", {})
+    return {
+        "annulus_diameter_mm": annulus.get("equivalent_diameter_mm"),
+        "annulus_diameter_short_mm": annulus.get("diameter_short_mm"),
+        "annulus_diameter_long_mm": annulus.get("diameter_long_mm"),
+        "annulus_area_mm2": annulus.get("area_mm2"),
+        "annulus_perimeter_mm": annulus.get("perimeter_mm"),
+        "sinus_of_valsalva_diameter_mm": sinus.get("max_diameter_mm") or sinus.get("equivalent_diameter_mm"),
+        "stj_diameter_mm": stj.get("diameter_mm"),
+        "ascending_aorta_diameter_mm": asc.get("diameter_mm"),
+        "lvot_diameter_mm": lvot.get("diameter_mm"),
+        "coronary_height_left_mm": cor.get("left"),
+        "coronary_height_right_mm": cor.get("right"),
+        "valve_calcium_burden": cal,
+    }
+
+
+def _section_to_line(section: Any) -> dict[str, Any] | None:
+    if section is None:
+        return None
+    return {
+        "line_world": section.line_world,
+        "line_voxel": section.line_voxel,
+        "index": int(section.index),
+        "s_mm": float(section.s_mm),
+    }
+
+
+def run_geometry_pipeline(
     ct_path: Path,
     mask_path: Path,
     builder_meta: dict[str, Any],
     output_dir: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    timers: dict[str, float] = {}
+    t_pipeline = time.time()
+
     ct_nii = nib.load(str(ct_path))
-    m_nii = nib.load(str(mask_path))
+    mask_nii = nib.load(str(mask_path))
     ct_hu = ct_nii.get_fdata().astype(np.float32)
-    m = m_nii.get_fdata().astype(np.uint8)
+    multiclass = mask_nii.get_fdata().astype(np.uint8)
 
-    affine = m_nii.affine.astype(np.float64)
-    affine_inv = np.linalg.inv(affine)
-    spacing = tuple(float(v) for v in m_nii.header.get_zooms()[:3])
-    dx, dy, dz = spacing
-    voxel_volume_mm3 = float(dx * dy * dz)
-    voxel_ml = voxel_volume_mm3 / 1000.0
-
-    root = m == 1
-    leaf = m == 2
-    asc = m == 3
-    aorta_union = root | asc
-    if not aorta_union.any():
-        aorta_union = m > 0
-
-    artifacts_meta: list[dict[str, Any]] = [
-        {
-            "artifact_type": "segmentation_mask_nifti",
-            "filename": mask_path.name,
-            "content_type": "application/gzip",
-            "path": str(mask_path),
-        }
-    ]
-
-    centerline_work = output_dir / "centerline_tmp"
-    centerline_work.mkdir(parents=True, exist_ok=True)
-
-    cl_world_vmtk, cl_method = extract_centerline_vmtk(aorta_union, affine, centerline_work)
-    if cl_world_vmtk.shape[0] >= 8:
-        cl_vox_seed = points_world_to_voxel(cl_world_vmtk, affine_inv)
-        cl_vox_raw = cl_vox_seed
-        cl_world_raw = cl_world_vmtk
-    else:
-        cl_vox_raw = extract_centerline_centroid(aorta_union)
-        cl_world_raw = points_voxel_to_world(cl_vox_raw, affine)
-        if cl_world_raw.shape[0] < 2:
-            cl_vox_raw = extract_centerline_synthetic(aorta_union)
-            cl_world_raw = points_voxel_to_world(cl_vox_raw, affine)
-            if cl_world_raw.shape[0] >= 2:
-                cl_method = "synthetic_fallback"
-            else:
-                cl_method = "unavailable"
-        else:
-            cl_method = "centroid_fallback"
-
-    cl_vox, cl_world, cl_s_mm = resample_polyline(cl_vox_raw, cl_world_raw, step_mm=1.5)
-    cl_t = tangents_from_polyline(cl_world)
-    if cl_world.shape[0] < 2:
-        # As last resort, generate a 2-point synthetic centerline in voxel space.
-        cl_vox = extract_centerline_synthetic(aorta_union)
-        cl_world = points_voxel_to_world(cl_vox, affine)
-        cl_s_mm = np.array([0.0, max(1.0, float(spacing[2]))], dtype=np.float64) if cl_world.shape[0] >= 2 else np.zeros((0,), dtype=np.float64)
-        cl_t = tangents_from_polyline(cl_world)
-        if cl_world.shape[0] < 2:
-            nx, ny, nz = m.shape
-            cx = float(nx) * 0.5
-            cy = float(ny) * 0.5
-            z0 = float(max(0, min(nz - 1, nz // 3)))
-            z1 = float(max(0, min(nz - 1, (2 * nz) // 3)))
-            if z0 == z1:
-                z1 = float(min(nz - 1, z0 + 1.0))
-            cl_vox = np.asarray([[cx, cy, z0], [cx, cy, z1]], dtype=np.float64)
-            cl_world = points_voxel_to_world(cl_vox, affine)
-            cl_s_mm = np.array([0.0, max(1.0, abs(z1 - z0) * float(spacing[2]))], dtype=np.float64)
-            cl_t = tangents_from_polyline(cl_world)
-            cl_method = "volume_axis_fallback"
-
-    seed_z = int(builder_meta.get("seed_z", round(float(cl_vox[0, 2]))))
-    stj_z = int(builder_meta.get("stj_z", round(float(cl_vox[min(len(cl_vox) - 1, len(cl_vox) // 2), 2]))))
-    annulus_idx = nearest_centerline_index_by_z(cl_vox, seed_z)
-    stj_idx = nearest_centerline_index_by_z(cl_vox, stj_z)
-
-    if annulus_idx < 0:
-        annulus_idx = 0
-    if stj_idx < 0:
-        stj_idx = min(len(cl_vox) - 1, annulus_idx + 8)
-
-    direction = 1 if stj_idx >= annulus_idx else -1
-
-    root_points_world = points_voxel_to_world(np.argwhere(root), affine)
-    leaf_points_world = points_voxel_to_world(np.argwhere(leaf), affine)
-    asc_points_world = points_voxel_to_world(np.argwhere(asc), affine)
-    lvot_proxy_points_world = points_voxel_to_world(np.argwhere(root | leaf), affine)
-    aorta_points_world = points_voxel_to_world(np.argwhere(aorta_union), affine)
-
-    plane_thickness_mm = max(0.8, min(spacing))
-
-    def section_at_idx(points: np.ndarray, idx: int, radius_mm: float) -> dict[str, Any] | None:
-        if idx < 0 or idx >= cl_world.shape[0]:
-            return None
-        return section_metrics_from_points(
-            points_world=points,
-            center_world=cl_world[idx],
-            tangent_world=cl_t[idx],
-            voxel_volume_mm3=voxel_volume_mm3,
-            plane_thickness_mm=plane_thickness_mm,
-            radius_mm=radius_mm,
-            affine_inv=affine_inv,
-        )
-
-    annulus_sec = section_at_idx(root_points_world, annulus_idx, radius_mm=38.0)
-    if annulus_sec is None:
-        annulus_sec = section_at_idx(lvot_proxy_points_world, annulus_idx, radius_mm=38.0)
-
-    # Sinus/STJ search in annulus-STJ segment (centerline orthogonal)
-    lo = min(annulus_idx, stj_idx)
-    hi = max(annulus_idx, stj_idx)
-    sinus_best: tuple[int, dict[str, Any]] | None = None
-    stj_best: tuple[int, dict[str, Any]] | None = None
-
-    for i in range(lo, hi + 1):
-        sec = section_at_idx(root_points_world, i, radius_mm=45.0)
-        if sec is None:
-            continue
-        if sinus_best is None or float(sec["eq_diameter_mm"] or 0.0) > float(sinus_best[1]["eq_diameter_mm"] or 0.0):
-            sinus_best = (i, sec)
-        if stj_best is None or float(sec["eq_diameter_mm"] or 1e9) < float(stj_best[1]["eq_diameter_mm"] or 1e9):
-            stj_best = (i, sec)
-
-    if stj_best is not None:
-        stj_idx = int(stj_best[0])
-
-    stj_sec = section_at_idx(root_points_world, stj_idx, radius_mm=42.0)
-    sinus_idx = sinus_best[0] if sinus_best is not None else stj_idx
-    sinus_sec = sinus_best[1] if sinus_best is not None else stj_sec
-
-    # Ascending diameter at 20-60mm distal from STJ
-    asc_scan_start = move_idx_by_distance(cl_s_mm, stj_idx, direction, 20.0)
-    asc_scan_end = move_idx_by_distance(cl_s_mm, stj_idx, direction, 60.0)
-    asc_lo = min(asc_scan_start, asc_scan_end)
-    asc_hi = max(asc_scan_start, asc_scan_end)
-    ascending_best: tuple[int, dict[str, Any]] | None = None
-    for i in range(max(0, asc_lo), min(cl_world.shape[0] - 1, asc_hi) + 1):
-        sec = section_at_idx(asc_points_world, i, radius_mm=42.0)
-        if sec is None:
-            continue
-        if ascending_best is None or float(sec["eq_diameter_mm"] or 0.0) > float(ascending_best[1]["eq_diameter_mm"] or 0.0):
-            ascending_best = (i, sec)
-
-    if ascending_best is None:
-        fallback_idx = move_idx_by_distance(cl_s_mm, stj_idx, direction, 30.0)
-        ascending_best = (fallback_idx, section_at_idx(asc_points_world, fallback_idx, radius_mm=42.0) or {})
-    asc_idx = int(ascending_best[0])
-    asc_sec = ascending_best[1] if isinstance(ascending_best[1], dict) and ascending_best[1] else None
-
-    # LVOT diameter: proximal 6mm from annulus
-    lvot_idx = move_idx_by_distance(cl_s_mm, annulus_idx, -direction, 6.0)
-    lvot_sec = section_at_idx(lvot_proxy_points_world, lvot_idx, radius_mm=36.0)
-
-    annulus_z = int(round(float(cl_vox[annulus_idx, 2])))
-    stj_z_now = int(round(float(cl_vox[stj_idx, 2])))
-
-    ostia = detect_coronary_ostia_heights(
-        ct_hu=ct_hu,
-        root_mask=root,
-        annulus_z=annulus_z,
-        stj_z=stj_z_now,
-        direction=direction,
-        spacing=spacing,
-        cl_vox=cl_vox,
-        cl_world=cl_world,
-        cl_s_mm=cl_s_mm,
-        annulus_idx=annulus_idx,
-        affine=affine,
-    )
-
-    valve_roi = root | leaf
-    calcium = compute_calcium_burden(ct_hu=ct_hu, valve_region_mask=valve_roi, voxel_volume_mm3=voxel_volume_mm3, threshold_hu=130.0)
-
-    annulus_d = float(annulus_sec["eq_diameter_mm"]) if annulus_sec and annulus_sec.get("eq_diameter_mm") else None
-    annulus_area = float(annulus_sec["area_mm2"]) if annulus_sec and annulus_sec.get("area_mm2") else None
-    annulus_perim = float(annulus_sec["perimeter_mm"]) if annulus_sec and annulus_sec.get("perimeter_mm") else None
-    sinus_d = float(sinus_sec["eq_diameter_mm"]) if sinus_sec and sinus_sec.get("eq_diameter_mm") else None
-    stj_d = float(stj_sec["eq_diameter_mm"]) if stj_sec and stj_sec.get("eq_diameter_mm") else None
-    asc_d = float(asc_sec["eq_diameter_mm"]) if asc_sec and asc_sec.get("eq_diameter_mm") else None
-    lvot_d = float(lvot_sec["eq_diameter_mm"]) if lvot_sec and lvot_sec.get("eq_diameter_mm") else None
-
-    left_h = ostia.get("left_height_mm")
-    right_h = ostia.get("right_height_mm")
-    calc_ml = float(calcium["calc_volume_ml"])
-
-    risk_flags: list[dict[str, Any]] = []
-    if (left_h is not None and left_h < 10.0) or (right_h is not None and right_h < 10.0):
-        risk_flags.append(
-            {
-                "id": "low_coronary_height",
-                "severity": "high",
-                "message": "Coronary ostial height below 10 mm",
-            }
-        )
-    if sinus_d is not None and sinus_d < 30.0:
-        risk_flags.append(
-            {
-                "id": "small_sinus",
-                "severity": "moderate",
-                "message": "Sinus of Valsalva diameter appears small (<30 mm)",
-            }
-        )
-    if calc_ml > 0.35:
-        risk_flags.append(
-            {
-                "id": "heavy_valve_calcification",
-                "severity": "high",
-                "message": "Valve/root calcium burden is elevated (HU>130)",
-            }
-        )
-
-    # Profile for orthogonal measurements along centerline.
-    profile: list[dict[str, Any]] = []
-    stride = max(1, int(round(3.0 / max(1e-3, plane_thickness_mm))))
-    for i in range(0, cl_world.shape[0], stride):
-        sec = section_at_idx(aorta_points_world, i, radius_mm=48.0)
-        if sec is None:
-            continue
-        d_ann = directed_distance_from_annulus(cl_s_mm, annulus_idx, i, direction)
-        profile.append(
-            {
-                "index": int(i),
-                "distance_from_annulus_mm": float(d_ann),
-                "eq_diameter_mm": float(sec["eq_diameter_mm"]) if sec.get("eq_diameter_mm") is not None else None,
-                "area_mm2": float(sec["area_mm2"]) if sec.get("area_mm2") is not None else None,
-            }
-        )
-
-    # Annulus plane visualization package.
-    annulus_center = cl_world[annulus_idx]
-    annulus_normal = normalize(cl_t[annulus_idx])
-    annulus_u, annulus_v = orth_basis_from_tangent(annulus_normal)
-    half_plane = 15.0
-    corners_world = [
-        (annulus_center + annulus_u * half_plane + annulus_v * half_plane),
-        (annulus_center - annulus_u * half_plane + annulus_v * half_plane),
-        (annulus_center - annulus_u * half_plane - annulus_v * half_plane),
-        (annulus_center + annulus_u * half_plane - annulus_v * half_plane),
-    ]
-    corners_vox = points_world_to_voxel(np.asarray(corners_world), affine_inv)
-
-    annulus_plane = {
-        "origin_world": [float(x) for x in annulus_center],
-        "origin_voxel": [float(x) for x in cl_vox[annulus_idx]],
-        "normal_world": [float(x) for x in annulus_normal],
-        "basis_u_world": [float(x) for x in annulus_u],
-        "basis_v_world": [float(x) for x in annulus_v],
-        "corners_world": [[float(v) for v in p] for p in corners_world],
-        "corners_voxel": [[float(v) for v in p] for p in corners_vox],
-        "index": int(annulus_idx),
-        "z": int(annulus_z),
-    }
-
-    centerline_payload = {
-        "method": cl_method,
-        "point_count": int(cl_world.shape[0]),
-        "points": [
-            {
-                "index": int(i),
-                "s_mm": float(cl_s_mm[i]),
-                "world": [float(cl_world[i, 0]), float(cl_world[i, 1]), float(cl_world[i, 2])],
-                "voxel": [float(cl_vox[i, 0]), float(cl_vox[i, 1]), float(cl_vox[i, 2])],
-                "tangent_world": [float(cl_t[i, 0]), float(cl_t[i, 1]), float(cl_t[i, 2])],
-            }
-            for i in range(cl_world.shape[0])
-        ],
-        "orthogonal_profile": profile,
-        "annulus_plane": annulus_plane,
-    }
-
-    centerline_json_path = output_dir / "centerline.json"
-    centerline_json_path.write_text(json.dumps(sanitize_for_json(centerline_payload), indent=2), encoding="utf-8")
-    artifacts_meta.append(
-        {
-            "artifact_type": "centerline_json",
-            "filename": centerline_json_path.name,
-            "content_type": "application/json",
-            "path": str(centerline_json_path),
-        }
-    )
-
-    annulus_plane_path = output_dir / "annulus_plane.json"
-    annulus_plane_path.write_text(json.dumps(sanitize_for_json(annulus_plane), indent=2), encoding="utf-8")
-    artifacts_meta.append(
-        {
-            "artifact_type": "annulus_plane_json",
-            "filename": annulus_plane_path.name,
-            "content_type": "application/json",
-            "path": str(annulus_plane_path),
-        }
-    )
-
-    measurements = {
-        "annulus_diameter_mm": annulus_d,
-        "annulus_area_mm2": annulus_area,
-        "annulus_perimeter_mm": annulus_perim,
-        "sinus_of_valsalva_diameter_mm": sinus_d,
-        "stj_diameter_mm": stj_d,
-        "ascending_aorta_diameter_mm": asc_d,
-        "lvot_diameter_mm": lvot_d,
-        "coronary_height_left_mm": float(left_h) if left_h is not None else None,
-        "coronary_height_right_mm": float(right_h) if right_h is not None else None,
-        "valve_calcium_burden": calcium,
-    }
-
-    planning_metrics = {
-        "vsrr": {
-            "annulus_diameter_mm": annulus_d,
-            "sinus_diameter_mm": sinus_d,
-            "stj_diameter_mm": stj_d,
-            "lvot_diameter_mm": lvot_d,
-            "recommended_graft_size_mm": float(max(20.0, round((annulus_d or 26.0) - 2.5, 1))) if annulus_d else None,
-        },
-        "pears": {
-            "root_external_reference_diameter_mm": sinus_d,
-            "sinus_distribution_reference_mm": sinus_d,
-            "annulus_plane": annulus_plane,
-        },
-        "tavi": {
-            "annulus_area_mm2": annulus_area,
-            "annulus_perimeter_mm": annulus_perim,
-            "coronary_height_left_mm": float(left_h) if left_h is not None else None,
-            "coronary_height_right_mm": float(right_h) if right_h is not None else None,
-            "sinus_width_mm": sinus_d,
-            "stj_diameter_mm": stj_d,
-            "valve_calcium_burden": calcium,
-        },
-    }
-
-    # STL mesh export for PEARS planning.
-    stl_path = output_dir / "aortic_root.stl"
-    mesh_mask = root.astype(bool) if root.any() else aorta_union.astype(bool)
-    stl_meta = write_ascii_stl_from_mask(mesh_mask, affine, stl_path)
-    artifacts_meta.append(
-        {
-            "artifact_type": "aortic_root_stl",
-            "filename": stl_path.name,
-            "content_type": "model/stl",
-            "path": str(stl_path),
-        }
-    )
-
-    measurements_json_path = output_dir / "measurements.json"
-    measurements_json_payload = {
-        "measurements": measurements,
-        "planning_metrics": planning_metrics,
-        "risk_flags": risk_flags,
-        "annulus_plane": annulus_plane,
-        "centerline_method": cl_method,
-        "orthogonal_profile": profile,
-    }
-    measurements_json_path.write_text(json.dumps(sanitize_for_json(measurements_json_payload), indent=2), encoding="utf-8")
-    artifacts_meta.append(
-        {
-            "artifact_type": "measurements_json",
-            "filename": measurements_json_path.name,
-            "content_type": "application/json",
-            "path": str(measurements_json_path),
-        }
-    )
-
-    report_lines = [
-        f"Study ID: {ct_path.name}",
-        f"Centerline method: {cl_method}",
-        f"Annulus diameter: {annulus_d}",
-        f"Annulus area: {annulus_area}",
-        f"Annulus perimeter: {annulus_perim}",
-        f"Sinus of Valsalva diameter: {sinus_d}",
-        f"STJ diameter: {stj_d}",
-        f"Ascending aorta diameter: {asc_d}",
-        f"LVOT diameter: {lvot_d}",
-        f"Coronary height left: {left_h}",
-        f"Coronary height right: {right_h}",
-        f"Valve calcium burden (HU>130, ml): {calc_ml}",
-        "",
-        "Risk flags:",
-    ]
-    if risk_flags:
-        report_lines.extend([f"- {x['id']}: {x['message']}" for x in risk_flags])
-    else:
-        report_lines.append("- none")
-
-    report_pdf_path = output_dir / "planning_report.pdf"
-    write_planning_report_pdf(report_pdf_path, "Aortic Planning Report", report_lines)
-    artifacts_meta.append(
-        {
-            "artifact_type": "planning_report_pdf",
-            "filename": report_pdf_path.name,
-            "content_type": "application/pdf",
-            "path": str(report_pdf_path),
-        }
-    )
+    affine = mask_nii.affine.astype(np.float64)
+    spacing = tuple(float(v) for v in mask_nii.header.get_zooms()[:3])
+    voxel_mm3 = voxel_volume_mm3(spacing)
+    voxel_ml = voxel_mm3 / 1000.0
 
     labels = {
         "0": "background",
@@ -1010,53 +290,245 @@ def measure_from_multiclass(
         "2": "valve_leaflets",
         "3": "ascending_aorta",
     }
+    root_mask = multiclass == 1
+    leaflet_mask = multiclass == 2
+    ascending_mask = multiclass == 3
+
+    artifacts_manifest: list[dict[str, Any]] = []
+    _record_artifact(artifacts_manifest, "segmentation_mask_nifti", mask_path.name, "application/gzip", mask_path)
+
+    t0 = time.time()
+    lumen_mask = extract_lumen_mask(multiclass, spacing)
+    lumen_mask_path = output_dir / "lumen_mask.nii.gz"
+    save_mask_nifti(lumen_mask, affine, lumen_mask_path)
+    timers["lumen_cleanup_seconds"] = round(time.time() - t0, 4)
+    _record_artifact(artifacts_manifest, "lumen_mask_nifti", lumen_mask_path.name, "application/gzip", lumen_mask_path)
+
+    t0 = time.time()
+    lumen_mesh = generate_surface_mesh(lumen_mask, affine)
+    lumen_surface_vtk = output_dir / "lumen_surface.vtk"
+    lumen_surface_stl = output_dir / "lumen_surface.stl"
+    write_vtk_polydata(lumen_mesh, lumen_surface_vtk)
+    write_ascii_stl(lumen_mesh, lumen_surface_stl, "lumen_surface")
+    timers["mesh_seconds"] = round(time.time() - t0, 4)
+    _record_artifact(artifacts_manifest, "lumen_surface_vtk", lumen_surface_vtk.name, "model/vtk", lumen_surface_vtk)
+    _record_artifact(artifacts_manifest, "lumen_surface_stl", lumen_surface_stl.name, "model/stl", lumen_surface_stl)
+
+    t0 = time.time()
+    root_mesh = generate_surface_mesh(root_mask if np.any(root_mask) else lumen_mask, affine)
+    root_stl_path = output_dir / "aortic_root.stl"
+    write_ascii_stl(root_mesh, root_stl_path, "aortic_root")
+    asc_mesh = generate_surface_mesh(ascending_mask if np.any(ascending_mask) else lumen_mask, affine)
+    asc_stl_path = output_dir / "ascending_aorta.stl"
+    write_ascii_stl(asc_mesh, asc_stl_path, "ascending_aorta")
+    timers["surface_export_seconds"] = round(time.time() - t0, 4)
+    _record_artifact(artifacts_manifest, "aortic_root_stl", root_stl_path.name, "model/stl", root_stl_path)
+    _record_artifact(artifacts_manifest, "ascending_aorta_stl", asc_stl_path.name, "model/stl", asc_stl_path)
+
+    t0 = time.time()
+    centerline = compute_centerline(lumen_mask, affine, spacing, sample_step_mm=1.25)
+    timers["centerline_seconds"] = round(time.time() - t0, 4)
+
+    t0 = time.time()
+    sections = sample_cross_sections(
+        lumen_mask=lumen_mask,
+        centerline_world=centerline.points_world,
+        centerline_voxel=centerline.points_voxel,
+        tangents_world=centerline.tangents_world,
+        centerline_radii_mm=centerline.radii_mm,
+        affine=affine,
+        plane_thickness_mm=max(0.8, min(spacing)),
+        voxel_volume_mm3=voxel_mm3,
+        step_stride=2,
+    )
+    sections = attach_arclength_to_sections(sections, centerline.s_mm)
+    profile = build_radius_profile(sections)
+    timers["profile_seconds"] = round(time.time() - t0, 4)
+
+    t0 = time.time()
+    landmarks = detect_landmarks_from_profile(sections, centerline.points_world, centerline.s_mm)
+    landmark_sections = pick_section_bundle(sections, landmarks)
+    timers["landmark_seconds"] = round(time.time() - t0, 4)
+
+    t0 = time.time()
+    root_model = build_aortic_root_model(
+        sections=landmark_sections,
+        landmarks=landmarks,
+        centerline_world=centerline.points_world,
+        centerline_voxel=centerline.points_voxel,
+        centerline_s_mm=centerline.s_mm,
+    )
+    leaflet_model = build_leaflet_model(root_model)
+    leaflet_stl_path = output_dir / "leaflets.stl"
+    write_ascii_stl(leaflet_model.mesh, leaflet_stl_path, "leaflets")
+    timers["root_model_seconds"] = round(time.time() - t0, 4)
+    _record_artifact(artifacts_manifest, "leaflets_stl", leaflet_stl_path.name, "model/stl", leaflet_stl_path)
+
+    t0 = time.time()
+    measurements_structured, planning_metrics, risk_flags, measurements_json_payload = build_measurements(
+        ct_hu=ct_hu,
+        lumen_mask=lumen_mask,
+        valve_region_mask=(root_mask | leaflet_mask),
+        landmark_sections=landmark_sections,
+        ascending_sections=sections,
+        annulus_plane=landmarks.annulus_plane,
+        root_model=root_model,
+        leaflet_model=leaflet_model,
+        spacing_mm=spacing,
+        affine=affine,
+        voxel_volume_mm3=voxel_mm3,
+        centerline_result=centerline,
+    )
+    timers["measurement_seconds"] = round(time.time() - t0, 4)
+
+    annulus_plane_path = output_dir / "annulus_plane.json"
+    annulus_plane_path.write_text(json.dumps(sanitize_for_json(landmarks.annulus_plane), indent=2), encoding="utf-8")
+    _record_artifact(artifacts_manifest, "annulus_plane_json", annulus_plane_path.name, "application/json", annulus_plane_path)
+
+    centerline_payload = {
+        "method": centerline.method,
+        "point_count": int(centerline.points_world.shape[0]),
+        "points": [
+            {
+                "index": int(i),
+                "s_mm": float(centerline.s_mm[i]),
+                "world": [float(v) for v in centerline.points_world[i]],
+                "voxel": [float(v) for v in centerline.points_voxel[i]],
+                "tangent_world": [float(v) for v in centerline.tangents_world[i]],
+                "radius_mm": float(centerline.radii_mm[i]) if i < centerline.radii_mm.shape[0] else None,
+            }
+            for i in range(centerline.points_world.shape[0])
+        ],
+        "orthogonal_profile": profile,
+        "annulus_plane": landmarks.annulus_plane,
+        "stj_plane": landmarks.stj_plane,
+    }
+    centerline_json_path = output_dir / "centerline.json"
+    centerline_json_path.write_text(json.dumps(sanitize_for_json(centerline_payload), indent=2), encoding="utf-8")
+    _record_artifact(artifacts_manifest, "centerline_json", centerline_json_path.name, "application/json", centerline_json_path)
+
+    aortic_root_model_path = output_dir / "aortic_root_model.json"
+    aortic_root_model_path.write_text(json.dumps(sanitize_for_json(asdict(root_model)), indent=2), encoding="utf-8")
+    _record_artifact(artifacts_manifest, "aortic_root_model_json", aortic_root_model_path.name, "application/json", aortic_root_model_path)
+
+    measurements_json_path = output_dir / "measurements.json"
+    measurements_json_path.write_text(json.dumps(sanitize_for_json(measurements_json_payload), indent=2), encoding="utf-8")
+    _record_artifact(artifacts_manifest, "measurements_json", measurements_json_path.name, "application/json", measurements_json_path)
+
+    report_lines = [
+        f"Study ID: {ct_path.name}",
+        f"Centerline method: {centerline.method}",
+        f"Annulus short/long diameter: {measurements_structured['annulus']['diameter_short_mm']} / {measurements_structured['annulus']['diameter_long_mm']} mm",
+        f"Annulus area/perimeter: {measurements_structured['annulus']['area_mm2']} mm2 / {measurements_structured['annulus']['perimeter_mm']} mm",
+        f"Sinus max diameter: {measurements_structured['sinus_of_valsalva']['max_diameter_mm']} mm",
+        f"STJ diameter: {measurements_structured['stj']['diameter_mm']} mm",
+        f"Ascending aorta diameter: {measurements_structured['ascending_aorta']['diameter_mm']} mm",
+        f"LVOT diameter: {measurements_structured['lvot']['diameter_mm']} mm",
+        f"Coronary height left/right: {measurements_structured['coronary_heights_mm']['left']} / {measurements_structured['coronary_heights_mm']['right']} mm",
+        f"Calcium burden (HU>130): {measurements_structured['calcium_burden']['calc_volume_ml']} mL",
+        f"Leaflet coaptation height estimate: {measurements_structured['leaflet_geometry']['coaptation_height_mm']} mm",
+        "",
+        "Risk flags:",
+    ]
+    if risk_flags:
+        report_lines.extend([f"- {flag['id']}: {flag['message']}" for flag in risk_flags])
+    else:
+        report_lines.append("- none")
+    planning_report_pdf = output_dir / "planning_report.pdf"
+    write_planning_report_pdf(planning_report_pdf, "Aortic Geometry Planning Report", report_lines)
+    _record_artifact(artifacts_manifest, "planning_report_pdf", planning_report_pdf.name, "application/pdf", planning_report_pdf)
+
+    total_runtime = round(time.time() - t_pipeline, 4)
+    flat_measurements = _flatten_measurements(measurements_structured)
+    volumes_ml = {
+        "aortic_root": float(root_mask.sum() * voxel_ml),
+        "valve_leaflets": float(leaflet_mask.sum() * voxel_ml),
+        "ascending_aorta": float(ascending_mask.sum() * voxel_ml),
+        "lumen": float(lumen_mask.sum() * voxel_ml),
+    }
 
     payload = {
         "labels": labels,
-        "spacing_mm": {"dx": dx, "dy": dy, "dz": dz},
+        "spacing_mm": {"dx": spacing[0], "dy": spacing[1], "dz": spacing[2]},
         "volume_reconstruction": {
-            "dims": {"x": int(m.shape[0]), "y": int(m.shape[1]), "z": int(m.shape[2])},
-            "spacing_mm": {"dx": dx, "dy": dy, "dz": dz},
-            "voxel_volume_mm3": voxel_volume_mm3,
+            "dims": {"x": int(multiclass.shape[0]), "y": int(multiclass.shape[1]), "z": int(multiclass.shape[2])},
+            "spacing_mm": {"dx": spacing[0], "dy": spacing[1], "dz": spacing[2]},
+            "voxel_volume_mm3": voxel_mm3,
+        },
+        "geometry_model": {
+            "type": "aortic_root_computational_anatomy_v1",
+            "lumen_mask": lumen_mask_path.name,
+            "lumen_surface_vtk": lumen_surface_vtk.name,
+            "lumen_surface_stl": lumen_surface_stl.name,
+            "root_model_json": aortic_root_model_path.name,
         },
         "centerline": {
-            "method": cl_method,
-            "point_count": int(cl_world.shape[0]),
-            "annulus_index": int(annulus_idx),
-            "stj_index": int(stj_idx),
-            "direction": int(direction),
+            "method": centerline.method,
+            "point_count": int(centerline.points_world.shape[0]),
+            "annulus_index": int(landmarks.annulus_index),
+            "stj_index": int(landmarks.stj_index),
+            "sinus_peak_index": int(landmarks.sinus_peak_index),
+            "ascending_reference_index": int(landmarks.ascending_reference_index),
+            "skeletonization": "distance_transform",
         },
         "landmarks": {
-            "annulus_plane": annulus_plane,
-            "stj_point_world": [float(x) for x in cl_world[stj_idx]],
-            "sinus_peak_point_world": [float(x) for x in cl_world[sinus_idx]],
-            "ascending_reference_point_world": [float(x) for x in cl_world[asc_idx]],
+            "annulus_plane": landmarks.annulus_plane,
+            "stj_plane": landmarks.stj_plane,
+            "sinus_peak_point_world": landmarks.sinus_peak_point_world,
+            "ascending_reference_point_world": landmarks.ascending_reference_point_world,
         },
-        "measurements": measurements,
-        "volumes_ml": {
-            "aortic_root": float(root.sum() * voxel_ml),
-            "valve_leaflets": float(leaf.sum() * voxel_ml),
-            "ascending_aorta": float(asc.sum() * voxel_ml),
-        },
+        "measurements": flat_measurements,
+        "measurements_structured": measurements_structured,
+        "volumes_ml": volumes_ml,
         "risk_flags": risk_flags,
+        "sanity_checks": measurements_json_payload.get("sanity_checks", {}),
         "planning_metrics": planning_metrics,
         "exports": {
             "measurements_json": measurements_json_path.name,
-            "planning_report_pdf": report_pdf_path.name,
+            "planning_report_pdf": planning_report_pdf.name,
             "segmentation_mask_nifti": mask_path.name,
-            "aortic_root_stl": stl_path.name,
+            "lumen_mask_nifti": lumen_mask_path.name,
+            "lumen_surface_vtk": lumen_surface_vtk.name,
+            "lumen_surface_stl": lumen_surface_stl.name,
+            "aortic_root_stl": root_stl_path.name,
+            "ascending_aorta_stl": asc_stl_path.name,
+            "leaflets_stl": leaflet_stl_path.name,
             "centerline_json": centerline_json_path.name,
             "annulus_plane_json": annulus_plane_path.name,
+            "aortic_root_model_json": aortic_root_model_path.name,
         },
+        "mesh": {
+            "lumen_surface": mesh_meta(lumen_mesh, lumen_surface_stl),
+            "aortic_root": mesh_meta(root_mesh, root_stl_path),
+            "ascending_aorta": mesh_meta(asc_mesh, asc_stl_path),
+            "leaflets": mesh_meta(leaflet_model.mesh, leaflet_stl_path),
+        },
+        "geometry_sections": {
+            "annulus": _section_to_line(landmark_sections.get("annulus")),
+            "sinus": _section_to_line(landmark_sections.get("sinus")),
+            "stj": _section_to_line(landmark_sections.get("stj")),
+            "ascending": _section_to_line(landmark_sections.get("ascending")),
+        },
+        "builder_meta": builder_meta,
         "notes": [
-            "Orthogonal sections are computed on centerline-normal planes.",
-            "Coronary ostia heights are estimated from shell-threshold vessel candidates and should be clinician-verified.",
-            "Valve calcium burden threshold set to HU > 130.",
+            "Measurements are geometry-derived from lumen mesh, skeleton centerline, and landmarked root model.",
+            "GPU is used only for segmentation; all geometry stages run on CPU.",
+            "Valve leaflet output is parametric and intended for planning assistance rather than standalone diagnosis.",
         ],
-        "mesh": stl_meta,
+        "stage_timings_seconds": timers,
+    }
+    payload["pipeline"] = {
+        "input_prep": {"input_kind": "nifti", "conversion": "none"},
+        "segmentation": "TotalSegmentator(open)+multiclass_aortic_builder",
+        "lumen_model": "mask_cleanup+marching_cubes+taubin",
+        "centerline": centerline.method,
+        "measurement_method": "geometry_model_driven_v1",
+        "quality": builder_meta.get("quality", "high"),
+        "device": builder_meta.get("device", "gpu"),
+        "runtime_seconds": total_runtime,
     }
 
-    return sanitize_for_json(payload), artifacts_meta
+    return sanitize_for_json(payload), artifacts_manifest
 
 
 def main() -> None:
@@ -1104,27 +576,25 @@ def main() -> None:
         run_cmd(cmd)
 
         builder_meta = parse_builder_meta(builder_meta_path)
-        result_payload, artifacts_meta = measure_from_multiclass(
+        builder_meta.setdefault("device", args.device)
+        builder_meta.setdefault("quality", args.quality)
+        result_payload, artifacts_meta = run_geometry_pipeline(
             ct_path=nifti_input,
             mask_path=out_mask,
             builder_meta=builder_meta,
             output_dir=output_dir,
         )
 
-        elapsed = time.time() - t0
+        elapsed = round(time.time() - t0, 4)
+        pipeline_info = result_payload.get("pipeline", {})
+        pipeline_info["input_prep"] = prep_meta
+        pipeline_info["quality"] = args.quality
+        pipeline_info["device"] = args.device
+        pipeline_info["runtime_seconds"] = elapsed
+        result_payload["pipeline"] = pipeline_info
         payload = {
             "job_id": args.job_id,
             "study_id": args.study_id,
-            "pipeline": {
-                "input_prep": prep_meta,
-                "segmentation": "TotalSegmentator(open)+multiclass_aortic_builder",
-                "centerline": result_payload.get("centerline", {}).get("method", "unknown"),
-                "measurement_method": "centerline_orthogonal_sections_v2",
-                "quality": args.quality,
-                "device": args.device,
-                "runtime_seconds": round(float(elapsed), 4),
-            },
-            "builder_meta": builder_meta,
             **result_payload,
             "artifacts_manifest": artifacts_meta,
         }
