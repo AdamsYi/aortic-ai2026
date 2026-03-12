@@ -30,8 +30,9 @@ import numpy as np
 try:
     from .geometry.centerline import compute_centerline
     from .geometry.common import sanitize_for_json, voxel_volume_mm3
+    from .geometry.digital_twin import build_digital_twin_simulation
     from .geometry.landmarks import detect_landmarks_from_profile, pick_section_bundle
-    from .geometry.leaflet_model import build_leaflet_model
+    from .geometry.leaflet_model import build_leaflet_model, leaflet_model_payload
     from .geometry.lumen_mesh import (
         extract_lumen_mask,
         generate_surface_mesh,
@@ -42,12 +43,13 @@ try:
     )
     from .geometry.measurements import build_measurements
     from .geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
-    from .geometry.root_model import build_aortic_root_model
+    from .geometry.root_model import attach_digital_twin_simulation, attach_leaflet_geometry, build_aortic_root_model
 except ImportError:
     from geometry.centerline import compute_centerline
     from geometry.common import sanitize_for_json, voxel_volume_mm3
+    from geometry.digital_twin import build_digital_twin_simulation
     from geometry.landmarks import detect_landmarks_from_profile, pick_section_bundle
-    from geometry.leaflet_model import build_leaflet_model
+    from geometry.leaflet_model import build_leaflet_model, leaflet_model_payload
     from geometry.lumen_mesh import (
         extract_lumen_mask,
         generate_surface_mesh,
@@ -58,7 +60,7 @@ except ImportError:
     )
     from geometry.measurements import build_measurements
     from geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
-    from geometry.root_model import build_aortic_root_model
+    from geometry.root_model import attach_digital_twin_simulation, attach_leaflet_geometry, build_aortic_root_model
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -362,11 +364,15 @@ def run_geometry_pipeline(
         leaflet_mask=leaflet_mask,
         ascending_mask=ascending_mask,
     )
-    leaflet_model = build_leaflet_model(root_model)
+    leaflet_model = build_leaflet_model(root_model, leaflet_mask=leaflet_mask, affine=affine, spacing_mm=spacing)
+    root_model = attach_leaflet_geometry(root_model, leaflet_model_payload(leaflet_model))
     leaflet_stl_path = output_dir / "leaflets.stl"
     write_ascii_stl(leaflet_model.mesh, leaflet_stl_path, "leaflets")
     timers["root_model_seconds"] = round(time.time() - t0, 4)
     _record_artifact(artifacts_manifest, "leaflets_stl", leaflet_stl_path.name, "model/stl", leaflet_stl_path)
+    leaflet_model_json_path = output_dir / "leaflet_model.json"
+    leaflet_model_json_path.write_text(json.dumps(sanitize_for_json(leaflet_model_payload(leaflet_model)), separators=(",", ":")), encoding="utf-8")
+    _record_artifact(artifacts_manifest, "leaflet_model_json", leaflet_model_json_path.name, "application/json", leaflet_model_json_path)
 
     t0 = time.time()
     measurements_structured, planning_metrics, risk_flags, measurements_json_payload = build_measurements(
@@ -389,7 +395,7 @@ def run_geometry_pipeline(
     annulus_plane_payload.setdefault("index", int(landmarks.annulus_index))
     annulus_plane_payload.setdefault("s_mm", float(centerline.s_mm[min(max(0, landmarks.annulus_index), len(centerline.s_mm) - 1)]))
     annulus_plane_path = output_dir / "annulus_plane.json"
-    annulus_plane_path.write_text(json.dumps(sanitize_for_json(annulus_plane_payload), indent=2), encoding="utf-8")
+    annulus_plane_path.write_text(json.dumps(sanitize_for_json(annulus_plane_payload), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "annulus_plane_json", annulus_plane_path.name, "application/json", annulus_plane_path)
 
     centerline_payload = {
@@ -411,15 +417,21 @@ def run_geometry_pipeline(
         "stj_plane": landmarks.stj_plane,
     }
     centerline_json_path = output_dir / "centerline.json"
-    centerline_json_path.write_text(json.dumps(sanitize_for_json(centerline_payload), indent=2), encoding="utf-8")
+    centerline_json_path.write_text(json.dumps(sanitize_for_json(centerline_payload), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "centerline_json", centerline_json_path.name, "application/json", centerline_json_path)
 
+    digital_twin_simulation = build_digital_twin_simulation(root_model, planning_metrics)
+    root_model = attach_digital_twin_simulation(root_model, digital_twin_simulation)
+
     aortic_root_model_path = output_dir / "aortic_root_model.json"
-    aortic_root_model_path.write_text(json.dumps(sanitize_for_json(asdict(root_model)), indent=2), encoding="utf-8")
+    aortic_root_model_path.write_text(json.dumps(sanitize_for_json(asdict(root_model)), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "aortic_root_model_json", aortic_root_model_path.name, "application/json", aortic_root_model_path)
 
     measurements_json_path = output_dir / "measurements.json"
-    measurements_json_path.write_text(json.dumps(sanitize_for_json(measurements_json_payload), indent=2), encoding="utf-8")
+    measurements_json_payload["digital_twin_simulation"] = digital_twin_simulation
+    if isinstance(measurements_json_payload.get("aortic_root_model"), dict):
+        measurements_json_payload["aortic_root_model"]["digital_twin_simulation"] = digital_twin_simulation
+    measurements_json_path.write_text(json.dumps(sanitize_for_json(measurements_json_payload), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "measurements_json", measurements_json_path.name, "application/json", measurements_json_path)
 
     report_lines = [
@@ -494,6 +506,8 @@ def run_geometry_pipeline(
             "coronary_ostia": root_model.coronary_ostia,
             "ascending_axis": root_model.ascending_axis,
             "centerline": root_model.centerline,
+            "leaflet_geometry": root_model.leaflet_geometry,
+            "digital_twin_simulation": root_model.digital_twin_simulation,
             "anatomical_constraints": root_model.anatomical_constraints,
         },
         "measurements": flat_measurements,
@@ -502,6 +516,7 @@ def run_geometry_pipeline(
         "risk_flags": risk_flags,
         "sanity_checks": measurements_json_payload.get("sanity_checks", {}),
         "planning_metrics": planning_metrics,
+        "digital_twin_simulation": digital_twin_simulation,
         "exports": {
             "measurements_json": measurements_json_path.name,
             "planning_report_pdf": planning_report_pdf.name,
@@ -512,6 +527,7 @@ def run_geometry_pipeline(
             "aortic_root_stl": root_stl_path.name,
             "ascending_aorta_stl": asc_stl_path.name,
             "leaflets_stl": leaflet_stl_path.name,
+            "leaflet_model_json": leaflet_model_json_path.name,
             "centerline_json": centerline_json_path.name,
             "annulus_plane_json": annulus_plane_path.name,
             "aortic_root_model_json": aortic_root_model_path.name,
@@ -532,7 +548,7 @@ def run_geometry_pipeline(
         "notes": [
             "Measurements are geometry-derived from lumen mesh, skeleton centerline, and landmarked root model.",
             "GPU is used only for segmentation; all geometry stages run on CPU.",
-            "Valve leaflet output is parametric and intended for planning assistance rather than standalone diagnosis.",
+            "Valve leaflet output is reconstructed from segmented leaflet ROI plus anatomical regularization for planning support rather than standalone diagnosis.",
         ],
         "stage_timings_seconds": timers,
     }

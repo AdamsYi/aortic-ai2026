@@ -176,8 +176,14 @@ def build_measurements(
         "calcium_burden": calcium,
         "leaflet_geometry": {
             "coaptation_height_mm": leaflet_model.coaptation_height_mm,
+            "coaptation_surface_area_mm2": leaflet_model.coaptation_surface_area_mm2,
+            "coaptation_level_mm": leaflet_model.coaptation_level_mm,
+            "raw_coaptation_height_mm": leaflet_model.raw_coaptation_height_mm,
+            "effective_height_mean_mm": leaflet_model.effective_height_mean_mm,
+            "geometric_height_mean_mm": leaflet_model.geometric_height_mean_mm,
             "root_symmetry_index": leaflet_model.root_symmetry_index,
-            "coaptation_reserve_mm": float(leaflet_model.coaptation_height_mm - 4.0) if leaflet_model.coaptation_height_mm is not None else None,
+            "coaptation_reserve_mm": float(leaflet_model.effective_height_mean_mm - 9.0) if leaflet_model.effective_height_mean_mm is not None else None,
+            "regularization": leaflet_model.regularization,
         },
     }
     constraint_corrections = _apply_anatomical_constraints(measurements, root_model)
@@ -194,6 +200,7 @@ def build_measurements(
             "recommended_graft_size_mm": float(max(20.0, round((annulus_metrics["equivalent_diameter_mm"] + measurements["stj"]["diameter_mm"]) / 2.0, 1))),
             "annulus_stj_mismatch_mm": annulus_stj_mismatch,
             "coaptation_height_mm": leaflet_model.coaptation_height_mm,
+            "effective_height_mean_mm": leaflet_model.effective_height_mean_mm,
             "coaptation_reserve_mm": measurements["leaflet_geometry"]["coaptation_reserve_mm"],
         },
         "pears": {
@@ -233,6 +240,8 @@ def build_measurements(
         risk_flags.append({"id": "low_coronary_height", "severity": "high", "message": "Coronary ostial height below 10 mm"})
     if coronary.get("left", {}).get("status") == "uncertain" or coronary.get("right", {}).get("status") == "uncertain":
         risk_flags.append({"id": "coronary_ostia_uncertain", "severity": "moderate", "message": "Coronary ostial detection is uncertain"})
+    if leaflet_model.status != "detected" or any(item.status != "detected" for item in leaflet_model.leaflet_surfaces):
+        risk_flags.append({"id": "leaflet_geometry_uncertain", "severity": "moderate", "message": "Leaflet reconstruction is partial or uncertain"})
     if float(measurements["sinus_of_valsalva"]["max_diameter_mm"]) < 30.0:
         risk_flags.append({"id": "small_sinus", "severity": "moderate", "message": "Sinus of Valsalva diameter appears small (<30 mm)"})
     if float(calcium["calc_volume_ml"]) > 0.35:
@@ -259,6 +268,8 @@ def build_measurements(
             "coronary_ostia": root_model.coronary_ostia,
             "ascending_axis": root_model.ascending_axis,
             "centerline": root_model.centerline,
+            "leaflet_geometry": root_model.leaflet_geometry,
+            "digital_twin_simulation": root_model.digital_twin_simulation,
             "anatomical_constraints": root_model.anatomical_constraints,
             "reference_sections": root_model.reference_sections,
         },

@@ -25,6 +25,8 @@ class AorticRootComputationalModel:
     anatomical_constraints: dict[str, Any]
     reference_sections: dict[str, Any]
     annulus_plane: dict[str, Any]
+    leaflet_geometry: dict[str, Any]
+    digital_twin_simulation: dict[str, Any]
 
 
 AorticRootModel = AorticRootComputationalModel
@@ -389,6 +391,10 @@ def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[st
         comm_spacing = []
     left_height = model.coronary_ostia.get("left", {}).get("height_mm")
     right_height = model.coronary_ostia.get("right", {}).get("height_mm")
+    leaflet_geometry = model.leaflet_geometry or {}
+    coaptation_height = leaflet_geometry.get("coaptation_height_mm")
+    effective_height_mean = leaflet_geometry.get("effective_height_mean_mm")
+    geometric_height_mean = leaflet_geometry.get("geometric_height_mean_mm")
     checks = [
         {
             "id": "sinus_ge_annulus",
@@ -413,6 +419,25 @@ def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[st
             "left_height_mm": left_height,
             "right_height_mm": right_height,
         },
+        {
+            "id": "coaptation_height_threshold",
+            "accepted": bool(
+                coaptation_height is None
+                or float(coaptation_height) >= 1.0
+            ),
+            "coaptation_height_mm": coaptation_height,
+            "effective_height_mean_mm": effective_height_mean,
+        },
+        {
+            "id": "effective_height_le_geometric_height",
+            "accepted": bool(
+                effective_height_mean is None
+                or geometric_height_mean is None
+                or float(effective_height_mean) <= float(geometric_height_mean) + 0.5
+            ),
+            "effective_height_mean_mm": effective_height_mean,
+            "geometric_height_mean_mm": geometric_height_mean,
+        },
     ]
     accepted = all(bool(item.get("accepted")) for item in checks)
     return {"accepted": accepted, "checks": checks}
@@ -420,6 +445,18 @@ def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[st
 
 def attach_coronary_ostia(model: AorticRootComputationalModel, coronary_ostia: dict[str, Any]) -> AorticRootComputationalModel:
     model.coronary_ostia = coronary_ostia
+    model.anatomical_constraints = build_anatomical_constraints(model)
+    return model
+
+
+def attach_leaflet_geometry(model: AorticRootComputationalModel, leaflet_geometry: dict[str, Any]) -> AorticRootComputationalModel:
+    model.leaflet_geometry = leaflet_geometry
+    model.anatomical_constraints = build_anatomical_constraints(model)
+    return model
+
+
+def attach_digital_twin_simulation(model: AorticRootComputationalModel, digital_twin_simulation: dict[str, Any]) -> AorticRootComputationalModel:
+    model.digital_twin_simulation = digital_twin_simulation
     model.anatomical_constraints = build_anatomical_constraints(model)
     return model
 
@@ -500,6 +537,8 @@ def build_aortic_root_model(
             "geometry_stats": geometry_stats,
         },
         annulus_plane=annulus_plane,
+        leaflet_geometry={},
+        digital_twin_simulation={},
     )
     model.anatomical_constraints = build_anatomical_constraints(model)
     return model

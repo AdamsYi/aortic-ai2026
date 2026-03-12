@@ -136,7 +136,15 @@ def compute_face_normals(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     return normals / norms[:, None]
 
 
-def generate_surface_mesh(mask: np.ndarray, affine: np.ndarray) -> SurfaceMesh:
+def generate_surface_mesh(
+    mask: np.ndarray,
+    affine: np.ndarray,
+    laplacian_iterations: int = 4,
+    taubin_iterations: int = 6,
+    laplacian_lambda: float = 0.22,
+    taubin_lambda: float = 0.28,
+    taubin_mu: float = -0.31,
+) -> SurfaceMesh:
     if sk_measure is None:
         raise RuntimeError("scikit-image is required for marching cubes mesh generation")
     if not np.any(mask):
@@ -149,8 +157,8 @@ def generate_surface_mesh(mask: np.ndarray, affine: np.ndarray) -> SurfaceMesh:
     verts_vox, faces, _normals, _values = sk_measure.marching_cubes(mask.astype(np.float32), level=0.5, spacing=(1.0, 1.0, 1.0))
     verts_world = points_voxel_to_world(verts_vox, affine)
     faces = remove_degenerate_faces(verts_world, np.asarray(faces, dtype=np.int32))
-    verts_world = laplacian_smooth(verts_world, faces, lam=0.22, iterations=4)
-    verts_world = taubin_smooth(verts_world, faces, iterations=6, lam=0.28, mu=-0.31)
+    verts_world = laplacian_smooth(verts_world, faces, lam=laplacian_lambda, iterations=laplacian_iterations)
+    verts_world = taubin_smooth(verts_world, faces, iterations=taubin_iterations, lam=taubin_lambda, mu=taubin_mu)
     faces = remove_degenerate_faces(verts_world, faces)
     normals_world = compute_face_normals(verts_world, faces)
     return SurfaceMesh(vertices_world=verts_world, faces=faces, normals_world=normals_world)
