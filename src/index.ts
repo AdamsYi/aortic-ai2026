@@ -10,6 +10,7 @@ interface Env {
   INFERENCE_MAX_INPUT_BYTES?: string;
   INFERENCE_CALLBACK_SECRET?: string;
   API_BASE_URL?: string;
+  BUILD_VERSION?: string;
 }
 
 type JobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -62,6 +63,80 @@ const jsonHeaders = {
   "access-control-allow-headers": "content-type,authorization,x-callback-secret"
 };
 
+const FALLBACK_BUILD_VERSION = "20260312-1800";
+
+function getBuildVersion(env?: Env): string {
+  const raw = String(env?.BUILD_VERSION || "").trim();
+  return raw || FALLBACK_BUILD_VERSION;
+}
+
+function textResponse(body: string, contentType: string): Response {
+  const headers = new Headers(jsonHeaders);
+  headers.set("content-type", contentType);
+  return new Response(body, { status: 200, headers });
+}
+
+function sanitizePublicValue(input: unknown): unknown {
+  if (Array.isArray(input)) return input.map((item) => sanitizePublicValue(item));
+  if (!input || typeof input !== "object") return input;
+  const src = input as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  const blocked = new Set([
+    "pipeline_cmd",
+    "stdout_tail",
+    "stderr_tail",
+    "artifacts_manifest",
+    "work_dir",
+    "output_dir",
+    "object_key",
+    "bucket",
+    "upload_token_hash",
+    "raw_payload"
+  ]);
+  for (const [key, value] of Object.entries(src)) {
+    if (blocked.has(key)) continue;
+    if (key === "runtime" && value && typeof value === "object") {
+      const runtime = sanitizePublicValue(value) as Record<string, unknown>;
+      delete runtime.pipeline_cmd;
+      delete runtime.stdout_tail;
+      delete runtime.stderr_tail;
+      out[key] = runtime;
+      continue;
+    }
+    out[key] = sanitizePublicValue(value);
+  }
+  return out;
+}
+
+function sanitizePublicResultJson(input: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  return sanitizePublicValue(input) as Record<string, unknown>;
+}
+
+function sanitizeProviderReceipt(input: Record<string, unknown>): Record<string, unknown> {
+  const receipt = {
+    status: readRecordString(input, "status") || null,
+    job_id: readRecordString(input, "job_id") || null,
+    provider_job_id: readRecordString(input, "provider_job_id") || null,
+    error_message: readRecordString(input, "error_message") || null,
+    metrics: Array.isArray(input.metrics) ? input.metrics : [],
+    artifact_types: Array.isArray(input.artifacts)
+      ? (input.artifacts as Array<Record<string, unknown>>).map((a) => String(a?.artifact_type || "provider_artifact"))
+      : []
+  } satisfies Record<string, unknown>;
+  return sanitizePublicValue(receipt) as Record<string, unknown>;
+}
+
+function toPublicArtifactRecord(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    artifact_type: row.artifact_type,
+    sha256: row.sha256,
+    bytes: row.bytes,
+    created_at: row.created_at
+  };
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     try {
@@ -80,7 +155,15 @@ export default {
           ok: true,
           service: "aortic-ai-api",
           mode: getInferenceMode(env),
-          date: new Date().toISOString()
+          date: new Date().toISOString(),
+          build_version: getBuildVersion(env)
+        });
+      }
+
+      if (request.method === "GET" && path === "/version") {
+        return json({
+          ok: true,
+          build_version: getBuildVersion(env)
         });
       }
 
@@ -91,8 +174,16 @@ export default {
         });
       }
 
+      if (request.method === "GET" && path === `/assets/style.${getBuildVersion(env)}.css`) {
+        return textResponse(getDemoStyleCss(), "text/css; charset=utf-8");
+      }
+
+      if (request.method === "GET" && path === `/assets/app.${getBuildVersion(env)}.js`) {
+        return textResponse(getDemoAppJs(getBuildVersion(env)), "text/javascript; charset=utf-8");
+      }
+
       if (request.method === "GET" && path === "/demo") {
-        return html(DEMO_HTML);
+        return html(renderDemoHtml(getBuildVersion(env)));
       }
 
       if (request.method === "GET" && path === "/demo/latest-case") {
@@ -204,7 +295,6 @@ async function createUploadUrl(payload: any, env: Env): Promise<Response> {
     {
       study_id: studyId,
       session_id: sessionId,
-      object_key: objectKey,
       expires_at: expiresAt,
       upload_url: `/upload/${sessionId}?token=${uploadToken}`,
       method: "PUT"
@@ -284,7 +374,6 @@ async function consumeUploadSession(request: Request, env: Env, sessionId: strin
   return json({
     ok: true,
     study_id: row.study_id,
-    object_key: row.object_key,
     etag: putResult?.etag ?? null,
     version: putResult?.version ?? null
   });
@@ -351,7 +440,7 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
 
   return json({
     ...job,
-    artifacts: artifacts.results,
+    artifacts: (artifacts.results as Array<Record<string, unknown>>).map((row) => toPublicArtifactRecord(row)),
     metrics: metrics.results
   });
 }
@@ -464,7 +553,7 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
 
   return json({
     ...job,
-    artifacts: artifacts.results,
+    artifacts: (artifacts.results as Array<Record<string, unknown>>).map((row) => toPublicArtifactRecord(row)),
     metrics: metrics.results,
     scalars: {
       image_bytes: imageBytes,
@@ -671,7 +760,7 @@ async function dispatchToInferenceWebhook(
     string,
     unknown
   >;
-  await writeJsonArtifact(env, payload.job_id, payload.study_id, "provider_receipt", "provider-receipt.json", receipt);
+  await writeJsonArtifact(env, payload.job_id, payload.study_id, "provider_receipt", "provider-receipt.json", sanitizeProviderReceipt(receipt));
 
   const inlineStatus = readRecordString(receipt, "status").toLowerCase();
   if (inlineStatus === "succeeded") {
@@ -728,8 +817,9 @@ async function applyInferenceOutputToJob(
   const hasResultJson = payload.result_json && typeof payload.result_json === "object";
 
   if (hasResultJson) {
+    const safeResultJson = sanitizePublicResultJson(payload.result_json as Record<string, unknown>) || {};
     await writeJsonArtifact(env, jobId, studyId, "result_json", "result.json", {
-      ...payload.result_json,
+      ...safeResultJson,
       _source: source,
       _provider_job_id: payload.provider_job_id || null
     });
@@ -781,8 +871,7 @@ async function applyInferenceOutputToJob(
       status: "succeeded",
       provider_job_id: payload.provider_job_id || null,
       source,
-      note: "No explicit output payload received; saved callback envelope.",
-      raw_payload: payload
+      note: "No explicit output payload received."
     });
   }
 
@@ -4559,3 +4648,49 @@ const DEMO_HTML = `<!doctype html>
   </script>
 </body>
 </html>`;
+
+function getDemoStyleCss(): string {
+  const match = DEMO_HTML.match(/<style>([\s\S]*?)<\/style>/);
+  return match?.[1]?.trim() || "";
+}
+
+function getDemoAppJs(buildVersion: string): string {
+  const match = DEMO_HTML.match(/<script type="module">([\s\S]*?)<\/script>/);
+  const body = match?.[1]?.trim() || "";
+  const bootstrap = `
+const AORTIC_BUILD_VERSION = ${JSON.stringify(buildVersion)};
+async function ensureFreshBuild() {
+  try {
+    const resp = await fetch('/version', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const info = await resp.json();
+    const remote = String(info?.build_version || '');
+    if (!remote || remote === AORTIC_BUILD_VERSION) return;
+    const key = 'aortic-build-refresh';
+    const last = sessionStorage.getItem(key) || '';
+    if (last === remote) return;
+    sessionStorage.setItem(key, remote);
+    const next = new URL(window.location.href);
+    next.searchParams.set('v', remote);
+    window.location.replace(next.toString());
+    await new Promise(() => {});
+  } catch {}
+}
+await ensureFreshBuild();
+`;
+  return `${bootstrap}\n${body}\n`;
+}
+
+function renderDemoHtml(buildVersion: string): string {
+  const cssHref = `/assets/style.${buildVersion}.css?v=${buildVersion}`;
+  const jsSrc = `/assets/app.${buildVersion}.js?v=${buildVersion}`;
+  return DEMO_HTML
+    .replace(
+      /<style>[\s\S]*?<\/style>/,
+      `<meta name="aortic-build-version" content="${buildVersion}" />\n  <link rel="stylesheet" href="${cssHref}" />`
+    )
+    .replace(
+      /<script type="module">[\s\S]*?<\/script>/,
+      `<script>window.__AORTIC_BUILD_VERSION__=${JSON.stringify(buildVersion)};</script>\n  <script type="module" src="${jsSrc}"></script>`
+    );
+}

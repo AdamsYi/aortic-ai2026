@@ -10,6 +10,7 @@ INFERENCE_WEBHOOK_TIMEOUT_MS = "600000"
 INFERENCE_MAX_INPUT_BYTES = "104857600"
 API_BASE_URL = "https://aortic-ai-api.we085197.workers.dev"
 INFERENCE_WEBHOOK_URL = "https://gpu-api.8686668.xyz/infer"
+BUILD_VERSION = "20260312-1830"
 
 [[r2_buckets]]
 binding = "R2_RAW"

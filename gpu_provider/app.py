@@ -122,6 +122,45 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
     )
 
 
+def sanitize_public_result_json(obj: Dict[str, Any]) -> Dict[str, Any]:
+    blocked = {
+        "pipeline_cmd",
+        "stdout_tail",
+        "stderr_tail",
+        "artifacts_manifest",
+        "work_dir",
+        "output_dir",
+        "object_key",
+        "bucket",
+        "raw_payload",
+    }
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, dict):
+            out: Dict[str, Any] = {}
+            for key, item in value.items():
+                if key in blocked:
+                    continue
+                out[key] = walk(item)
+            return out
+        return value
+
+    return walk(obj)
+
+
+def public_error_message(exc: Exception) -> str:
+    raw = str(exc)
+    if "invalid_input_base64" in raw:
+        return raw
+    if "input_too_large" in raw:
+        return raw
+    if "failed" in raw.lower():
+        return "inference_pipeline_failed"
+    return "provider_execution_error"
+
+
 def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Optional[str] = None) -> InferenceResponse:
     started = time.time()
     if not provider_job_id:
@@ -206,12 +245,9 @@ def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Option
             InferenceMetric(name="provider_total_seconds", value=round(total_seconds, 4), unit="s"),
         ]
 
-        # Attach short command tails for traceability (research reproducibility).
         result_json.setdefault("runtime", {})
-        result_json["runtime"]["pipeline_cmd"] = cmd
-        result_json["runtime"]["stdout_tail"] = stdout[-1000:]
-        result_json["runtime"]["stderr_tail"] = stderr[-1000:]
         result_json["runtime"]["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        result_json = sanitize_public_result_json(result_json)
 
         return InferenceResponse(
             status="succeeded",
@@ -266,7 +302,7 @@ def run_model_and_callback(req: InferenceRequest, input_bytes: bytes, provider_j
         result = run_model(input_bytes, req, provider_job_id=provider_job_id)
         post_callback(req, result)
     except Exception as exc:
-        post_error_callback(req, provider_job_id, str(exc))
+        post_error_callback(req, provider_job_id, public_error_message(exc))
 
 
 @app.get("/health")
@@ -310,13 +346,14 @@ def infer(req: InferenceRequest) -> Dict[str, Any]:
         result = run_model(input_bytes, req)
     except Exception as exc:
         provider_job_id = f"provider-failed-{int(time.time() * 1000)}"
+        message = public_error_message(exc)
         error_payload = {
             "status": "failed",
             "job_id": req.job_id,
             "provider_job_id": provider_job_id,
-            "error_message": str(exc),
+            "error_message": message,
         }
-        post_error_callback(req, provider_job_id, str(exc))
+        post_error_callback(req, provider_job_id, message)
         return error_payload
 
     return result.model_dump(exclude_none=True)
