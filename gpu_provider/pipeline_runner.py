@@ -269,6 +269,7 @@ def run_geometry_pipeline(
     ct_path: Path,
     mask_path: Path,
     builder_meta: dict[str, Any],
+    input_meta: dict[str, Any] | None,
     output_dir: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     timers: dict[str, float] = {}
@@ -372,6 +373,7 @@ def run_geometry_pipeline(
         centerline_world=centerline.points_world,
         centerline_voxel=centerline.points_voxel,
         centerline_s_mm=centerline.s_mm,
+        centerline_method=centerline.method,
         affine=affine,
         root_mask=root_mask,
         leaflet_mask=leaflet_mask,
@@ -403,6 +405,21 @@ def run_geometry_pipeline(
         centerline_result=centerline,
     )
     timers["measurement_seconds"] = round(time.time() - t0, 4)
+    root_model.phase_metadata = {
+        "input_kind": str((input_meta or {}).get("input_kind") or "nifti"),
+        "conversion": str((input_meta or {}).get("conversion") or "none"),
+        "reported_phase": str((builder_meta.get("phase") or (input_meta or {}).get("phase") or "unknown")),
+        "selection_strategy": "single_phase_as_provided",
+        "ecg_gated": bool(builder_meta.get("ecg_gated", False)),
+    }
+    root_model.provenance = {
+        **root_model.provenance,
+        "segmentation": "TotalSegmentator(open)+multiclass_aortic_builder",
+        "centerline_method": centerline.method,
+        "measurement_method": "geometry_model_driven_v3",
+        "quality": builder_meta.get("quality", "high"),
+        "device": builder_meta.get("device", "gpu"),
+    }
 
     annulus_plane_payload = dict(root_model.annulus_plane)
     annulus_plane_payload.setdefault("index", int(landmarks.annulus_index))
@@ -444,6 +461,8 @@ def run_geometry_pipeline(
     measurements_json_payload["digital_twin_simulation"] = digital_twin_simulation
     if isinstance(measurements_json_payload.get("aortic_root_model"), dict):
         measurements_json_payload["aortic_root_model"]["digital_twin_simulation"] = digital_twin_simulation
+        measurements_json_payload["aortic_root_model"]["phase_metadata"] = root_model.phase_metadata
+        measurements_json_payload["aortic_root_model"]["provenance"] = root_model.provenance
     measurements_json_path.write_text(json.dumps(sanitize_for_json(measurements_json_payload), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "measurements_json", measurements_json_path.name, "application/json", measurements_json_path)
 
@@ -519,6 +538,13 @@ def run_geometry_pipeline(
             "ascending_axis": root_model.ascending_axis,
             "ascending_aorta_axis": root_model.ascending_aorta_axis,
             "centerline": root_model.centerline,
+            "structure_metadata": root_model.structure_metadata,
+            "raw_landmarks": root_model.raw_landmarks,
+            "regularized_landmarks": root_model.regularized_landmarks,
+            "raw_measurements": root_model.raw_measurements,
+            "regularized_measurements": root_model.regularized_measurements,
+            "phase_metadata": root_model.phase_metadata,
+            "provenance": root_model.provenance,
             "leaflet_geometry": root_model.leaflet_geometry,
             "leaflet_meshes": root_model.leaflet_meshes,
             "digital_twin_simulation": root_model.digital_twin_simulation,
@@ -527,10 +553,14 @@ def run_geometry_pipeline(
         },
         "measurements": flat_measurements,
         "measurements_structured": measurements_structured,
+        "measurements_structured_raw": measurements_json_payload.get("measurements_raw", {}),
+        "measurements_structured_regularized": measurements_json_payload.get("measurements_regularized", measurements_structured),
+        "measurement_contract": measurements_json_payload.get("measurement_contract", {}),
         "volumes_ml": volumes_ml,
         "risk_flags": risk_flags,
         "sanity_checks": measurements_json_payload.get("sanity_checks", {}),
         "planning_metrics": planning_metrics,
+        "planning_evidence": measurements_json_payload.get("planning_evidence", {}),
         "digital_twin_simulation": digital_twin_simulation,
         "exports": {
             "measurements_json": measurements_json_path.name,
@@ -562,6 +592,7 @@ def run_geometry_pipeline(
             "Measurements are geometry-derived from lumen mesh, skeleton centerline, and landmarked root model.",
             "GPU is used only for segmentation; all geometry stages run on CPU.",
             "Valve leaflet output is reconstructed from segmented leaflet ROI plus anatomical regularization for planning support rather than standalone diagnosis.",
+            "Raw and regularized landmark/measurement sets are both preserved for auditability.",
         ],
         "stage_timings_seconds": timers,
     }
@@ -570,7 +601,7 @@ def run_geometry_pipeline(
         "segmentation": "TotalSegmentator(open)+multiclass_aortic_builder",
         "lumen_model": "mask_cleanup+marching_cubes+taubin",
         "centerline": centerline.method,
-        "measurement_method": "geometry_model_driven_v1",
+        "measurement_method": "geometry_model_driven_v3",
         "computational_model": root_model.model_type,
         "quality": builder_meta.get("quality", "high"),
         "device": builder_meta.get("device", "gpu"),
@@ -631,6 +662,7 @@ def main() -> None:
             ct_path=nifti_input,
             mask_path=out_mask,
             builder_meta=builder_meta,
+            input_meta=prep_meta,
             output_dir=output_dir,
         )
 

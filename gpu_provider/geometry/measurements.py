@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import asdict
 from typing import Any
 
 import numpy as np
@@ -39,7 +41,8 @@ def _sanitize_coronary_height(coronary_side: dict[str, Any] | None) -> float | N
     return float(height) if height is not None else None
 
 
-def _apply_anatomical_constraints(measurements: dict[str, Any], root_model: AorticRootModel) -> dict[str, Any]:
+def _regularize_measurements(raw_measurements: dict[str, Any], root_model: AorticRootModel) -> tuple[dict[str, Any], dict[str, Any]]:
+    measurements = deepcopy(raw_measurements)
     annulus_eq = measurements["annulus"]["equivalent_diameter_mm"]
     sinus_d = measurements["sinus_of_valsalva"]["max_diameter_mm"]
     stj_d = measurements["stj"]["diameter_mm"]
@@ -70,7 +73,7 @@ def _apply_anatomical_constraints(measurements: dict[str, Any], root_model: Aort
         if item.get("id") == "commissure_angles_approx_120" and not bool(item.get("accepted")):
             corrected["commissure_angles_flagged"] = True
             break
-    return corrected
+    return measurements, corrected
 
 
 def _sanity_checks(measurements: dict[str, Any], root_model: AorticRootModel) -> dict[str, Any]:
@@ -102,6 +105,106 @@ def compute_calcium_burden(ct_hu: np.ndarray, region_mask: np.ndarray, voxel_vol
         "threshold_hu": float(threshold_hu),
         "calc_voxels": vox,
         "calc_volume_ml": float((vox * voxel_volume_mm3) / 1000.0),
+        "method": "contrast_ct_hu_threshold_proxy",
+    }
+
+
+def _measurement_contract() -> dict[str, Any]:
+    return {
+        "annulus": {
+            "method": "double_oblique_centerline_orthogonal_plane",
+            "evidence_rule": "SCCT_TAVI_CT_consensus_double_oblique_annulus",
+            "source_fields": ["centerline", "annulus_plane", "annulus_ring.contour_world"],
+        },
+        "lvot": {
+            "method": "double_oblique_centerline_orthogonal_plane",
+            "evidence_rule": "subannular_section_within_8mm_of_annulus",
+            "source_fields": ["centerline", "orthogonal_sections"],
+        },
+        "sinus_of_valsalva": {
+            "method": "sinus_radius_profile_peak",
+            "evidence_rule": "root_profile_peak_distal_to_annulus",
+            "source_fields": ["sinus_peaks", "sinus_section"],
+        },
+        "stj": {
+            "method": "centerline_profile_first_local_minimum_after_sinus",
+            "evidence_rule": "stj_ge_annulus_and_le_sinus",
+            "source_fields": ["centerline_profile", "stj_section", "anatomical_constraints"],
+        },
+        "ascending_aorta": {
+            "method": "ascending_plateau_mean_diameter",
+            "evidence_rule": "post_stj_plateau_average",
+            "source_fields": ["centerline_profile", "ascending_sections"],
+        },
+        "coronary_heights_mm": {
+            "method": "ostium_to_annulus_plane_distance",
+            "evidence_rule": "only_emit_when_ostium_status_detected",
+            "source_fields": ["coronary_ostia", "annulus_plane"],
+        },
+        "calcium_burden": {
+            "method": "contrast_ct_hu_threshold_proxy",
+            "evidence_rule": "research_use_only_not_agatston_equivalent",
+            "source_fields": ["ct_hu", "root_or_valve_roi"],
+        },
+        "leaflet_geometry": {
+            "method": "leaflet_mesh_reconstruction_plus_regularization",
+            "evidence_rule": "emit_status_uncertain_when_leaflet_roi_incomplete",
+            "source_fields": ["leaflet_mask", "annulus_plane", "commissures", "hinge_curve"],
+        },
+    }
+
+
+def _planning_evidence(regularized_measurements: dict[str, Any], annulus_plane: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "vsrr": {
+            "recommended_graft_size_mm": {
+                "method": "mean_of_annulus_and_stj_with_floor",
+                "evidence_rule": "research_use_geometry_proxy_for_root_reimplantation",
+                "source_fields": [
+                    "measurements_regularized.annulus.equivalent_diameter_mm",
+                    "measurements_regularized.stj.diameter_mm",
+                ],
+            },
+            "coaptation_reserve_mm": {
+                "method": "effective_height_minus_reference_threshold",
+                "evidence_rule": "effective_height_targeting_for_valve_repair",
+                "source_fields": ["measurements_regularized.leaflet_geometry.effective_height_mean_mm"],
+            },
+        },
+        "tavi": {
+            "area_derived_valve_size": {
+                "method": "nearest_reference_nominal_size_non_vendor_specific",
+                "evidence_rule": "annulus_area_and_perimeter_drive_valve_sizing_but_vendor_table_required_for_clinical_use",
+                "source_fields": ["measurements_regularized.annulus.area_mm2", "measurements_regularized.annulus.perimeter_mm"],
+            },
+            "coronary_risk_flag": {
+                "method": "coronary_height_threshold_logic",
+                "evidence_rule": "coronary_obstruction_risk_requires_height_plus_sinus_plus_virtual_valve_clearance",
+                "source_fields": [
+                    "measurements_regularized.coronary_heights_mm.left",
+                    "measurements_regularized.coronary_heights_mm.right",
+                    "measurements_regularized.sinus_of_valsalva.max_diameter_mm",
+                    "measurements_regularized.stj.diameter_mm",
+                ],
+            },
+        },
+        "pears": {
+            "root_external_geometry": {
+                "method": "inner_root_geometry_proxy",
+                "evidence_rule": "upgrade_to_outer_wall_geometry_before_device_design_use",
+                "source_fields": [
+                    "measurements_regularized.annulus.equivalent_diameter_mm",
+                    "measurements_regularized.sinus_of_valsalva.max_diameter_mm",
+                    "measurements_regularized.stj.diameter_mm",
+                ],
+            },
+            "device_mesh_export": {
+                "method": "surface_mesh_export_from_aortic_root_stl",
+                "evidence_rule": "research_use_mesh_export_requires_outer_wall_and_coronary_window_planning",
+                "source_fields": ["aortic_root_stl", "annulus_plane", "support_segment_length_mm"],
+            },
+            "annulus_plane_reference": annulus_plane,
+        },
     }
 
 
@@ -142,7 +245,7 @@ def build_measurements(
 
     annulus_model = root_model.annulus_ring
     stj_model = root_model.sinotubular_junction
-    sinus_peak_diameter = max(float(item.get("radius_mm", 0.0)) * 2.0 for item in root_model.sinus_peaks) if root_model.sinus_peaks else float(sinus.max_diameter_mm)
+    sinus_peak_diameter = max(float(item.get("radius_mm", 0.0)) * 2.0 for item in root_model.regularized_landmarks.get("sinus_peaks", root_model.sinus_peaks)) if root_model.regularized_landmarks.get("sinus_peaks") else float(sinus.max_diameter_mm)
     annulus_metrics = {
         "diameter_short_mm": float(annulus_model.get("min_diameter_mm", annulus.min_diameter_mm)),
         "diameter_long_mm": float(annulus_model.get("max_diameter_mm", annulus.max_diameter_mm)),
@@ -156,7 +259,7 @@ def build_measurements(
     ascending_plateau = [sec for sec in ascending_sections if sec.s_mm >= stj.s_mm and (sec.s_mm - stj.s_mm) >= 8.0]
     ascending_d = _mean_diameter(ascending_plateau[: max(3, min(8, len(ascending_plateau)))]) or float(ascending.equivalent_diameter_mm)
 
-    measurements = {
+    raw_measurements = {
         "annulus": annulus_metrics,
         "lvot": {
             "diameter_mm": float(lvot.equivalent_diameter_mm),
@@ -191,96 +294,95 @@ def build_measurements(
             "regularization": leaflet_model.regularization,
         },
     }
-    constraint_corrections = _apply_anatomical_constraints(measurements, root_model)
+    regularized_measurements, constraint_corrections = _regularize_measurements(raw_measurements, root_model)
+    root_model.raw_measurements = raw_measurements
+    root_model.regularized_measurements = regularized_measurements
 
-    annulus_stj_mismatch = float(measurements["annulus"]["equivalent_diameter_mm"] - measurements["stj"]["diameter_mm"])
-    tavi_size = _nearest_reference_valve_size(measurements["annulus"]["equivalent_diameter_mm"])
+    annulus_stj_mismatch = float(regularized_measurements["annulus"]["equivalent_diameter_mm"] - regularized_measurements["stj"]["diameter_mm"])
+    tavi_size = _nearest_reference_valve_size(regularized_measurements["annulus"]["equivalent_diameter_mm"])
+    planning_evidence = _planning_evidence(regularized_measurements, annulus_plane)
 
     planning_metrics = {
         "vsrr": {
-            "annulus_diameter_mm": annulus_metrics["equivalent_diameter_mm"],
-            "sinus_diameter_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
-            "stj_diameter_mm": float(measurements["stj"]["diameter_mm"]),
+            "annulus_diameter_mm": regularized_measurements["annulus"]["equivalent_diameter_mm"],
+            "sinus_diameter_mm": float(regularized_measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+            "stj_diameter_mm": float(regularized_measurements["stj"]["diameter_mm"]),
             "lvot_diameter_mm": float(lvot.equivalent_diameter_mm),
-            "recommended_graft_size_mm": float(max(20.0, round((annulus_metrics["equivalent_diameter_mm"] + measurements["stj"]["diameter_mm"]) / 2.0, 1))),
+            "recommended_graft_size_mm": float(max(20.0, round((regularized_measurements["annulus"]["equivalent_diameter_mm"] + regularized_measurements["stj"]["diameter_mm"]) / 2.0, 1))),
             "annulus_stj_mismatch_mm": annulus_stj_mismatch,
             "coaptation_height_mm": leaflet_model.coaptation_height_mm,
             "effective_height_mean_mm": leaflet_model.effective_height_mean_mm,
-            "coaptation_reserve_mm": measurements["leaflet_geometry"]["coaptation_reserve_mm"],
+            "coaptation_reserve_mm": regularized_measurements["leaflet_geometry"]["coaptation_reserve_mm"],
+            "recommended_graft_size_metadata": planning_evidence["vsrr"]["recommended_graft_size_mm"],
+            "coaptation_reserve_metadata": planning_evidence["vsrr"]["coaptation_reserve_mm"],
         },
         "pears": {
             "root_external_geometry": {
-                "annulus_reference_mm": annulus_metrics["equivalent_diameter_mm"],
-                "sinus_reference_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
-                "stj_reference_mm": float(measurements["stj"]["diameter_mm"]),
+                "annulus_reference_mm": regularized_measurements["annulus"]["equivalent_diameter_mm"],
+                "sinus_reference_mm": float(regularized_measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+                "stj_reference_mm": float(regularized_measurements["stj"]["diameter_mm"]),
             },
-            "root_external_reference_diameter_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+            "root_external_reference_diameter_mm": float(regularized_measurements["sinus_of_valsalva"]["max_diameter_mm"]),
             "support_segment_length_mm": float(max(0.0, ascending.s_mm - annulus.s_mm)),
             "annulus_plane": annulus_plane,
+            "root_external_geometry_metadata": planning_evidence["pears"]["root_external_geometry"],
+            "device_mesh_export_metadata": planning_evidence["pears"]["device_mesh_export"],
         },
         "tavi": {
-            "annulus_area_mm2": annulus_metrics["area_mm2"],
-            "annulus_perimeter_mm": annulus_metrics["perimeter_mm"],
-            "annulus_diameter_short_mm": annulus_metrics["diameter_short_mm"],
-            "annulus_diameter_long_mm": annulus_metrics["diameter_long_mm"],
-            "coronary_height_left_mm": measurements["coronary_heights_mm"]["left"],
-            "coronary_height_right_mm": measurements["coronary_heights_mm"]["right"],
-            "sinus_width_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
-            "stj_diameter_mm": float(measurements["stj"]["diameter_mm"]),
+            "annulus_area_mm2": regularized_measurements["annulus"]["area_mm2"],
+            "annulus_perimeter_mm": regularized_measurements["annulus"]["perimeter_mm"],
+            "annulus_diameter_short_mm": regularized_measurements["annulus"]["diameter_short_mm"],
+            "annulus_diameter_long_mm": regularized_measurements["annulus"]["diameter_long_mm"],
+            "coronary_height_left_mm": regularized_measurements["coronary_heights_mm"]["left"],
+            "coronary_height_right_mm": regularized_measurements["coronary_heights_mm"]["right"],
+            "sinus_width_mm": float(regularized_measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+            "stj_diameter_mm": float(regularized_measurements["stj"]["diameter_mm"]),
             "area_derived_valve_size": tavi_size,
             "coronary_risk_flag": bool(
-                measurements["coronary_heights_mm"]["left"] is None
-                or measurements["coronary_heights_mm"]["right"] is None
-                or (measurements["coronary_heights_mm"]["left"] is not None and measurements["coronary_heights_mm"]["left"] < 10.0)
-                or (measurements["coronary_heights_mm"]["right"] is not None and measurements["coronary_heights_mm"]["right"] < 10.0)
+                regularized_measurements["coronary_heights_mm"]["left"] is None
+                or regularized_measurements["coronary_heights_mm"]["right"] is None
+                or (regularized_measurements["coronary_heights_mm"]["left"] is not None and regularized_measurements["coronary_heights_mm"]["left"] < 10.0)
+                or (regularized_measurements["coronary_heights_mm"]["right"] is not None and regularized_measurements["coronary_heights_mm"]["right"] < 10.0)
             ),
             "valve_calcium_burden": calcium,
+            "area_derived_valve_size_metadata": planning_evidence["tavi"]["area_derived_valve_size"],
+            "coronary_risk_flag_metadata": planning_evidence["tavi"]["coronary_risk_flag"],
         },
     }
 
     risk_flags: list[dict[str, Any]] = []
-    left_h = measurements["coronary_heights_mm"]["left"]
-    right_h = measurements["coronary_heights_mm"]["right"]
+    left_h = regularized_measurements["coronary_heights_mm"]["left"]
+    right_h = regularized_measurements["coronary_heights_mm"]["right"]
     if (left_h is not None and left_h < 10.0) or (right_h is not None and right_h < 10.0):
         risk_flags.append({"id": "low_coronary_height", "severity": "high", "message": "Coronary ostial height below 10 mm"})
     if coronary.get("left", {}).get("status") == "uncertain" or coronary.get("right", {}).get("status") == "uncertain":
         risk_flags.append({"id": "coronary_ostia_uncertain", "severity": "moderate", "message": "Coronary ostial detection is uncertain"})
     if leaflet_model.status != "detected" or any(item.status != "detected" for item in leaflet_model.leaflet_surfaces):
         risk_flags.append({"id": "leaflet_geometry_uncertain", "severity": "moderate", "message": "Leaflet reconstruction is partial or uncertain"})
-    if float(measurements["sinus_of_valsalva"]["max_diameter_mm"]) < 30.0:
+    if float(regularized_measurements["sinus_of_valsalva"]["max_diameter_mm"]) < 30.0:
         risk_flags.append({"id": "small_sinus", "severity": "moderate", "message": "Sinus of Valsalva diameter appears small (<30 mm)"})
     if float(calcium["calc_volume_ml"]) > 0.35:
         risk_flags.append({"id": "heavy_valve_calcification", "severity": "high", "message": "Valve/root calcium burden is elevated (HU>130)"})
 
-    sanity = _sanity_checks(measurements, root_model)
+    sanity = _sanity_checks(regularized_measurements, root_model)
     for err in sanity["errors"]:
         risk_flags.append({"id": err, "severity": "critical", "message": err.replace("_", " ")})
 
+    measurement_contract = _measurement_contract()
     measurements_json_payload = {
-        "measurements": measurements,
+        "measurements": regularized_measurements,
+        "measurements_raw": raw_measurements,
+        "measurements_regularized": regularized_measurements,
+        "measurement_contract": measurement_contract,
         "planning_metrics": planning_metrics,
+        "planning_evidence": planning_evidence,
         "risk_flags": risk_flags,
         "sanity_checks": sanity,
         "constraint_corrections": constraint_corrections,
         "annulus_plane": annulus_plane,
-        "aortic_root_model": {
-            "model_type": root_model.model_type,
-            "annulus_ring": root_model.annulus_ring,
-            "hinge_curve": root_model.hinge_curve,
-            "commissures": root_model.commissures,
-            "sinus_peaks": root_model.sinus_peaks,
-            "sinotubular_junction": root_model.sinotubular_junction,
-            "coronary_ostia": root_model.coronary_ostia,
-            "ascending_axis": root_model.ascending_axis,
-            "ascending_aorta_axis": root_model.ascending_aorta_axis,
-            "centerline": root_model.centerline,
-            "leaflet_geometry": root_model.leaflet_geometry,
-            "leaflet_meshes": root_model.leaflet_meshes,
-            "digital_twin_simulation": root_model.digital_twin_simulation,
-            "anatomical_constraints": root_model.anatomical_constraints,
-            "confidence_scores": root_model.confidence_scores,
-            "reference_sections": root_model.reference_sections,
-        },
+        "aortic_root_model": asdict(root_model),
         "coronary_detection": coronary,
+        "phase_metadata": root_model.phase_metadata,
+        "provenance": root_model.provenance,
     }
-    return measurements, planning_metrics, risk_flags, measurements_json_payload
+    return regularized_measurements, planning_metrics, risk_flags, measurements_json_payload

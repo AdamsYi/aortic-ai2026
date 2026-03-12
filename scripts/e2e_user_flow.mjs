@@ -1,8 +1,12 @@
 import { chromium } from "playwright-core";
+import fs from "fs";
 
 const BASE = process.env.E2E_BASE_URL || "https://aortic-ai-api.we085197.workers.dev/demo";
 const URL = `${BASE}${BASE.includes("?") ? "&" : "?"}t=${Date.now()}`;
 const E2E_LANG = (process.env.E2E_LANG || "en").toLowerCase();
+const LOCAL_ROOT =
+  process.env.AORTICAI_LOCAL_WORK_ROOT ||
+  (process.platform === "darwin" ? "/tmp/aorticai" : "runs");
 const CHROME_PATH =
   process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -123,6 +127,7 @@ async function verifyCanvasNotBlank(page) {
 }
 
 async function run() {
+  fs.mkdirSync(LOCAL_ROOT, { recursive: true });
   const browser = await chromium.launch({
     executablePath: CHROME_PATH,
     headless: true
@@ -160,7 +165,7 @@ async function run() {
   if (await stjBtn.isEnabled().catch(() => false)) {
     await stjBtn.click();
     await sleep(400);
-    await page.screenshot({ path: "runs/e2e_keyslice_preview.png", fullPage: true });
+    await page.screenshot({ path: `${LOCAL_ROOT}/e2e_keyslice_preview.png`, fullPage: true });
     const keyLabel = (((await text(page, "badgeKey")) || "").trim()).toLowerCase();
     if (!keyLabel || keyLabel === "-" || keyLabel === "none" || keyLabel === "无") {
       fail("key slice shortcut did not activate a key label");
@@ -232,7 +237,7 @@ async function run() {
     fail("result preview not loaded", resultPreview.slice(0, 180));
   }
 
-  await page.screenshot({ path: "runs/e2e_latest.png", fullPage: true });
+  await page.screenshot({ path: `${LOCAL_ROOT}/e2e_latest.png`, fullPage: true });
 
   const hasCriticalErrors = pageErrors.length > 0 || consoleErrors.length > 0;
   if (hasCriticalErrors) {
@@ -254,7 +259,7 @@ async function run() {
     zoom_before: zoomBefore,
     zoom_after: zoomAfter,
     recon3d_status: recon3dStatus,
-    screenshot: "runs/e2e_latest.png"
+    screenshot: `${LOCAL_ROOT}/e2e_latest.png`
   };
   console.log(JSON.stringify(report, null, 2));
   await browser.close();

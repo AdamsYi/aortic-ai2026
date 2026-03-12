@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/_local_paths.sh"
 
 # One-shot helper:
 # 1) Verify Windows GPU provider health
@@ -39,8 +40,11 @@ if [[ "$HOST" =~ ^127\. || "$HOST" =~ ^10\. || "$HOST" =~ ^192\.168\. || "$HOST"
   echo "Use a public HTTPS endpoint (Cloudflare Tunnel / Tailscale Funnel) for end-to-end cloud execution."
 fi
 
+WORK_ROOT="$(aortic_local_work_root)"
+mkdir -p "${WORK_ROOT}"
+
 echo "[1/4] Checking Windows provider health: ${PROVIDER_HEALTH_URL}"
-curl -fsS "${PROVIDER_HEALTH_URL}" | tee runs/provider_health_latest.json >/dev/null
+curl -fsS "${PROVIDER_HEALTH_URL}" | tee "${WORK_ROOT}/provider_health_latest.json" >/dev/null
 
 echo "[2/4] Switching Worker webhook to: ${PROVIDER_INFER_URL}"
 ./scripts/switch_to_windows_gpu.sh "${PROVIDER_BASE}" "${CALLBACK_SECRET}"
@@ -49,11 +53,11 @@ echo "[3/4] Triggering real open CTA case via Worker"
 ./scripts/run_open_ct_case.sh "${WORKER_BASE_URL}" "${DATA_URL}"
 
 echo "[4/4] Verifying demo endpoint returns latest completed case"
-curl -fsS "${WORKER_BASE_URL}/demo/latest-case" | tee runs/latest_case_after_attach.json >/dev/null
+curl -fsS "${WORKER_BASE_URL}/demo/latest-case" | tee "${WORK_ROOT}/latest_case_after_attach.json" >/dev/null
 
 echo ""
 echo "Done. Key files:"
-echo "- runs/provider_health_latest.json"
-echo "- runs/latest_run.json"
-echo "- runs/latest_job_result.json"
-echo "- runs/latest_case_after_attach.json"
+echo "- ${WORK_ROOT}/provider_health_latest.json"
+echo "- ${WORK_ROOT}/latest_run.json"
+echo "- ${WORK_ROOT}/latest_job_result.json"
+echo "- ${WORK_ROOT}/latest_case_after_attach.json"

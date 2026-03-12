@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/_local_paths.sh"
+
+if [[ "$(uname -s)" == "Darwin" && "${AORTICAI_ALLOW_LOCAL_ARTIFACTS:-0}" != "1" ]]; then
+  echo "Refusing local CTA/mask generation on Mac control plane. Run this on the Windows GPU node or set AORTICAI_ALLOW_LOCAL_ARTIFACTS=1 to override." >&2
+  exit 1
+fi
 
 BASE_URL="${1:-https://aortic-ai-api.we085197.workers.dev}"
 CASE_URL="${2:-https://huggingface.co/datasets/Angelou0516/totalsegmentator-cardiac/resolve/main/s0016/ct.nii.gz}"
@@ -7,8 +13,9 @@ DEVICE="${3:-cpu}"
 
 TIME_TAG="$(date +%s)"
 STUDY_ID="hfcardio-${TIME_TAG}"
-WORK_DIR="runs/${STUDY_ID}"
-mkdir -p "${WORK_DIR}" runs
+WORK_ROOT="$(aortic_local_work_root)"
+WORK_DIR="${WORK_ROOT}/${STUDY_ID}"
+mkdir -p "${WORK_DIR}" "${WORK_ROOT}"
 
 CT_FILE="${WORK_DIR}/ct.nii.gz"
 MASK_FILE="${WORK_DIR}/mask_multiclass.nii.gz"
@@ -128,7 +135,7 @@ echo "${FINAL_JSON}" > "${WORK_DIR}/job_final.json"
 echo "[8/8] Running full browser E2E on this exact case..."
 E2E_BASE_URL="${BASE_URL}/demo?study_id=${STUDY_ID}&job_id=${JOB_ID}" npm run -s e2e:user | tee "${WORK_DIR}/e2e_report.json"
 
-cat > runs/latest_second_case_validation.json <<JSON
+cat > "${WORK_ROOT}/latest_second_case_validation.json" <<JSON
 {
   "base_url": "${BASE_URL}",
   "case_url": "${CASE_URL}",
@@ -143,4 +150,4 @@ JSON
 echo "Validation complete:"
 echo "  study_id=${STUDY_ID}"
 echo "  job_id=${JOB_ID}"
-echo "  report=runs/latest_second_case_validation.json"
+echo "  report=${WORK_ROOT}/latest_second_case_validation.json"

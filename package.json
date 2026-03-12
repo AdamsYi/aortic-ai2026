@@ -7,6 +7,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:versioned": "node scripts/set_build_version.mjs && wrangler deploy",
+    "check:control-plane-clean": "bash scripts/assert_control_plane_clean.sh",
     "d1:migrate:local": "wrangler d1 migrations apply aortic_meta --local",
     "d1:migrate:remote": "wrangler d1 migrations apply aortic_meta --remote",
     "e2e:user": "node scripts/e2e_user_flow.mjs"

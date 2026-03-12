@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "$(uname -s)" == "Darwin" && "${AORTICAI_ALLOW_LOCAL_ARTIFACTS:-0}" != "1" ]]; then
+  echo "Refusing direct local artifact promotion on Mac control plane. Use Windows/CI artifacts or set AORTICAI_ALLOW_LOCAL_ARTIFACTS=1 to override." >&2
+  exit 1
+fi
+
 if [[ $# -lt 4 ]]; then
   echo "usage: $0 <study_id> <job_id> <artifact_dir> <ct_file>" >&2
   exit 1

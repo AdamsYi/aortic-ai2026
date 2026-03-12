@@ -3961,22 +3961,53 @@ const DEMO_HTML = `<!doctype html>
       const s = state.stats;
       const backend = state.pipelineResult?.measurements || {};
       const backendCalc = backend?.valve_calcium_burden || {};
+      const rawStructured = state.pipelineResult?.measurements_structured_raw || {};
+      const regStructured = state.pipelineResult?.measurements_structured_regularized || state.pipelineResult?.measurements_structured || {};
+      const contract = state.pipelineResult?.measurement_contract || {};
       const hasBackend = (k) => Number.isFinite(Number(backend?.[k]));
-      const src = (k) => hasBackend(k) ? 'backend(centerline-orthogonal)' : 'ui(fallback)';
+      const safeGet = (obj, path) => {
+        const parts = String(path || '').split('.');
+        let cur = obj;
+        for (const p of parts) {
+          if (!cur || typeof cur !== 'object') return null;
+          cur = cur[p];
+        }
+        return cur ?? null;
+      };
+      const sameNum = (a, b) => {
+        const na = Number(a);
+        const nb = Number(b);
+        if (!Number.isFinite(na) || !Number.isFinite(nb)) return false;
+        return Math.abs(na - nb) < 1e-4;
+      };
+      const contractSource = (group, rawPath, regPath, fallback) => {
+        const meta = contract?.[group] || null;
+        if (!meta) return fallback;
+        const method = String(meta.method || fallback || 'backend');
+        const rawVal = rawPath ? safeGet(rawStructured, rawPath) : null;
+        const regVal = regPath ? safeGet(regStructured, regPath) : null;
+        if (rawVal !== null && regVal !== null && !sameNum(rawVal, regVal)) {
+          return method + ' (raw→regularized)';
+        }
+        return method;
+      };
+      const src = (k, group, rawPath, regPath) => hasBackend(k)
+        ? 'backend(' + contractSource(group, rawPath, regPath, 'centerline-orthogonal') + ')'
+        : 'ui(fallback)';
       const calcSrc = Number.isFinite(Number(backendCalc?.calc_volume_ml))
-        ? 'backend(HU>130)'
+        ? 'backend(' + contractSource('calcium_burden', 'calcium_burden.calc_volume_ml', 'calcium_burden.calc_volume_ml', 'HU-threshold') + ')'
         : 'ui/fallback';
 
       const rows = [
-        [L('瓣环直径', 'Annulus Diameter'), fmt(s.vbrDiameterMm), 'mm', src('annulus_diameter_mm')],
-        [L('瓣环面积', 'Annulus Area'), fmt(s.vbrAreaMm2), 'mm2', src('annulus_area_mm2')],
-        [L('瓣环周长', 'Annulus Perimeter'), fmt(s.vbrPerimeterMm), 'mm', src('annulus_perimeter_mm')],
-        [L('窦部直径', 'Sinus of Valsalva Diameter'), fmt(s.rootMaxDiameterMm), 'mm', src('sinus_of_valsalva_diameter_mm')],
-        [L('STJ 直径', 'STJ Diameter'), fmt(s.stjDiameterMm), 'mm', src('stj_diameter_mm')],
-        [L('升主动脉直径', 'Ascending Aorta Diameter'), fmt(s.ascMaxDiameterMm), 'mm', src('ascending_aorta_diameter_mm')],
-        [L('LVOT 直径', 'LVOT Diameter'), fmt(s.lvotDiameterMm), 'mm', src('lvot_diameter_mm')],
-        [L('左冠开口高度', 'Coronary Height Left'), fmt(s.taviCoronaryHeightLeftMm), 'mm', src('coronary_height_left_mm')],
-        [L('右冠开口高度', 'Coronary Height Right'), fmt(s.taviCoronaryHeightRightMm), 'mm', src('coronary_height_right_mm')],
+        [L('瓣环直径', 'Annulus Diameter'), fmt(s.vbrDiameterMm), 'mm', src('annulus_diameter_mm', 'annulus', 'annulus.equivalent_diameter_mm', 'annulus.equivalent_diameter_mm')],
+        [L('瓣环面积', 'Annulus Area'), fmt(s.vbrAreaMm2), 'mm2', src('annulus_area_mm2', 'annulus', 'annulus.area_mm2', 'annulus.area_mm2')],
+        [L('瓣环周长', 'Annulus Perimeter'), fmt(s.vbrPerimeterMm), 'mm', src('annulus_perimeter_mm', 'annulus', 'annulus.perimeter_mm', 'annulus.perimeter_mm')],
+        [L('窦部直径', 'Sinus of Valsalva Diameter'), fmt(s.rootMaxDiameterMm), 'mm', src('sinus_of_valsalva_diameter_mm', 'sinus_of_valsalva', 'sinus_of_valsalva.max_diameter_mm', 'sinus_of_valsalva.max_diameter_mm')],
+        [L('STJ 直径', 'STJ Diameter'), fmt(s.stjDiameterMm), 'mm', src('stj_diameter_mm', 'stj', 'stj.diameter_mm', 'stj.diameter_mm')],
+        [L('升主动脉直径', 'Ascending Aorta Diameter'), fmt(s.ascMaxDiameterMm), 'mm', src('ascending_aorta_diameter_mm', 'ascending_aorta', 'ascending_aorta.diameter_mm', 'ascending_aorta.diameter_mm')],
+        [L('LVOT 直径', 'LVOT Diameter'), fmt(s.lvotDiameterMm), 'mm', src('lvot_diameter_mm', 'lvot', 'lvot.diameter_mm', 'lvot.diameter_mm')],
+        [L('左冠开口高度', 'Coronary Height Left'), fmt(s.taviCoronaryHeightLeftMm), 'mm', src('coronary_height_left_mm', 'coronary_heights_mm', 'coronary_heights_mm.left', 'coronary_heights_mm.left')],
+        [L('右冠开口高度', 'Coronary Height Right'), fmt(s.taviCoronaryHeightRightMm), 'mm', src('coronary_height_right_mm', 'coronary_heights_mm', 'coronary_heights_mm.right', 'coronary_heights_mm.right')],
         [L('瓣膜钙化负荷', 'Valve Calcium Burden'), fmt(s.rootLeafCalcVolumeMl, 3), 'mL', calcSrc]
       ];
       tbody.innerHTML = rows

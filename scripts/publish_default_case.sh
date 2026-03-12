@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/_local_paths.sh"
 
 BASE_URL="${1:-https://aortic-ai-api.we085197.workers.dev}"
 CT_FILE="${2:-data/CTACardio.nii.gz}"
@@ -23,8 +24,9 @@ TIME_TAG="$(date +%s)"
 CASE_STUDY_ID="hqcta-cardio-${TIME_TAG}"
 FULL_STUDY_ID="hqcta-full-ctacardio"
 MASK_STUDY_ID="hqcta-full-ctacardio-mask"
-OUT_DIR="runs/${CASE_STUDY_ID}"
-mkdir -p "$OUT_DIR" runs
+WORK_ROOT="$(aortic_local_work_root)"
+OUT_DIR="${WORK_ROOT}/${CASE_STUDY_ID}"
+mkdir -p "$OUT_DIR" "$WORK_ROOT"
 
 json_field() {
   node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const j=JSON.parse(d||'{}');const v=j['$1'];process.stdout.write(typeof v==='string'?v:'');});"
@@ -112,9 +114,9 @@ fi
 
 echo "[5/5] Reading latest demo case snapshot..."
 curl -sS "${BASE_URL}/demo/latest-case" > "${OUT_DIR}/latest_case.json"
-cp "${OUT_DIR}/latest_case.json" runs/latest_case.json
+cp "${OUT_DIR}/latest_case.json" "${WORK_ROOT}/latest_case.json"
 
-cat > runs/latest_publish.json <<JSON
+cat > "${WORK_ROOT}/latest_publish.json" <<JSON
 {
   "base_url": "${BASE_URL}",
   "study_id": "${CASE_STUDY_ID}",

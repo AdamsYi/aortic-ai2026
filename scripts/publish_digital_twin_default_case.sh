@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/_local_paths.sh"
+
+if [[ "$(uname -s)" == "Darwin" && "${AORTICAI_ALLOW_LOCAL_ARTIFACTS:-0}" != "1" ]]; then
+  echo "Refusing local digital-twin artifact generation on Mac control plane. Run this on the Windows GPU node or set AORTICAI_ALLOW_LOCAL_ARTIFACTS=1 to override." >&2
+  exit 1
+fi
 
 BASE_URL="${1:-https://aortic-ai-api.we085197.workers.dev}"
 CT_FILE="${2:-data/CTACardio.nii.gz}"
@@ -16,9 +22,10 @@ fi
 
 TIME_TAG="$(date +%s)"
 CASE_STUDY_ID="hqcta-cardio-${TIME_TAG}"
-WORK_DIR="runs/${CASE_STUDY_ID}"
+WORK_ROOT="$(aortic_local_work_root)"
+WORK_DIR="${WORK_ROOT}/${CASE_STUDY_ID}"
 LOCAL_PIPE_DIR="${WORK_DIR}/local_pipeline"
-mkdir -p "${LOCAL_PIPE_DIR}" runs
+mkdir -p "${LOCAL_PIPE_DIR}" "${WORK_ROOT}"
 
 json_field() {
   node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const j=JSON.parse(d||'{}');const v=j['$1'];process.stdout.write(typeof v==='string'?v:'');});"
@@ -37,6 +44,7 @@ result, _artifacts = run_geometry_pipeline(
     Path("${CT_FILE}"),
     Path("${MASK_FILE}"),
     {"device": "gpu", "quality": "high", "published_via": "publish_digital_twin_default_case.sh"},
+    {"input_kind": "nifti", "conversion": "none", "phase": "cardiac-cta-full"},
     out_dir,
 )
 (out_dir / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -162,7 +170,7 @@ fi
 
 echo "[7/7] Capturing latest demo snapshot..."
 curl -sS "${BASE_URL}/demo/latest-case" > "${WORK_DIR}/latest_case.json"
-cp "${WORK_DIR}/latest_case.json" runs/latest_case.json
+cp "${WORK_DIR}/latest_case.json" "${WORK_ROOT}/latest_case.json"
 
 echo "Published default digital twin case:"
 echo "  study_id=${CASE_STUDY_ID}"

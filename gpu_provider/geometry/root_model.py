@@ -23,6 +23,13 @@ class AorticRootComputationalModel:
     ascending_axis: dict[str, Any]
     ascending_aorta_axis: dict[str, Any]
     centerline: dict[str, Any]
+    structure_metadata: dict[str, Any]
+    raw_landmarks: dict[str, Any]
+    regularized_landmarks: dict[str, Any]
+    raw_measurements: dict[str, Any]
+    regularized_measurements: dict[str, Any]
+    phase_metadata: dict[str, Any]
+    provenance: dict[str, Any]
     anatomical_constraints: dict[str, Any]
     confidence_scores: dict[str, Any]
     reference_sections: dict[str, Any]
@@ -33,6 +40,46 @@ class AorticRootComputationalModel:
 
 
 AorticRootModel = AorticRootComputationalModel
+
+
+def _structure_meta(
+    method: str,
+    confidence: float | None,
+    status: str = "detected",
+    source_fields: list[str] | None = None,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "detection_method": method,
+        "confidence": float(confidence) if confidence is not None else None,
+        "source_fields": source_fields or [],
+        "notes": notes or [],
+    }
+
+
+def _landmark_bundle(
+    annulus_ring: dict[str, Any],
+    hinge_curve: dict[str, Any],
+    commissures: list[dict[str, Any]],
+    sinus_peaks: list[dict[str, Any]],
+    stj_ring: dict[str, Any],
+    coronary_ostia: dict[str, Any],
+    ascending_axis: dict[str, Any],
+    centerline: dict[str, Any],
+    annulus_plane: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "annulus_ring": annulus_ring,
+        "hinge_curve": hinge_curve,
+        "commissures": commissures,
+        "sinus_peaks": sinus_peaks,
+        "sinotubular_junction": stj_ring,
+        "coronary_ostia": coronary_ostia,
+        "ascending_aorta_axis": ascending_axis,
+        "centerline": centerline,
+        "annulus_plane": annulus_plane,
+    }
 
 
 def _sample_curve_points(world: np.ndarray, voxel: np.ndarray, max_points: int = 96) -> tuple[list[list[float]], list[list[float]]]:
@@ -322,7 +369,7 @@ def detect_commissures_and_sinus_peaks(
     sinus_section: SectionMetrics,
     stj_section: SectionMetrics,
     annulus_plane: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     radial = ndimage.gaussian_filter1d(np.asarray(sinus_section.radial_profile_mm, dtype=np.float64), sigma=1.1, mode="wrap")
     angles = np.asarray(sinus_section.radial_angles_rad, dtype=np.float64)
     curvature = ndimage.gaussian_filter1d(np.gradient(np.gradient(radial)), sigma=0.8, mode="wrap")
@@ -354,6 +401,11 @@ def detect_commissures_and_sinus_peaks(
         curvature=curvature,
         method="sinus_rim_saddle_points",
     )
+    raw_bundle = {
+        "commissures": [dict(item) for item in commissures],
+        "sinus_peaks": [dict(item) for item in sinus_peaks],
+        "geometry_stats": dict(geometry_stats),
+    }
     if geometry_stats.get("commissure_spacing_error_deg") is not None and float(geometry_stats["commissure_spacing_error_deg"]) > 35.0:
         anchor_idx = int(peak_indices[int(np.argmax(radial[np.asarray(peak_indices, dtype=np.int32)]))]) if peak_indices else 0
         n = radial.shape[0]
@@ -380,7 +432,7 @@ def detect_commissures_and_sinus_peaks(
             "sinus_peak_angles_deg": peak_target_deg,
             "detection_method": "angularly_regularized_saddle_points",
         }
-    return commissures, sinus_peaks, geometry_stats
+    return commissures, sinus_peaks, geometry_stats, raw_bundle
 
 
 def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[str, Any]:
@@ -505,6 +557,22 @@ def build_confidence_scores(model: AorticRootComputationalModel) -> dict[str, An
 
 def attach_coronary_ostia(model: AorticRootComputationalModel, coronary_ostia: dict[str, Any]) -> AorticRootComputationalModel:
     model.coronary_ostia = coronary_ostia
+    model.raw_landmarks["coronary_ostia"] = coronary_ostia
+    model.regularized_landmarks["coronary_ostia"] = coronary_ostia
+    model.structure_metadata["coronary_ostia"] = {
+        "left": _structure_meta(
+            method=str(coronary_ostia.get("method") or "coronary_detection"),
+            confidence=coronary_ostia.get("left", {}).get("confidence"),
+            status=str(coronary_ostia.get("left", {}).get("status") or "not_found"),
+            source_fields=["ct_hu", "lumen_mask", "annulus_plane", "sinus_roi"],
+        ),
+        "right": _structure_meta(
+            method=str(coronary_ostia.get("method") or "coronary_detection"),
+            confidence=coronary_ostia.get("right", {}).get("confidence"),
+            status=str(coronary_ostia.get("right", {}).get("status") or "not_found"),
+            source_fields=["ct_hu", "lumen_mask", "annulus_plane", "sinus_roi"],
+        ),
+    }
     model.anatomical_constraints = build_anatomical_constraints(model)
     model.confidence_scores = build_confidence_scores(model)
     return model
@@ -525,6 +593,13 @@ def attach_leaflet_geometry(model: AorticRootComputationalModel, leaflet_geometr
     ]
     model.anatomical_constraints = build_anatomical_constraints(model)
     model.confidence_scores = build_confidence_scores(model)
+    model.structure_metadata["leaflet_geometry"] = _structure_meta(
+        method=str(leaflet_geometry.get("method") or "leaflet_mesh_reconstruction"),
+        confidence=model.confidence_scores.get("leaflet_geometry"),
+        status=str(leaflet_geometry.get("status") or "uncertain"),
+        source_fields=["leaflet_mask", "annulus_plane", "commissures", "hinge_curve"],
+        notes=["raw and regularized leaflet heights are both preserved"],
+    )
     return model
 
 
@@ -541,6 +616,7 @@ def build_aortic_root_model(
     centerline_world: np.ndarray,
     centerline_voxel: np.ndarray,
     centerline_s_mm: np.ndarray,
+    centerline_method: str,
     affine: np.ndarray,
     root_mask: np.ndarray,
     leaflet_mask: np.ndarray,
@@ -571,7 +647,7 @@ def build_aortic_root_model(
     stj_ring = _ring_payload(stj, label="sinotubular_junction")
     sinus_ring = _ring_payload(sinus, label="sinus_section")
     ascending_ring = _ring_payload(ascending, label="ascending_reference")
-    commissures, sinus_peaks, geometry_stats = detect_commissures_and_sinus_peaks(
+    commissures, sinus_peaks, geometry_stats, raw_geometry_bundle = detect_commissures_and_sinus_peaks(
         sinus_section=sinus,
         stj_section=stj,
         annulus_plane=annulus_plane,
@@ -588,21 +664,108 @@ def build_aortic_root_model(
         "points_world": [[float(v) for v in p] for p in centerline_world],
         "points_voxel": [[float(v) for v in p] for p in centerline_voxel],
         "s_mm": [float(v) for v in centerline_s_mm],
+        "method": centerline_method,
+    }
+    coronary_ostia = {
+        "left": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
+        "right": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
+    }
+    raw_landmarks = _landmark_bundle(
+        annulus_ring=annulus_ring,
+        hinge_curve=hinge_curve,
+        commissures=raw_geometry_bundle.get("commissures", commissures),
+        sinus_peaks=raw_geometry_bundle.get("sinus_peaks", sinus_peaks),
+        stj_ring=stj_ring,
+        coronary_ostia=coronary_ostia,
+        ascending_axis=ascending_axis,
+        centerline=centerline,
+        annulus_plane=annulus_plane,
+    )
+    regularized_landmarks = _landmark_bundle(
+        annulus_ring=annulus_ring,
+        hinge_curve=hinge_curve,
+        commissures=commissures,
+        sinus_peaks=sinus_peaks,
+        stj_ring=stj_ring,
+        coronary_ostia=coronary_ostia,
+        ascending_axis=ascending_axis,
+        centerline=centerline,
+        annulus_plane=annulus_plane,
+    )
+    structure_metadata = {
+        "annulus_ring": _structure_meta(
+            method=str(annulus_plane.get("method") or "orthogonal_section"),
+            confidence=annulus_plane.get("confidence"),
+            status=str(annulus_plane.get("status") or "detected"),
+            source_fields=["lumen_mask", "leaflet_mask", "root_mask", "centerline"],
+        ),
+        "hinge_curve": _structure_meta(
+            method=str(hinge_curve.get("method") or annulus_plane.get("method") or "hinge_curve_pca"),
+            confidence=hinge_curve.get("confidence"),
+            status=str(annulus_plane.get("status") or "detected"),
+            source_fields=["leaflet_mask", "root_mask", "annulus_ring"],
+        ),
+        "commissures": _structure_meta(
+            method=str(geometry_stats.get("detection_method") or "sinus_rim_saddle_points"),
+            confidence=float(np.clip(1.0 - (float(geometry_stats.get("commissure_spacing_error_deg") or 0.0) / 45.0), 0.1, 0.99)),
+            status="detected",
+            source_fields=["sinus_section", "stj_section", "annulus_plane"],
+            notes=["raw landmark set preserved separately before angular regularization"],
+        ),
+        "sinus_peaks": _structure_meta(
+            method=str(geometry_stats.get("detection_method") or "sinus_rim_saddle_points"),
+            confidence=float(np.clip(1.0 - (float(geometry_stats.get("commissure_spacing_error_deg") or 0.0) / 60.0), 0.1, 0.99)),
+            status="detected",
+            source_fields=["sinus_section", "annulus_plane"],
+        ),
+        "sinotubular_junction": _structure_meta(
+            method="diameter_profile_local_minimum",
+            confidence=1.0,
+            status="detected",
+            source_fields=["centerline_profile", "orthogonal_sections"],
+        ),
+        "ascending_aorta_axis": _structure_meta(
+            method="landmark_axis_join",
+            confidence=1.0,
+            status="detected",
+            source_fields=["stj_section", "ascending_reference_section"],
+        ),
+        "centerline": _structure_meta(
+            method=str(centerline_method or "geometry_centerline"),
+            confidence=1.0,
+            status="detected",
+            source_fields=["lumen_mask", "distance_transform", "skeleton_mask"],
+            notes=["fallback may occur for poor lumen topology"],
+        ),
+        "coronary_ostia": {
+            "left": _structure_meta("not_evaluated", 0.0, status="not_evaluated"),
+            "right": _structure_meta("not_evaluated", 0.0, status="not_evaluated"),
+        },
+        "leaflet_geometry": _structure_meta("not_attached", 0.0, status="not_evaluated"),
     }
     model = AorticRootComputationalModel(
-        model_type="AorticRootComputationalModel-v2",
+        model_type="AorticRootComputationalModel-v3",
         annulus_ring=annulus_ring,
         hinge_curve=hinge_curve,
         commissures=commissures,
         sinus_peaks=sinus_peaks,
         sinotubular_junction=stj_ring,
-        coronary_ostia={
-            "left": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
-            "right": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
-        },
+        coronary_ostia=coronary_ostia,
         ascending_axis=ascending_axis,
         ascending_aorta_axis=ascending_axis,
         centerline=centerline,
+        structure_metadata=structure_metadata,
+        raw_landmarks=raw_landmarks,
+        regularized_landmarks=regularized_landmarks,
+        raw_measurements={},
+        regularized_measurements={},
+        phase_metadata={},
+        provenance={
+            "computational_model_contract": "raw_plus_regularized_non_destructive",
+            "landmark_strategy": "geometry_model_driven_v3",
+            "measurement_strategy": "geometry_model_driven_v3",
+            "constraint_policy": "preserve_raw_emit_regularized_copy",
+        },
         anatomical_constraints={},
         confidence_scores={},
         reference_sections={
@@ -611,6 +774,7 @@ def build_aortic_root_model(
             "stj": stj_ring,
             "ascending": ascending_ring,
             "geometry_stats": geometry_stats,
+            "raw_geometry_stats": raw_geometry_bundle.get("geometry_stats", {}),
         },
         annulus_plane=annulus_plane,
         leaflet_geometry={},

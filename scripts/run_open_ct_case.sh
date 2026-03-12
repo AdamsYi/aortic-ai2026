@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/_local_paths.sh"
 
 BASE_URL="${1:-https://aortic-ai-api.we085197.workers.dev}"
 DATA_URL="${2:-https://raw.githubusercontent.com/wasserth/TotalSegmentator/master/tests/reference_files/example_ct.nii.gz}"
@@ -7,9 +8,10 @@ MAX_POLL_ROUNDS="${MAX_POLL_ROUNDS:-240}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-3}"
 TIME_TAG="$(date +%s)"
 STUDY_ID="openct-${TIME_TAG}"
-OUT_DIR="runs/${STUDY_ID}"
+WORK_ROOT="$(aortic_local_work_root)"
+OUT_DIR="${WORK_ROOT}/${STUDY_ID}"
 mkdir -p "$OUT_DIR"
-mkdir -p runs
+mkdir -p "$WORK_ROOT"
 
 INPUT_FILE="/tmp/${STUDY_ID}.nii.gz"
 
@@ -105,7 +107,7 @@ process.stdin.on("data",c=>d+=c).on("end",()=>{
   fi
 done
 
-cat > runs/latest_run.json <<JSON
+cat > "${WORK_ROOT}/latest_run.json" <<JSON
 {
   "study_id": "${STUDY_ID}",
   "job_id": "${JOB_ID}",
@@ -116,4 +118,4 @@ cat > runs/latest_run.json <<JSON
 }
 JSON
 
-cp "$OUT_DIR/job_result.json" runs/latest_job_result.json
+cp "$OUT_DIR/job_result.json" "${WORK_ROOT}/latest_job_result.json"
