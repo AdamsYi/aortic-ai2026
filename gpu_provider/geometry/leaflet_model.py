@@ -46,7 +46,7 @@ def build_leaflet_model(root_model: AorticRootModel) -> LeafletModel:
         )
 
     annulus_center = np.asarray(root_model.annulus_ring.get("center_world", [0.0, 0.0, 0.0]), dtype=np.float64)
-    stj_center = np.asarray(root_model.stj_ring.get("center_world", annulus_center.tolist()), dtype=np.float64)
+    stj_center = np.asarray(root_model.sinotubular_junction.get("center_world", annulus_center.tolist()), dtype=np.float64)
     axis = stj_center - annulus_center
     axis_len = float(np.linalg.norm(axis))
     axis_dir = axis / axis_len if axis_len > 1e-8 else np.array([0.0, 0.0, 1.0], dtype=np.float64)

@@ -28,7 +28,50 @@ class SectionMetrics:
     line_voxel: dict[str, float]
     contour_world: np.ndarray
     contour_voxel: np.ndarray
+    radial_angles_rad: np.ndarray
+    radial_profile_mm: np.ndarray
     voxel_count: int
+
+
+def _build_radial_boundary(
+    uu: np.ndarray,
+    vv: np.ndarray,
+    center_world: np.ndarray,
+    u_world: np.ndarray,
+    v_world: np.ndarray,
+    affine_inv: np.ndarray,
+    bins: int = 72,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    angles = np.linspace(0.0, 2.0 * np.pi, bins, endpoint=False, dtype=np.float64)
+    if uu.size == 0:
+        contour_world = np.repeat(center_world[None, :], bins, axis=0)
+        contour_voxel = points_world_to_voxel(contour_world, affine_inv)
+        return contour_world, contour_voxel, angles, np.zeros((bins,), dtype=np.float64)
+
+    radii = np.sqrt(uu * uu + vv * vv)
+    theta = np.mod(np.arctan2(vv, uu), 2.0 * np.pi)
+    idx = np.floor((theta / (2.0 * np.pi)) * bins).astype(np.int32)
+    idx = np.clip(idx, 0, bins - 1)
+    radial_profile = np.full((bins,), np.nan, dtype=np.float64)
+    for b in range(bins):
+        sel = radii[idx == b]
+        if sel.size:
+            radial_profile[b] = float(np.max(sel))
+    valid = np.isfinite(radial_profile)
+    if not np.any(valid):
+        radial_profile[:] = float(np.max(radii)) if radii.size else 0.0
+    elif np.count_nonzero(valid) < bins:
+        valid_idx = np.flatnonzero(valid)
+        radial_profile = np.interp(np.arange(bins), valid_idx, radial_profile[valid_idx], period=bins)
+    contour_world = np.asarray(
+        [
+            center_world + np.cos(ang) * rr * u_world + np.sin(ang) * rr * v_world
+            for ang, rr in zip(angles, radial_profile)
+        ],
+        dtype=np.float64,
+    )
+    contour_voxel = points_world_to_voxel(contour_world, affine_inv)
+    return contour_world, contour_voxel, angles, radial_profile
 
 
 def section_metrics_from_mask(
@@ -111,14 +154,14 @@ def section_metrics_from_mask(
     p1_voxel = nib.affines.apply_affine(affine_inv, p1_world)
     p2_voxel = nib.affines.apply_affine(affine_inv, p2_world)
 
-    ellipse_angles = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
-    contour_world = []
-    for ang in ellipse_angles:
-        du = np.cos(ang) * (max_diameter_mm * 0.5)
-        dv = np.sin(ang) * (min_diameter_mm * 0.5)
-        contour_world.append(center_world + axis_world * du + minor_axis_world * dv)
-    contour_world_arr = np.asarray(contour_world, dtype=np.float64)
-    contour_voxel_arr = points_world_to_voxel(contour_world_arr, affine_inv)
+    contour_world_arr, contour_voxel_arr, radial_angles_rad, radial_profile_mm = _build_radial_boundary(
+        uu=uu,
+        vv=vv,
+        center_world=center_world,
+        u_world=u,
+        v_world=v,
+        affine_inv=affine_inv,
+    )
 
     return SectionMetrics(
         index=int(index),
@@ -152,6 +195,8 @@ def section_metrics_from_mask(
         },
         contour_world=contour_world_arr,
         contour_voxel=contour_voxel_arr,
+        radial_angles_rad=radial_angles_rad,
+        radial_profile_mm=radial_profile_mm,
         voxel_count=len(samples_u),
     )
 

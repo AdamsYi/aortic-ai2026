@@ -4,12 +4,10 @@ from typing import Any
 
 import numpy as np
 
-from .common import ellipse_perimeter_from_diameters
 from .coronary_detection import detect_coronary_ostia
-from .landmarks import LandmarkDetectionResult
 from .leaflet_model import LeafletModel
 from .profile_analysis import SectionMetrics
-from .root_model import AorticRootModel
+from .root_model import AorticRootModel, attach_coronary_ostia
 
 
 def _mean_diameter(sections: list[SectionMetrics]) -> float | None:
@@ -19,7 +17,57 @@ def _mean_diameter(sections: list[SectionMetrics]) -> float | None:
     return float(np.mean(vals))
 
 
-def _sanity_checks(measurements: dict[str, Any]) -> dict[str, Any]:
+def _nearest_reference_valve_size(area_derived_diameter_mm: float | None) -> dict[str, Any]:
+    sizes = [20, 23, 26, 29]
+    if area_derived_diameter_mm is None:
+        return {"reference_nominal_sizes_mm": sizes, "nearest_nominal_size_mm": None}
+    nearest = min(sizes, key=lambda s: abs(float(s) - float(area_derived_diameter_mm)))
+    return {
+        "reference_nominal_sizes_mm": sizes,
+        "nearest_nominal_size_mm": int(nearest),
+        "area_derived_diameter_mm": float(area_derived_diameter_mm),
+        "method": "nearest_reference_nominal_size_non_vendor_specific",
+    }
+
+
+def _sanitize_coronary_height(coronary_side: dict[str, Any] | None) -> float | None:
+    if not coronary_side:
+        return None
+    if str(coronary_side.get("status") or "not_found") != "detected":
+        return None
+    height = coronary_side.get("height_mm")
+    return float(height) if height is not None else None
+
+
+def _apply_anatomical_constraints(measurements: dict[str, Any], root_model: AorticRootModel) -> dict[str, Any]:
+    annulus_eq = measurements["annulus"]["equivalent_diameter_mm"]
+    sinus_d = measurements["sinus_of_valsalva"]["max_diameter_mm"]
+    stj_d = measurements["stj"]["diameter_mm"]
+
+    corrected = {
+        "sinus_was_raised_to_annulus": False,
+        "stj_was_limited_to_sinus": False,
+        "commissure_angles_flagged": False,
+    }
+    if sinus_d is not None and annulus_eq is not None and sinus_d < annulus_eq:
+        measurements["sinus_of_valsalva"]["max_diameter_mm"] = float(annulus_eq)
+        measurements["sinus_of_valsalva"]["constraint_corrected_from_mm"] = float(sinus_d)
+        corrected["sinus_was_raised_to_annulus"] = True
+        sinus_d = float(annulus_eq)
+    if stj_d is not None and sinus_d is not None and stj_d > sinus_d:
+        measurements["stj"]["diameter_mm"] = float(sinus_d)
+        measurements["stj"]["constraint_corrected_from_mm"] = float(stj_d)
+        corrected["stj_was_limited_to_sinus"] = True
+
+    comm_checks = root_model.anatomical_constraints.get("checks", []) if isinstance(root_model.anatomical_constraints, dict) else []
+    for item in comm_checks:
+        if item.get("id") == "commissure_angles_approx_120" and not bool(item.get("accepted")):
+            corrected["commissure_angles_flagged"] = True
+            break
+    return corrected
+
+
+def _sanity_checks(measurements: dict[str, Any], root_model: AorticRootModel) -> dict[str, Any]:
     errors: list[str] = []
     annulus_eq = measurements.get("annulus", {}).get("equivalent_diameter_mm")
     stj_d = measurements.get("stj", {}).get("diameter_mm")
@@ -35,6 +83,10 @@ def _sanity_checks(measurements: dict[str, Any]) -> dict[str, Any]:
         errors.append("right_coronary_height_below_2mm")
     if annulus_eq is not None and stj_d is not None and stj_d > annulus_eq * 2.4:
         errors.append("stj_annulus_ratio_inconsistent")
+    if root_model.anatomical_constraints and not bool(root_model.anatomical_constraints.get("accepted", True)):
+        for item in root_model.anatomical_constraints.get("checks", []):
+            if not bool(item.get("accepted")):
+                errors.append(str(item.get("id")))
     return {"accepted": len(errors) == 0, "errors": errors}
 
 
@@ -69,22 +121,29 @@ def build_measurements(
     if annulus is None or sinus is None or stj is None or ascending is None:
         raise RuntimeError("geometry_measurements_incomplete")
 
-    coronary = detect_coronary_ostia(
-        ct_hu=ct_hu,
-        lumen_mask=lumen_mask,
-        annulus_plane=annulus_plane,
-        landmark_sections=landmark_sections,
-        spacing_mm=spacing_mm,
-        affine=affine,
-    )
+    if root_model.coronary_ostia.get("left", {}).get("status") == "not_evaluated":
+        coronary = detect_coronary_ostia(
+            ct_hu=ct_hu,
+            lumen_mask=lumen_mask,
+            annulus_plane=annulus_plane,
+            landmark_sections=landmark_sections,
+            spacing_mm=spacing_mm,
+            affine=affine,
+        )
+        root_model = attach_coronary_ostia(root_model, coronary)
+    else:
+        coronary = root_model.coronary_ostia
     calcium = compute_calcium_burden(ct_hu, valve_region_mask, voxel_volume_mm3, threshold_hu=130.0)
 
+    annulus_model = root_model.annulus_ring
+    stj_model = root_model.sinotubular_junction
+    sinus_peak_diameter = max(float(item.get("radius_mm", 0.0)) * 2.0 for item in root_model.sinus_peaks) if root_model.sinus_peaks else float(sinus.max_diameter_mm)
     annulus_metrics = {
-        "diameter_short_mm": float(annulus.min_diameter_mm),
-        "diameter_long_mm": float(annulus.max_diameter_mm),
-        "area_mm2": float(annulus.area_mm2),
-        "perimeter_mm": float(annulus.perimeter_mm) if annulus.perimeter_mm is not None else None,
-        "equivalent_diameter_mm": float(annulus.equivalent_diameter_mm),
+        "diameter_short_mm": float(annulus_model.get("min_diameter_mm", annulus.min_diameter_mm)),
+        "diameter_long_mm": float(annulus_model.get("max_diameter_mm", annulus.max_diameter_mm)),
+        "area_mm2": float(annulus_model.get("area_mm2", annulus.area_mm2)),
+        "perimeter_mm": float(annulus_model.get("perimeter_mm", annulus.perimeter_mm)) if annulus.perimeter_mm is not None else annulus_model.get("perimeter_mm"),
+        "equivalent_diameter_mm": float(annulus_model.get("equivalent_diameter_mm", annulus.equivalent_diameter_mm)),
     }
 
     lvot_sections = [sec for sec in ascending_sections if sec.s_mm < annulus.s_mm and (annulus.s_mm - sec.s_mm) <= 8.0]
@@ -99,39 +158,51 @@ def build_measurements(
             "area_mm2": float(lvot.area_mm2),
         },
         "sinus_of_valsalva": {
-            "max_diameter_mm": float(sinus.max_diameter_mm),
+            "max_diameter_mm": float(sinus_peak_diameter),
             "equivalent_diameter_mm": float(sinus.equivalent_diameter_mm),
         },
         "stj": {
-            "diameter_mm": float(stj.equivalent_diameter_mm),
-            "diameter_short_mm": float(stj.min_diameter_mm),
-            "diameter_long_mm": float(stj.max_diameter_mm),
+            "diameter_mm": float(stj_model.get("equivalent_diameter_mm", stj.equivalent_diameter_mm)),
+            "diameter_short_mm": float(stj_model.get("min_diameter_mm", stj.min_diameter_mm)),
+            "diameter_long_mm": float(stj_model.get("max_diameter_mm", stj.max_diameter_mm)),
         },
         "ascending_aorta": {
             "diameter_mm": float(ascending_d),
         },
         "coronary_heights_mm": {
-            "left": float(coronary["left"]["height_mm"]) if coronary.get("left") else None,
-            "right": float(coronary["right"]["height_mm"]) if coronary.get("right") else None,
+            "left": _sanitize_coronary_height(coronary.get("left")),
+            "right": _sanitize_coronary_height(coronary.get("right")),
         },
         "calcium_burden": calcium,
         "leaflet_geometry": {
             "coaptation_height_mm": leaflet_model.coaptation_height_mm,
             "root_symmetry_index": leaflet_model.root_symmetry_index,
+            "coaptation_reserve_mm": float(leaflet_model.coaptation_height_mm - 4.0) if leaflet_model.coaptation_height_mm is not None else None,
         },
     }
+    constraint_corrections = _apply_anatomical_constraints(measurements, root_model)
+
+    annulus_stj_mismatch = float(measurements["annulus"]["equivalent_diameter_mm"] - measurements["stj"]["diameter_mm"])
+    tavi_size = _nearest_reference_valve_size(measurements["annulus"]["equivalent_diameter_mm"])
 
     planning_metrics = {
         "vsrr": {
             "annulus_diameter_mm": annulus_metrics["equivalent_diameter_mm"],
-            "sinus_diameter_mm": float(sinus.max_diameter_mm),
-            "stj_diameter_mm": float(stj.equivalent_diameter_mm),
+            "sinus_diameter_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+            "stj_diameter_mm": float(measurements["stj"]["diameter_mm"]),
             "lvot_diameter_mm": float(lvot.equivalent_diameter_mm),
-            "recommended_graft_size_mm": float(max(20.0, round(annulus_metrics["equivalent_diameter_mm"] - 2.0, 1))),
+            "recommended_graft_size_mm": float(max(20.0, round((annulus_metrics["equivalent_diameter_mm"] + measurements["stj"]["diameter_mm"]) / 2.0, 1))),
+            "annulus_stj_mismatch_mm": annulus_stj_mismatch,
             "coaptation_height_mm": leaflet_model.coaptation_height_mm,
+            "coaptation_reserve_mm": measurements["leaflet_geometry"]["coaptation_reserve_mm"],
         },
         "pears": {
-            "root_external_reference_diameter_mm": float(sinus.max_diameter_mm),
+            "root_external_geometry": {
+                "annulus_reference_mm": annulus_metrics["equivalent_diameter_mm"],
+                "sinus_reference_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+                "stj_reference_mm": float(measurements["stj"]["diameter_mm"]),
+            },
+            "root_external_reference_diameter_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
             "support_segment_length_mm": float(max(0.0, ascending.s_mm - annulus.s_mm)),
             "annulus_plane": annulus_plane,
         },
@@ -142,8 +213,15 @@ def build_measurements(
             "annulus_diameter_long_mm": annulus_metrics["diameter_long_mm"],
             "coronary_height_left_mm": measurements["coronary_heights_mm"]["left"],
             "coronary_height_right_mm": measurements["coronary_heights_mm"]["right"],
-            "sinus_width_mm": float(sinus.max_diameter_mm),
-            "stj_diameter_mm": float(stj.equivalent_diameter_mm),
+            "sinus_width_mm": float(measurements["sinus_of_valsalva"]["max_diameter_mm"]),
+            "stj_diameter_mm": float(measurements["stj"]["diameter_mm"]),
+            "area_derived_valve_size": tavi_size,
+            "coronary_risk_flag": bool(
+                measurements["coronary_heights_mm"]["left"] is None
+                or measurements["coronary_heights_mm"]["right"] is None
+                or (measurements["coronary_heights_mm"]["left"] is not None and measurements["coronary_heights_mm"]["left"] < 10.0)
+                or (measurements["coronary_heights_mm"]["right"] is not None and measurements["coronary_heights_mm"]["right"] < 10.0)
+            ),
             "valve_calcium_burden": calcium,
         },
     }
@@ -153,12 +231,14 @@ def build_measurements(
     right_h = measurements["coronary_heights_mm"]["right"]
     if (left_h is not None and left_h < 10.0) or (right_h is not None and right_h < 10.0):
         risk_flags.append({"id": "low_coronary_height", "severity": "high", "message": "Coronary ostial height below 10 mm"})
-    if float(sinus.max_diameter_mm) < 30.0:
+    if coronary.get("left", {}).get("status") == "uncertain" or coronary.get("right", {}).get("status") == "uncertain":
+        risk_flags.append({"id": "coronary_ostia_uncertain", "severity": "moderate", "message": "Coronary ostial detection is uncertain"})
+    if float(measurements["sinus_of_valsalva"]["max_diameter_mm"]) < 30.0:
         risk_flags.append({"id": "small_sinus", "severity": "moderate", "message": "Sinus of Valsalva diameter appears small (<30 mm)"})
     if float(calcium["calc_volume_ml"]) > 0.35:
         risk_flags.append({"id": "heavy_valve_calcification", "severity": "high", "message": "Valve/root calcium burden is elevated (HU>130)"})
 
-    sanity = _sanity_checks(measurements)
+    sanity = _sanity_checks(measurements, root_model)
     for err in sanity["errors"]:
         risk_flags.append({"id": err, "severity": "critical", "message": err.replace("_", " ")})
 
@@ -167,13 +247,19 @@ def build_measurements(
         "planning_metrics": planning_metrics,
         "risk_flags": risk_flags,
         "sanity_checks": sanity,
+        "constraint_corrections": constraint_corrections,
         "annulus_plane": annulus_plane,
         "aortic_root_model": {
+            "model_type": root_model.model_type,
             "annulus_ring": root_model.annulus_ring,
             "commissures": root_model.commissures,
             "sinus_peaks": root_model.sinus_peaks,
-            "stj_ring": root_model.stj_ring,
+            "sinotubular_junction": root_model.sinotubular_junction,
+            "coronary_ostia": root_model.coronary_ostia,
             "ascending_axis": root_model.ascending_axis,
+            "centerline": root_model.centerline,
+            "anatomical_constraints": root_model.anatomical_constraints,
+            "reference_sections": root_model.reference_sections,
         },
         "coronary_detection": coronary,
     }

@@ -47,4 +47,4 @@ Write-Host "URL: http://${Host}:${Port}"
 Write-Host "MODEL_DEVICE=$env:MODEL_DEVICE"
 Write-Host "PIPELINE_QUALITY=$env:PIPELINE_QUALITY"
 Write-Host "PROVIDER_RESPONSE_MODE=$env:PROVIDER_RESPONSE_MODE"
-uvicorn app:app --host $Host --port $Port
+python .\run_provider_service.py --host $Host --port $Port --quality $Quality --response-mode $env:PROVIDER_RESPONSE_MODE

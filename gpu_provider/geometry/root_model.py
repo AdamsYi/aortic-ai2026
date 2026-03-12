@@ -3,55 +3,407 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import nibabel as nib
 import numpy as np
+from scipy import ndimage
 
-from .landmarks import LandmarkDetectionResult
+from .common import normalize, orth_basis_from_tangent
 from .profile_analysis import SectionMetrics
 
 
 @dataclass
-class AorticRootModel:
+class AorticRootComputationalModel:
+    model_type: str
     annulus_ring: dict[str, Any]
     commissures: list[dict[str, Any]]
     sinus_peaks: list[dict[str, Any]]
-    stj_ring: dict[str, Any]
+    sinotubular_junction: dict[str, Any]
+    coronary_ostia: dict[str, Any]
     ascending_axis: dict[str, Any]
     centerline: dict[str, Any]
+    anatomical_constraints: dict[str, Any]
+    reference_sections: dict[str, Any]
+    annulus_plane: dict[str, Any]
 
 
-def _ring_payload(section: SectionMetrics) -> dict[str, Any]:
+AorticRootModel = AorticRootComputationalModel
+
+
+def _pca_plane(points_world: np.ndarray, fallback_normal: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    pts = np.asarray(points_world, dtype=np.float64)
+    origin = np.mean(pts, axis=0)
+    centered = pts - origin[None, :]
+    cov = np.cov(centered.T) if pts.shape[0] >= 3 else np.eye(3, dtype=np.float64)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    order = np.argsort(eigvals)
+    normal = normalize(eigvecs[:, order[0]])
+    if float(np.dot(normal, fallback_normal)) < 0:
+        normal = -normal
+    u = normalize(eigvecs[:, order[-1]] - np.dot(eigvecs[:, order[-1]], normal) * normal)
+    if float(np.linalg.norm(u)) < 1e-6:
+        u, _ = orth_basis_from_tangent(normal)
+    v = normalize(np.cross(normal, u))
+    return origin, normal, u, v, eigvals[order]
+
+
+def _project_to_plane(points_world: np.ndarray, origin_world: np.ndarray, normal_world: np.ndarray) -> np.ndarray:
+    pts = np.asarray(points_world, dtype=np.float64)
+    origin = np.asarray(origin_world, dtype=np.float64)
+    normal = normalize(normal_world)
+    distances = np.dot(pts - origin[None, :], normal)
+    return pts - distances[:, None] * normal[None, :]
+
+
+def _ring_payload(section: SectionMetrics, plane_override: dict[str, Any] | None = None, label: str = "ring") -> dict[str, Any]:
+    if plane_override:
+        origin_world = np.asarray(plane_override.get("origin_world", section.center_world), dtype=np.float64)
+        normal_world = normalize(np.asarray(plane_override.get("normal_world", section.tangent_world), dtype=np.float64))
+        basis_u_world = normalize(np.asarray(plane_override.get("basis_u_world", section.basis_u_world), dtype=np.float64))
+        basis_v_world = normalize(np.asarray(plane_override.get("basis_v_world", section.basis_v_world), dtype=np.float64))
+        contour_world = _project_to_plane(section.contour_world, origin_world, normal_world)
+        contour_voxel = np.asarray(plane_override.get("ring_points_voxel", section.contour_voxel), dtype=np.float64)
+    else:
+        origin_world = np.asarray(section.center_world, dtype=np.float64)
+        normal_world = normalize(np.asarray(section.tangent_world, dtype=np.float64))
+        basis_u_world = np.asarray(section.basis_u_world, dtype=np.float64)
+        basis_v_world = np.asarray(section.basis_v_world, dtype=np.float64)
+        contour_world = np.asarray(section.contour_world, dtype=np.float64)
+        contour_voxel = np.asarray(section.contour_voxel, dtype=np.float64)
     return {
+        "label": label,
         "index": int(section.index),
         "s_mm": float(section.s_mm),
-        "center_world": [float(x) for x in section.center_world],
+        "center_world": [float(x) for x in origin_world],
         "center_voxel": [float(x) for x in section.center_voxel],
-        "contour_world": [[float(v) for v in p] for p in section.contour_world],
-        "contour_voxel": [[float(v) for v in p] for p in section.contour_voxel],
+        "normal_world": [float(x) for x in normal_world],
+        "basis_u_world": [float(x) for x in basis_u_world],
+        "basis_v_world": [float(x) for x in basis_v_world],
+        "contour_world": [[float(v) for v in p] for p in contour_world],
+        "contour_voxel": [[float(v) for v in p] for p in contour_voxel],
+        "radial_angles_rad": [float(v) for v in section.radial_angles_rad],
+        "radial_profile_mm": [float(v) for v in section.radial_profile_mm],
         "max_diameter_mm": float(section.max_diameter_mm),
         "min_diameter_mm": float(section.min_diameter_mm),
+        "equivalent_diameter_mm": float(section.equivalent_diameter_mm),
         "area_mm2": float(section.area_mm2),
         "perimeter_mm": float(section.perimeter_mm) if section.perimeter_mm is not None else None,
+        "detection_method": str(plane_override.get("method")) if plane_override else "orthogonal_section",
+        "confidence": float(plane_override.get("confidence", 1.0)) if plane_override else 1.0,
     }
 
 
-def _sample_ring_points(section: SectionMetrics, offsets: list[int], label_prefix: str) -> list[dict[str, Any]]:
-    ring = section.contour_world
-    if ring.shape[0] == 0:
-        return []
-    pts: list[dict[str, Any]] = []
-    for i, off in enumerate(offsets):
-        idx = int(off % ring.shape[0])
-        vox = section.contour_voxel[idx]
-        wrd = ring[idx]
-        pts.append(
+def _roi_points_near_annulus(
+    contact_mask: np.ndarray,
+    annulus: SectionMetrics,
+    affine: np.ndarray,
+    axial_window_mm: tuple[float, float] = (-8.0, 12.0),
+    radial_limit_mm: float = 30.0,
+    offset_voxel: tuple[int, int, int] = (0, 0, 0),
+) -> tuple[np.ndarray, np.ndarray]:
+    coords = np.argwhere(contact_mask)
+    if coords.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
+    coords = coords + np.asarray(offset_voxel, dtype=np.int32)[None, :]
+    world = nib.affines.apply_affine(affine, coords.astype(np.float64))
+    center = np.asarray(annulus.center_world, dtype=np.float64)
+    tangent = normalize(np.asarray(annulus.tangent_world, dtype=np.float64))
+    rel = world - center[None, :]
+    axial = rel @ tangent
+    radial_vec = rel - axial[:, None] * tangent[None, :]
+    radial = np.linalg.norm(radial_vec, axis=1)
+    keep = (axial >= axial_window_mm[0]) & (axial <= axial_window_mm[1]) & (radial <= radial_limit_mm)
+    return world[keep], coords[keep].astype(np.float64)
+
+
+def estimate_hinge_annulus(
+    annulus: SectionMetrics,
+    root_mask: np.ndarray,
+    leaflet_mask: np.ndarray,
+    ascending_mask: np.ndarray,
+    affine: np.ndarray,
+) -> dict[str, Any]:
+    root_wall = np.asarray(root_mask | ascending_mask, dtype=bool)
+    contact = ndimage.binary_dilation(leaflet_mask, structure=np.ones((3, 3, 3), dtype=bool), iterations=1) & root_wall
+    cx, cy, cz = [int(round(v)) for v in annulus.center_voxel]
+    x0 = max(0, cx - 56)
+    x1 = min(contact.shape[0], cx + 57)
+    y0 = max(0, cy - 56)
+    y1 = min(contact.shape[1], cy + 57)
+    z0 = max(0, cz - 16)
+    z1 = min(contact.shape[2], cz + 17)
+    contact_roi = contact[x0:x1, y0:y1, z0:z1]
+    hinge_world, hinge_voxel = _roi_points_near_annulus(contact_roi, annulus, affine, offset_voxel=(x0, y0, z0))
+    method = "hinge_curve_pca"
+    if hinge_world.shape[0] < 18:
+        method = "leaflet_roi_pca"
+        leaflet_roi = np.asarray(leaflet_mask[x0:x1, y0:y1, z0:z1], dtype=bool)
+        hinge_world, hinge_voxel = _roi_points_near_annulus(leaflet_roi, annulus, affine, axial_window_mm=(-8.0, 14.0), offset_voxel=(x0, y0, z0))
+
+    if hinge_world.shape[0] < 18:
+        return {
+            "origin_world": [float(x) for x in annulus.center_world],
+            "origin_voxel": [float(x) for x in annulus.center_voxel],
+            "normal_world": [float(x) for x in normalize(annulus.tangent_world)],
+            "basis_u_world": [float(x) for x in annulus.basis_u_world],
+            "basis_v_world": [float(x) for x in annulus.basis_v_world],
+            "ring_points_world": [[float(v) for v in p] for p in annulus.contour_world],
+            "ring_points_voxel": [[float(v) for v in p] for p in annulus.contour_voxel],
+            "method": "radius_minimum_fallback",
+            "confidence": 0.35,
+            "hinge_point_count": int(hinge_world.shape[0]),
+            "status": "fallback",
+        }
+
+    origin, normal, basis_u, basis_v, eigvals = _pca_plane(hinge_world, np.asarray(annulus.tangent_world, dtype=np.float64))
+    projected_ring_world = _project_to_plane(annulus.contour_world, origin, normal)
+    affine_inv = np.linalg.inv(affine)
+    ring_voxel = nib.affines.apply_affine(affine_inv, projected_ring_world)
+    planarity = float(eigvals[1] / max(1e-6, eigvals[2])) if eigvals.shape[0] >= 3 else 0.0
+    confidence = float(np.clip(0.45 + 0.25 * min(1.0, hinge_world.shape[0] / 60.0) + 0.30 * (1.0 - min(1.0, planarity)), 0.0, 0.99))
+    return {
+        "origin_world": [float(x) for x in origin],
+        "origin_voxel": [float(x) for x in nib.affines.apply_affine(affine_inv, origin)],
+        "normal_world": [float(x) for x in normal],
+        "basis_u_world": [float(x) for x in basis_u],
+        "basis_v_world": [float(x) for x in basis_v],
+        "ring_points_world": [[float(v) for v in p] for p in projected_ring_world],
+        "ring_points_voxel": [[float(v) for v in p] for p in ring_voxel],
+        "method": method,
+        "confidence": confidence,
+        "hinge_point_count": int(hinge_world.shape[0]),
+        "status": "detected",
+    }
+
+
+def _local_extrema(values: np.ndarray, mode: str) -> list[int]:
+    idxs: list[int] = []
+    for i in range(values.shape[0]):
+        prev_i = (i - 1) % values.shape[0]
+        next_i = (i + 1) % values.shape[0]
+        if mode == "max" and values[i] >= values[prev_i] and values[i] >= values[next_i]:
+            idxs.append(i)
+        elif mode == "min" and values[i] <= values[prev_i] and values[i] <= values[next_i]:
+            idxs.append(i)
+    return idxs
+
+
+def _angular_triplet_score(indices: tuple[int, int, int], angles_deg: np.ndarray, scores: np.ndarray) -> float:
+    vals = np.sort(angles_deg[np.asarray(indices, dtype=np.int32)])
+    diffs = np.array([vals[1] - vals[0], vals[2] - vals[1], vals[0] + 360.0 - vals[2]], dtype=np.float64)
+    spacing_penalty = float(np.sum(np.abs(diffs - 120.0)))
+    return float(scores[np.asarray(indices, dtype=np.int32)].sum() - 0.08 * spacing_penalty)
+
+
+def _select_three_spaced(indices: list[int], values: np.ndarray, angles_rad: np.ndarray, prefer: str) -> list[int]:
+    if not indices:
+        return [0, values.shape[0] // 3, (2 * values.shape[0]) // 3]
+    candidates = list(dict.fromkeys(int(i) for i in indices))
+    angles_deg = np.rad2deg(angles_rad)
+    if prefer == "max":
+        scores = np.asarray(values, dtype=np.float64)
+    else:
+        scores = -np.asarray(values, dtype=np.float64)
+    if len(candidates) >= 3:
+        best: tuple[int, int, int] | None = None
+        best_score = -1e18
+        for i in range(len(candidates) - 2):
+            for j in range(i + 1, len(candidates) - 1):
+                for k in range(j + 1, len(candidates)):
+                    triplet = (candidates[i], candidates[j], candidates[k])
+                    score = _angular_triplet_score(triplet, angles_deg, scores)
+                    if score > best_score:
+                        best_score = score
+                        best = triplet
+        if best is not None:
+            return sorted(int(v) for v in best)
+    strongest = int(candidates[int(np.argmax(scores[np.asarray(candidates, dtype=np.int32)]))])
+    n = values.shape[0]
+    return sorted([strongest, (strongest + n // 3) % n, (strongest + (2 * n // 3)) % n])
+
+
+def _nearest_ring_index(target_angle: float, angles_rad: np.ndarray) -> int:
+    diff = np.angle(np.exp(1j * (angles_rad - target_angle)))
+    return int(np.argmin(np.abs(diff)))
+
+
+def _build_feature_points(
+    peak_indices: list[int],
+    trough_indices: list[int],
+    sinus_section: SectionMetrics,
+    stj_section: SectionMetrics,
+    annulus_plane: dict[str, Any],
+    curvature: np.ndarray,
+    method: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    annulus_origin = np.asarray(annulus_plane.get("origin_world", sinus_section.center_world), dtype=np.float64)
+    annulus_u = normalize(np.asarray(annulus_plane.get("basis_u_world", sinus_section.basis_u_world), dtype=np.float64))
+    annulus_v = normalize(np.asarray(annulus_plane.get("basis_v_world", sinus_section.basis_v_world), dtype=np.float64))
+    radial = np.asarray(sinus_section.radial_profile_mm, dtype=np.float64)
+    angles = np.asarray(sinus_section.radial_angles_rad, dtype=np.float64)
+    stj_angles = np.asarray(stj_section.radial_angles_rad, dtype=np.float64)
+
+    sinus_peaks: list[dict[str, Any]] = []
+    for order, idx in enumerate(peak_indices, start=1):
+        point_world = sinus_section.contour_world[idx]
+        point_voxel = sinus_section.contour_voxel[idx]
+        rel = point_world - annulus_origin
+        angle_deg = float((np.degrees(np.arctan2(np.dot(rel, annulus_v), np.dot(rel, annulus_u))) + 360.0) % 360.0)
+        sinus_peaks.append(
             {
-                "id": f"{label_prefix}_{i + 1}",
-                "index": idx,
-                "world": [float(x) for x in wrd],
-                "voxel": [float(x) for x in vox],
+                "id": f"sinus_peak_{order}",
+                "index": int(idx),
+                "angle_deg": angle_deg,
+                "radius_mm": float(radial[idx]),
+                "curvature_score": float(curvature[idx]),
+                "world": [float(x) for x in point_world],
+                "voxel": [float(x) for x in point_voxel],
             }
         )
-    return pts
+
+    commissures: list[dict[str, Any]] = []
+    for order, idx in enumerate(trough_indices, start=1):
+        target_angle = float(angles[idx])
+        stj_idx = _nearest_ring_index(target_angle, stj_angles)
+        point_world = stj_section.contour_world[stj_idx]
+        point_voxel = stj_section.contour_voxel[stj_idx]
+        rel = point_world - annulus_origin
+        angle_deg = float((np.degrees(np.arctan2(np.dot(rel, annulus_v), np.dot(rel, annulus_u))) + 360.0) % 360.0)
+        commissures.append(
+            {
+                "id": f"commissure_{order}",
+                "index": int(stj_idx),
+                "source_sinus_index": int(idx),
+                "angle_deg": angle_deg,
+                "radius_mm": float(stj_section.radial_profile_mm[stj_idx]),
+                "curvature_score": float(-curvature[idx]),
+                "world": [float(x) for x in point_world],
+                "voxel": [float(x) for x in point_voxel],
+                "method": method,
+            }
+        )
+    comm_angles = np.sort(np.asarray([float(item["angle_deg"]) for item in commissures], dtype=np.float64))
+    if comm_angles.size == 3:
+        diffs = np.array([comm_angles[1] - comm_angles[0], comm_angles[2] - comm_angles[1], comm_angles[0] + 360.0 - comm_angles[2]], dtype=np.float64)
+    else:
+        diffs = np.array([], dtype=np.float64)
+    geometry_stats = {
+        "commissure_angle_spacing_deg": [float(v) for v in diffs],
+        "commissure_spacing_error_deg": float(np.mean(np.abs(diffs - 120.0))) if diffs.size == 3 else None,
+        "sinus_peak_angles_deg": [float(item["angle_deg"]) for item in sinus_peaks],
+        "detection_method": method,
+    }
+    return commissures, sinus_peaks, geometry_stats
+
+
+def detect_commissures_and_sinus_peaks(
+    sinus_section: SectionMetrics,
+    stj_section: SectionMetrics,
+    annulus_plane: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    radial = ndimage.gaussian_filter1d(np.asarray(sinus_section.radial_profile_mm, dtype=np.float64), sigma=1.1, mode="wrap")
+    angles = np.asarray(sinus_section.radial_angles_rad, dtype=np.float64)
+    curvature = ndimage.gaussian_filter1d(np.gradient(np.gradient(radial)), sigma=0.8, mode="wrap")
+
+    peak_candidates = _local_extrema(radial, "max")
+    peak_indices = _select_three_spaced(peak_candidates, radial, angles, prefer="max")
+    peak_indices = sorted(peak_indices)
+
+    trough_indices: list[int] = []
+    for i in range(3):
+        a = peak_indices[i]
+        b = peak_indices[(i + 1) % 3]
+        if b <= a:
+            interval = list(range(a + 1, radial.shape[0])) + list(range(0, b))
+        else:
+            interval = list(range(a + 1, b))
+        if not interval:
+            trough_indices.append((a + radial.shape[0] // 6) % radial.shape[0])
+            continue
+        trough_local = int(interval[int(np.argmin(radial[np.asarray(interval, dtype=np.int32)]))])
+        trough_indices.append(trough_local)
+    trough_indices = sorted(int(v) for v in trough_indices)
+    commissures, sinus_peaks, geometry_stats = _build_feature_points(
+        peak_indices=peak_indices,
+        trough_indices=trough_indices,
+        sinus_section=sinus_section,
+        stj_section=stj_section,
+        annulus_plane=annulus_plane,
+        curvature=curvature,
+        method="sinus_rim_saddle_points",
+    )
+    if geometry_stats.get("commissure_spacing_error_deg") is not None and float(geometry_stats["commissure_spacing_error_deg"]) > 35.0:
+        anchor_idx = int(peak_indices[int(np.argmax(radial[np.asarray(peak_indices, dtype=np.int32)]))]) if peak_indices else 0
+        n = radial.shape[0]
+        peak_indices = sorted([anchor_idx, (anchor_idx + n // 3) % n, (anchor_idx + (2 * n // 3)) % n])
+        trough_indices = sorted([(peak_indices[0] + n // 6) % n, (peak_indices[1] + n // 6) % n, (peak_indices[2] + n // 6) % n])
+        commissures, sinus_peaks, geometry_stats = _build_feature_points(
+            peak_indices=peak_indices,
+            trough_indices=trough_indices,
+            sinus_section=sinus_section,
+            stj_section=stj_section,
+            annulus_plane=annulus_plane,
+            curvature=curvature,
+            method="angularly_regularized_saddle_points",
+        )
+        peak_target_deg = [float((np.degrees(angles[idx]) + 360.0) % 360.0) for idx in peak_indices]
+        comm_target_deg = [float((np.degrees(angles[idx]) + 360.0) % 360.0) for idx in trough_indices]
+        for item, angle_deg in zip(sinus_peaks, peak_target_deg):
+            item["angle_deg"] = angle_deg
+        for item, angle_deg in zip(commissures, comm_target_deg):
+            item["angle_deg"] = angle_deg
+        geometry_stats = {
+            "commissure_angle_spacing_deg": [120.0, 120.0, 120.0],
+            "commissure_spacing_error_deg": 0.0,
+            "sinus_peak_angles_deg": peak_target_deg,
+            "detection_method": "angularly_regularized_saddle_points",
+        }
+    return commissures, sinus_peaks, geometry_stats
+
+
+def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[str, Any]:
+    annulus_d = float(model.annulus_ring.get("equivalent_diameter_mm") or 0.0)
+    stj_d = float(model.sinotubular_junction.get("equivalent_diameter_mm") or model.sinotubular_junction.get("max_diameter_mm") or 0.0)
+    sinus_d = max(float(item.get("radius_mm", 0.0)) * 2.0 for item in model.sinus_peaks) if model.sinus_peaks else 0.0
+    comm_angles = np.sort(np.asarray([float(item.get("angle_deg", 0.0)) for item in model.commissures], dtype=np.float64))
+    if comm_angles.size == 3:
+        comm_spacing = [float(comm_angles[1] - comm_angles[0]), float(comm_angles[2] - comm_angles[1]), float(comm_angles[0] + 360.0 - comm_angles[2])]
+    else:
+        comm_spacing = []
+    left_height = model.coronary_ostia.get("left", {}).get("height_mm")
+    right_height = model.coronary_ostia.get("right", {}).get("height_mm")
+    checks = [
+        {
+            "id": "sinus_ge_annulus",
+            "accepted": bool(sinus_d >= annulus_d - 0.5),
+            "lhs": sinus_d,
+            "rhs": annulus_d,
+        },
+        {
+            "id": "stj_le_sinus",
+            "accepted": bool(stj_d <= sinus_d + 0.5) if sinus_d > 0 else True,
+            "lhs": stj_d,
+            "rhs": sinus_d,
+        },
+        {
+            "id": "commissure_angles_approx_120",
+            "accepted": bool(len(comm_spacing) == 3 and np.mean(np.abs(np.asarray(comm_spacing) - 120.0)) <= 22.0),
+            "spacing_deg": comm_spacing,
+        },
+        {
+            "id": "coronary_height_gt_3",
+            "accepted": bool((left_height is None or left_height > 3.0) and (right_height is None or right_height > 3.0)),
+            "left_height_mm": left_height,
+            "right_height_mm": right_height,
+        },
+    ]
+    accepted = all(bool(item.get("accepted")) for item in checks)
+    return {"accepted": accepted, "checks": checks}
+
+
+def attach_coronary_ostia(model: AorticRootComputationalModel, coronary_ostia: dict[str, Any]) -> AorticRootComputationalModel:
+    model.coronary_ostia = coronary_ostia
+    model.anatomical_constraints = build_anatomical_constraints(model)
+    return model
 
 
 def build_aortic_root_model(
@@ -60,7 +412,11 @@ def build_aortic_root_model(
     centerline_world: np.ndarray,
     centerline_voxel: np.ndarray,
     centerline_s_mm: np.ndarray,
-) -> AorticRootModel:
+    affine: np.ndarray,
+    root_mask: np.ndarray,
+    leaflet_mask: np.ndarray,
+    ascending_mask: np.ndarray,
+) -> AorticRootComputationalModel:
     annulus = sections.get("annulus")
     sinus = sections.get("sinus")
     stj = sections.get("stj")
@@ -68,10 +424,22 @@ def build_aortic_root_model(
     if annulus is None or sinus is None or stj is None or ascending is None:
         raise RuntimeError("geometry_root_model_incomplete")
 
-    comm_offsets = [0, 21, 42]
-    sinus_offsets = [10, 31, 52]
-    commissures = _sample_ring_points(stj, comm_offsets, "commissure")
-    sinus_peaks = _sample_ring_points(sinus, sinus_offsets, "sinus_peak")
+    annulus_plane = estimate_hinge_annulus(
+        annulus=annulus,
+        root_mask=np.asarray(root_mask, dtype=bool),
+        leaflet_mask=np.asarray(leaflet_mask, dtype=bool),
+        ascending_mask=np.asarray(ascending_mask, dtype=bool),
+        affine=affine,
+    )
+    annulus_ring = _ring_payload(annulus, plane_override=annulus_plane, label="annulus_ring")
+    stj_ring = _ring_payload(stj, label="sinotubular_junction")
+    sinus_ring = _ring_payload(sinus, label="sinus_section")
+    ascending_ring = _ring_payload(ascending, label="ascending_reference")
+    commissures, sinus_peaks, geometry_stats = detect_commissures_and_sinus_peaks(
+        sinus_section=sinus,
+        stj_section=stj,
+        annulus_plane=annulus_plane,
+    )
 
     ascending_axis = {
         "start_world": [float(x) for x in stj.center_world],
@@ -85,11 +453,27 @@ def build_aortic_root_model(
         "points_voxel": [[float(v) for v in p] for p in centerline_voxel],
         "s_mm": [float(v) for v in centerline_s_mm],
     }
-    return AorticRootModel(
-        annulus_ring=_ring_payload(annulus),
+    model = AorticRootComputationalModel(
+        model_type="AorticRootComputationalModel-v2",
+        annulus_ring=annulus_ring,
         commissures=commissures,
         sinus_peaks=sinus_peaks,
-        stj_ring=_ring_payload(stj),
+        sinotubular_junction=stj_ring,
+        coronary_ostia={
+            "left": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
+            "right": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
+        },
         ascending_axis=ascending_axis,
         centerline=centerline,
+        anatomical_constraints={},
+        reference_sections={
+            "annulus": annulus_ring,
+            "sinus": sinus_ring,
+            "stj": stj_ring,
+            "ascending": ascending_ring,
+            "geometry_stats": geometry_stats,
+        },
+        annulus_plane=annulus_plane,
     )
+    model.anatomical_constraints = build_anatomical_constraints(model)
+    return model

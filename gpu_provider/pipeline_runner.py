@@ -357,6 +357,10 @@ def run_geometry_pipeline(
         centerline_world=centerline.points_world,
         centerline_voxel=centerline.points_voxel,
         centerline_s_mm=centerline.s_mm,
+        affine=affine,
+        root_mask=root_mask,
+        leaflet_mask=leaflet_mask,
+        ascending_mask=ascending_mask,
     )
     leaflet_model = build_leaflet_model(root_model)
     leaflet_stl_path = output_dir / "leaflets.stl"
@@ -371,7 +375,7 @@ def run_geometry_pipeline(
         valve_region_mask=(root_mask | leaflet_mask),
         landmark_sections=landmark_sections,
         ascending_sections=sections,
-        annulus_plane=landmarks.annulus_plane,
+        annulus_plane=root_model.annulus_plane,
         root_model=root_model,
         leaflet_model=leaflet_model,
         spacing_mm=spacing,
@@ -381,8 +385,11 @@ def run_geometry_pipeline(
     )
     timers["measurement_seconds"] = round(time.time() - t0, 4)
 
+    annulus_plane_payload = dict(root_model.annulus_plane)
+    annulus_plane_payload.setdefault("index", int(landmarks.annulus_index))
+    annulus_plane_payload.setdefault("s_mm", float(centerline.s_mm[min(max(0, landmarks.annulus_index), len(centerline.s_mm) - 1)]))
     annulus_plane_path = output_dir / "annulus_plane.json"
-    annulus_plane_path.write_text(json.dumps(sanitize_for_json(landmarks.annulus_plane), indent=2), encoding="utf-8")
+    annulus_plane_path.write_text(json.dumps(sanitize_for_json(annulus_plane_payload), indent=2), encoding="utf-8")
     _record_artifact(artifacts_manifest, "annulus_plane_json", annulus_plane_path.name, "application/json", annulus_plane_path)
 
     centerline_payload = {
@@ -400,7 +407,7 @@ def run_geometry_pipeline(
             for i in range(centerline.points_world.shape[0])
         ],
         "orthogonal_profile": profile,
-        "annulus_plane": landmarks.annulus_plane,
+        "annulus_plane": annulus_plane_payload,
         "stj_plane": landmarks.stj_plane,
     }
     centerline_json_path = output_dir / "centerline.json"
@@ -456,7 +463,7 @@ def run_geometry_pipeline(
             "voxel_volume_mm3": voxel_mm3,
         },
         "geometry_model": {
-            "type": "aortic_root_computational_anatomy_v1",
+            "type": "aortic_root_computational_model_v2",
             "lumen_mask": lumen_mask_path.name,
             "lumen_surface_vtk": lumen_surface_vtk.name,
             "lumen_surface_stl": lumen_surface_stl.name,
@@ -472,10 +479,21 @@ def run_geometry_pipeline(
             "skeletonization": "distance_transform",
         },
         "landmarks": {
-            "annulus_plane": landmarks.annulus_plane,
+            "annulus_plane": annulus_plane_payload,
             "stj_plane": landmarks.stj_plane,
             "sinus_peak_point_world": landmarks.sinus_peak_point_world,
             "ascending_reference_point_world": landmarks.ascending_reference_point_world,
+        },
+        "aortic_root_computational_model": {
+            "type": root_model.model_type,
+            "annulus_ring": root_model.annulus_ring,
+            "commissures": root_model.commissures,
+            "sinus_peaks": root_model.sinus_peaks,
+            "sinotubular_junction": root_model.sinotubular_junction,
+            "coronary_ostia": root_model.coronary_ostia,
+            "ascending_axis": root_model.ascending_axis,
+            "centerline": root_model.centerline,
+            "anatomical_constraints": root_model.anatomical_constraints,
         },
         "measurements": flat_measurements,
         "measurements_structured": measurements_structured,
@@ -523,6 +541,7 @@ def run_geometry_pipeline(
         "lumen_model": "mask_cleanup+marching_cubes+taubin",
         "centerline": centerline.method,
         "measurement_method": "geometry_model_driven_v1",
+        "computational_model": root_model.model_type,
         "quality": builder_meta.get("quality", "high"),
         "device": builder_meta.get("device", "gpu"),
         "runtime_seconds": total_runtime,
