@@ -646,7 +646,12 @@ async function streamJobArtifact(jobId: string, artifactType: string, env: Env):
   if (artifactType.endsWith("_json") || contentType.includes("application/json")) {
     const text = await obj.text();
     const parsed = safeJsonObject(text);
-    const sanitized = parsed ? sanitizePublicValue(parsed) : parsed;
+    let sanitized: unknown = parsed;
+    if (parsed) {
+      if (artifactType === "provider_receipt") sanitized = sanitizeProviderReceipt(parsed);
+      else if (artifactType === "result_json") sanitized = sanitizePublicResultJson(parsed);
+      else sanitized = sanitizePublicValue(parsed);
+    }
     const body = JSON.stringify(sanitized ?? {}, null, 2);
     headers.set("content-length", String(body.length));
     return new Response(body, { status: 200, headers });
