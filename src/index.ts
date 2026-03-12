@@ -570,8 +570,12 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
       measurements_json: `/jobs/${jobId}/artifacts/measurements_json`,
       planning_report_pdf: `/jobs/${jobId}/artifacts/planning_report_pdf`,
       aortic_root_stl: `/jobs/${jobId}/artifacts/aortic_root_stl`,
+      ascending_aorta_stl: `/jobs/${jobId}/artifacts/ascending_aorta_stl`,
+      leaflets_stl: `/jobs/${jobId}/artifacts/leaflets_stl`,
       centerline_json: `/jobs/${jobId}/artifacts/centerline_json`,
       annulus_plane_json: `/jobs/${jobId}/artifacts/annulus_plane_json`,
+      aortic_root_model_json: `/jobs/${jobId}/artifacts/aortic_root_model_json`,
+      leaflet_model_json: `/jobs/${jobId}/artifacts/leaflet_model_json`,
       job_api: `/jobs/${jobId}`
     },
     study_meta: {
@@ -634,9 +638,19 @@ async function streamJobArtifact(jobId: string, artifactType: string, env: Env):
 
   const filename = artifact.object_key.split("/").pop() || `${jobId}-${artifactType}.bin`;
   const headers = new Headers(jsonHeaders);
-  headers.set("content-type", obj.httpMetadata?.contentType || "application/octet-stream");
+  const contentType = obj.httpMetadata?.contentType || "application/octet-stream";
+  headers.set("content-type", contentType);
   headers.set("content-disposition", `attachment; filename="${filename}"`);
   headers.set("content-length", String(obj.size));
+
+  if (artifactType.endsWith("_json") || contentType.includes("application/json")) {
+    const text = await obj.text();
+    const parsed = safeJsonObject(text);
+    const sanitized = parsed ? sanitizePublicValue(parsed) : parsed;
+    const body = JSON.stringify(sanitized ?? {}, null, 2);
+    headers.set("content-length", String(body.length));
+    return new Response(body, { status: 200, headers });
+  }
 
   return new Response(obj.body, { status: 200, headers });
 }
@@ -1581,6 +1595,10 @@ const DEMO_HTML = `<!doctype html>
           <div class="small"><a id="measurementsLink" href="#">下载测量结果 JSON</a></div>
           <div class="small"><a id="reportPdfLink" href="#">下载规划报告 PDF</a></div>
           <div class="small"><a id="rootStlLink" href="#">下载主动脉根部 STL</a></div>
+          <div class="small"><a id="ascStlLink" href="#">下载升主动脉 STL</a></div>
+          <div class="small"><a id="leafletsStlLink" href="#">下载瓣叶 STL</a></div>
+          <div class="small"><a id="rootModelLink" href="#">下载数字孪生模型 JSON</a></div>
+          <div class="small"><a id="leafletModelLink" href="#">下载瓣叶模型 JSON</a></div>
           <div class="small"><a id="receiptLink" href="#">下载Provider回执</a></div>
           <div class="small"><a id="jobApiLink" href="#">查看Job API</a></div>
         </div>
@@ -1759,6 +1777,8 @@ const DEMO_HTML = `<!doctype html>
       pipelineResult: null,
       centerlineData: null,
       annulusPlaneData: null,
+      rootModelData: null,
+      leafletModelData: null,
       bodyBounds: null,
       recon3d: {
         lib: null,
@@ -1767,10 +1787,9 @@ const DEMO_HTML = `<!doctype html>
         camera: null,
         group: null,
         canvas: null,
+        controls: null,
+        animationHandle: 0,
         initialized: false,
-        dragging: false,
-        dragX: 0,
-        dragY: 0,
         classVisible: { 1: true, 2: true, 3: true },
         triangleCount: 0
       }
@@ -1834,7 +1853,7 @@ const DEMO_HTML = `<!doctype html>
         lblOverlay: '叠加透明度',
         viewerHint: '鼠标滚轮切层；按住 Ctrl + 滚轮缩放；拖拽平移。',
         keySliceHint: '一键跳转关键切片并显示测量线。',
-        recon3dHint: '拖拽旋转，滚轮缩放，双击重置；使用当前真实分割重建。',
+        recon3dHint: '左键旋转，右键平移，滚轮缩放，双击重置；使用当前真实 STL/数字孪生重建。',
         recon3dStatusIdle: '等待分割完成...',
         recon3dStatusBuilding: '正在重建 3D ...',
         recon3dStatusReady: '3D 重建完成',
@@ -1856,6 +1875,10 @@ const DEMO_HTML = `<!doctype html>
         measurementsLink: '下载测量结果 JSON',
         reportPdfLink: '下载规划报告 PDF',
         rootStlLink: '下载主动脉根部 STL',
+        ascStlLink: '下载升主动脉 STL',
+        leafletsStlLink: '下载瓣叶 STL',
+        rootModelLink: '下载数字孪生模型 JSON',
+        leafletModelLink: '下载瓣叶模型 JSON',
         receiptLink: '下载Provider回执',
         jobApiLink: '查看Job API',
         kBottomMeasure: '实时测量面板',
@@ -1966,7 +1989,7 @@ const DEMO_HTML = `<!doctype html>
         lblOverlay: 'Overlay Opacity',
         viewerHint: 'Mouse wheel to scroll slices; Ctrl + wheel to zoom; drag to pan.',
         keySliceHint: 'One-click jump to key slices with measurement annotations.',
-        recon3dHint: 'Drag to rotate, wheel to zoom, double-click to reset. Built from current validated segmentation.',
+        recon3dHint: 'Left drag rotates, right drag pans, wheel zooms, double-click resets. Built from current validated STL/digital twin artifacts.',
         recon3dStatusIdle: 'Waiting for segmentation...',
         recon3dStatusBuilding: 'Building 3D model...',
         recon3dStatusReady: '3D reconstruction ready',
@@ -1988,6 +2011,10 @@ const DEMO_HTML = `<!doctype html>
         measurementsLink: 'Download Measurements JSON',
         reportPdfLink: 'Download Planning Report PDF',
         rootStlLink: 'Download Aortic Root STL',
+        ascStlLink: 'Download Ascending Aorta STL',
+        leafletsStlLink: 'Download Leaflets STL',
+        rootModelLink: 'Download Digital Twin Model JSON',
+        leafletModelLink: 'Download Leaflet Model JSON',
         receiptLink: 'Download Provider Receipt',
         jobApiLink: 'Open Job API',
         kBottomMeasure: 'Live Measurement Board',
@@ -2331,6 +2358,10 @@ const DEMO_HTML = `<!doctype html>
       $('measurementsLink').textContent = t('measurementsLink');
       $('reportPdfLink').textContent = t('reportPdfLink');
       $('rootStlLink').textContent = t('rootStlLink');
+      $('ascStlLink').textContent = t('ascStlLink');
+      $('leafletsStlLink').textContent = t('leafletsStlLink');
+      $('rootModelLink').textContent = t('rootModelLink');
+      $('leafletModelLink').textContent = t('leafletModelLink');
       $('receiptLink').textContent = t('receiptLink');
       $('jobApiLink').textContent = t('jobApiLink');
       updateKeySliceButtons();
@@ -2521,8 +2552,12 @@ const DEMO_HTML = `<!doctype html>
     async function loadAuxArtifacts(data) {
       state.centerlineData = null;
       state.annulusPlaneData = null;
+      state.rootModelData = null;
+      state.leafletModelData = null;
       const centerlineUrl = findArtifactLink(data, ['centerline_json']);
       const annulusUrl = findArtifactLink(data, ['annulus_plane_json']);
+      const rootModelUrl = findArtifactLink(data, ['aortic_root_model_json']);
+      const leafletModelUrl = findArtifactLink(data, ['leaflet_model_json']);
       if (centerlineUrl) {
         try {
           const r = await fetch(centerlineUrl, { cache: 'no-store' });
@@ -2541,6 +2576,18 @@ const DEMO_HTML = `<!doctype html>
           }
         } catch {}
       }
+      if (rootModelUrl) {
+        try {
+          const r = await fetch(rootModelUrl, { cache: 'no-store' });
+          if (r.ok) state.rootModelData = await r.json();
+        } catch {}
+      }
+      if (leafletModelUrl) {
+        try {
+          const r = await fetch(leafletModelUrl, { cache: 'no-store' });
+          if (r.ok) state.leafletModelData = await r.json();
+        } catch {}
+      }
     }
 
     function bindCasePanel(data) {
@@ -2556,6 +2603,10 @@ const DEMO_HTML = `<!doctype html>
       $('measurementsLink').href = absLink(data.links?.measurements_json);
       $('reportPdfLink').href = absLink(data.links?.planning_report_pdf);
       $('rootStlLink').href = absLink(data.links?.aortic_root_stl);
+      $('ascStlLink').href = absLink(data.links?.ascending_aorta_stl);
+      $('leafletsStlLink').href = absLink(data.links?.leaflets_stl);
+      $('rootModelLink').href = absLink(data.links?.aortic_root_model_json);
+      $('leafletModelLink').href = absLink(data.links?.leaflet_model_json);
       $('receiptLink').href = absLink(data.links?.provider_receipt);
       $('jobApiLink').href = absLink(data.links?.job_api);
       setReadinessChip('pearsState', data.clinical_targets?.pears?.readiness?.stage || 'partial-ready');
@@ -2692,8 +2743,12 @@ const DEMO_HTML = `<!doctype html>
         measurements_json: '/jobs/' + jobId + '/artifacts/measurements_json',
         planning_report_pdf: '/jobs/' + jobId + '/artifacts/planning_report_pdf',
         aortic_root_stl: '/jobs/' + jobId + '/artifacts/aortic_root_stl',
+        ascending_aorta_stl: '/jobs/' + jobId + '/artifacts/ascending_aorta_stl',
+        leaflets_stl: '/jobs/' + jobId + '/artifacts/leaflets_stl',
         centerline_json: '/jobs/' + jobId + '/artifacts/centerline_json',
         annulus_plane_json: '/jobs/' + jobId + '/artifacts/annulus_plane_json',
+        aortic_root_model_json: '/jobs/' + jobId + '/artifacts/aortic_root_model_json',
+        leaflet_model_json: '/jobs/' + jobId + '/artifacts/leaflet_model_json',
         job_api: '/jobs/' + jobId
       };
       const resultJson = await loadResultPreview(absLink(links.result_json));
@@ -3563,198 +3618,219 @@ const DEMO_HTML = `<!doctype html>
       $('recon3dStatus').textContent = extra ? (base + ' | ' + extra) : base;
     }
 
+    async function ensure3dLib() {
+      if (state.recon3d.lib) return state.recon3d.lib;
+      const three = await import('https://esm.sh/three@0.179.1');
+      const controlsModule = await import('https://esm.sh/three@0.179.1/examples/jsm/controls/OrbitControls.js');
+      const stlModule = await import('https://esm.sh/three@0.179.1/examples/jsm/loaders/STLLoader.js');
+      state.recon3d.lib = {
+        THREE: three,
+        OrbitControls: controlsModule.OrbitControls,
+        STLLoader: stlModule.STLLoader
+      };
+      return state.recon3d.lib;
+    }
+
     function resize3dCanvas() {
       const r3 = state.recon3d;
-      if (!r3.initialized || !r3.canvas || !r3.ctx) return;
-      const ratio = window.devicePixelRatio || 1;
+      if (!r3.initialized || !r3.canvas || !r3.renderer || !r3.camera) return;
       const rect = r3.canvas.getBoundingClientRect();
-      const w = Math.max(2, Math.floor(rect.width * ratio));
-      const h = Math.max(2, Math.floor(rect.height * ratio));
-      r3.canvas.width = w;
-      r3.canvas.height = h;
-      r3.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      if (rect.width <= 0 || rect.height <= 0) return;
+      r3.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      r3.renderer.setSize(rect.width, rect.height, false);
+      r3.camera.aspect = rect.width / rect.height;
+      r3.camera.updateProjectionMatrix();
       render3dCanvas();
     }
 
-    function init3dViewer() {
+    function start3dAnimationLoop() {
+      const r3 = state.recon3d;
+      if (r3.animationHandle) return;
+      const tick = () => {
+        if (!r3.initialized || !r3.renderer || !r3.scene || !r3.camera) {
+          r3.animationHandle = 0;
+          return;
+        }
+        if (r3.controls && typeof r3.controls.update === 'function') {
+          r3.controls.update();
+        }
+        r3.renderer.render(r3.scene, r3.camera);
+        r3.animationHandle = window.requestAnimationFrame(tick);
+      };
+      r3.animationHandle = window.requestAnimationFrame(tick);
+    }
+
+    async function init3dViewer() {
       const r3 = state.recon3d;
       if (r3.initialized) return true;
       const canvas3d = $('viewer3d');
       if (!canvas3d) return false;
-      const ctx3d = canvas3d.getContext('2d');
-      if (!ctx3d) return false;
+      const lib = await ensure3dLib();
+      const THREE = lib.THREE;
+      const renderer = new THREE.WebGLRenderer({
+        canvas: canvas3d,
+        antialias: true,
+        alpha: true,
+        powerPreference: 'high-performance'
+      });
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setClearColor(0x07111d, 1.0);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x07111d);
+
+      const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 6000);
+      camera.position.set(0, -130, 120);
+
+      const controls = new lib.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.enablePan = true;
+      controls.enableZoom = true;
+      controls.enableRotate = true;
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN
+      };
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+      const hemi = new THREE.HemisphereLight(0x7dd3fc, 0x0f172a, 0.65);
+      const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+      dir.position.set(120, -100, 180);
+
+      const group = new THREE.Group();
+      scene.add(ambient);
+      scene.add(hemi);
+      scene.add(dir);
+      scene.add(group);
+
       r3.canvas = canvas3d;
-      r3.ctx = ctx3d;
-      r3.points = [];
-      r3.rotX = -0.45;
-      r3.rotY = 0.35;
-      r3.scale = 1.0;
-      r3.distance = 260;
+      r3.renderer = renderer;
+      r3.scene = scene;
+      r3.camera = camera;
+      r3.controls = controls;
+      r3.group = group;
       r3.initialized = true;
-
-      canvas3d.addEventListener('mousedown', (e) => {
-        r3.dragging = true;
-        r3.dragX = e.clientX;
-        r3.dragY = e.clientY;
-        canvas3d.classList.add('dragging');
-      });
-      window.addEventListener('mouseup', () => {
-        r3.dragging = false;
-        canvas3d.classList.remove('dragging');
-      });
-      window.addEventListener('mousemove', (e) => {
-        if (!r3.dragging) return;
-        const dx = e.clientX - r3.dragX;
-        const dy = e.clientY - r3.dragY;
-        r3.dragX = e.clientX;
-        r3.dragY = e.clientY;
-        r3.rotY += dx * 0.008;
-        r3.rotX += dy * 0.008;
-        render3dCanvas();
-      });
-      canvas3d.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const factor = e.deltaY > 0 ? 0.93 : 1.07;
-        r3.scale = clamp(r3.scale * factor, 0.35, 5.0);
-        render3dCanvas();
-      }, { passive: false });
+      canvas3d.addEventListener('contextmenu', (e) => e.preventDefault());
       canvas3d.addEventListener('dblclick', () => reset3dView());
-
       resize3dCanvas();
+      start3dAnimationLoop();
       return true;
     }
 
-    function clear3dGroup() {
-      state.recon3d.points = [];
-    }
-
-    function getUnionBounds() {
-      const nx = state.dims.x || 1;
-      const ny = state.dims.y || 1;
-      const nz = state.dims.z || 1;
-      const fallback = { minX: 0, minY: 0, minZ: 0, maxX: nx - 1, maxY: ny - 1, maxZ: nz - 1 };
-      const bounds = state.stats?.classBounds;
-      if (!bounds) return fallback;
-      let minX = nx, minY = ny, minZ = nz;
-      let maxX = -1, maxY = -1, maxZ = -1;
-      for (const cls of [1, 2, 3]) {
-        const b = bounds[cls];
-        if (!b) continue;
-        if (b.minX < minX) minX = b.minX;
-        if (b.minY < minY) minY = b.minY;
-        if (b.minZ < minZ) minZ = b.minZ;
-        if (b.maxX > maxX) maxX = b.maxX;
-        if (b.maxY > maxY) maxY = b.maxY;
-        if (b.maxZ > maxZ) maxZ = b.maxZ;
+    function dispose3dNode(node) {
+      if (!node) return;
+      if (node.geometry && typeof node.geometry.dispose === 'function') {
+        node.geometry.dispose();
       }
-      if (maxX < minX || maxY < minY || maxZ < minZ) return fallback;
-      return { minX, minY, minZ, maxX, maxY, maxZ };
+      if (node.material) {
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
+        for (const material of materials) {
+          if (material && typeof material.dispose === 'function') material.dispose();
+        }
+      }
+      if (Array.isArray(node.children)) {
+        for (const child of node.children) dispose3dNode(child);
+      }
     }
 
-    function rotatePoint(px, py, pz, rx, ry) {
-      const cosY = Math.cos(ry);
-      const sinY = Math.sin(ry);
-      const x1 = px * cosY + pz * sinY;
-      const z1 = -px * sinY + pz * cosY;
-      const cosX = Math.cos(rx);
-      const sinX = Math.sin(rx);
-      const y2 = py * cosX - z1 * sinX;
-      const z2 = py * sinX + z1 * cosX;
-      return [x1, y2, z2];
+    function clear3dGroup() {
+      const r3 = state.recon3d;
+      if (!r3.group) return;
+      while (r3.group.children.length) {
+        const child = r3.group.children[r3.group.children.length - 1];
+        if (!child) break;
+        r3.group.remove(child);
+        dispose3dNode(child);
+      }
+      r3.group.position.set(0, 0, 0);
+      r3.triangleCount = 0;
+    }
+
+    function buildCenterlineLineObject(THREE, points) {
+      if (!Array.isArray(points) || points.length < 2) return null;
+      const verts = [];
+      for (const item of points) {
+        const w = Array.isArray(item?.world) ? item.world : null;
+        if (!w || w.length < 3) continue;
+        verts.push(new THREE.Vector3(Number(w[0]), Number(w[1]), Number(w[2])));
+      }
+      if (verts.length < 2) return null;
+      const geometry = new THREE.BufferGeometry().setFromPoints(verts);
+      const material = new THREE.LineBasicMaterial({ color: 0x93c5fd, linewidth: 1 });
+      return new THREE.Line(geometry, material);
+    }
+
+    function buildAnnulusPlaneObject(THREE, annulusPlane) {
+      const ring = Array.isArray(annulusPlane?.ring_points_world)
+        ? annulusPlane.ring_points_world
+        : Array.isArray(annulusPlane?.corners_world)
+          ? annulusPlane.corners_world
+          : [];
+      if (!ring.length) return null;
+      const points = ring
+        .map((p) => Array.isArray(p) && p.length >= 3 ? new THREE.Vector3(Number(p[0]), Number(p[1]), Number(p[2])) : null)
+        .filter(Boolean);
+      if (points.length < 3) return null;
+      points.push(points[0].clone());
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.95 });
+      return new THREE.LineLoop(geometry, material);
     }
 
     function render3dCanvas() {
       const r3 = state.recon3d;
-      if (!r3.initialized || !r3.canvas || !r3.ctx) return;
-      const ctx = r3.ctx;
-      const ratio = window.devicePixelRatio || 1;
-      const rect = r3.canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-      ctx.clearRect(0, 0, w, h);
-      if (!Array.isArray(r3.points) || r3.points.length === 0) return;
-      const cx = w / 2;
-      const cy = h / 2;
-
-      const transformed = [];
-      for (const p of r3.points) {
-        const [x, y, z] = rotatePoint(p.x, p.y, p.z, r3.rotX, r3.rotY);
-        const depth = z + r3.distance;
-        if (depth <= 6) continue;
-        const proj = (90 * r3.scale) / depth;
-        transformed.push({
-          sx: cx + x * proj,
-          sy: cy + y * proj,
-          d: depth,
-          c: p.c,
-          r: Math.max(0.6, p.r * proj * 0.32)
-        });
-      }
-      transformed.sort((a, b) => b.d - a.d);
-      for (const p of transformed) {
-        ctx.beginPath();
-        ctx.fillStyle = p.c;
-        ctx.globalAlpha = 0.78;
-        ctx.arc(p.sx, p.sy, p.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
+      if (!r3.initialized || !r3.renderer || !r3.scene || !r3.camera) return;
+      r3.renderer.render(r3.scene, r3.camera);
     }
 
-    function buildClassBoundaryPoints(cls) {
-      if (!state.seg) return [];
-      const seg = state.seg;
-      const nx = state.dims.x;
-      const ny = state.dims.y;
-      const nz = state.dims.z;
-      const xy = nx * ny;
-      const b = state.stats?.classBounds?.[cls];
-      if (!b) return [];
-      const ub = getUnionBounds();
-      const cx = (ub.minX + ub.maxX + 1) / 2;
-      const cy = (ub.minY + ub.maxY + 1) / 2;
-      const cz = (ub.minZ + ub.maxZ + 1) / 2;
-      const dx = state.vox.dx || 1;
-      const dy = state.vox.dy || 1;
-      const dz = state.vox.dz || 1;
-      const vox = state.stats?.byClass?.[cls]?.vox || 0;
-      const stride = vox > 120000 ? 3 : (vox > 60000 ? 2 : 1);
-      const maxPts = cls === 2 ? 24000 : 42000;
-      const pts = [];
+    function fit3dCameraToGroup() {
+      const r3 = state.recon3d;
+      if (!r3.group || !r3.camera || !r3.controls || !r3.lib) return;
+      const THREE = r3.lib.THREE;
+      const box = new THREE.Box3().setFromObject(r3.group);
+      if (box.isEmpty()) return;
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const radius = Math.max(size.x, size.y, size.z) * 0.6 || 40;
+      r3.group.position.set(-center.x, -center.y, -center.z);
+      r3.controls.target.set(0, 0, 0);
+      r3.camera.position.set(radius * 0.9, -radius * 1.8, radius * 1.2);
+      r3.camera.near = Math.max(0.1, radius / 250);
+      r3.camera.far = Math.max(2000, radius * 20);
+      r3.camera.updateProjectionMatrix();
+      r3.controls.update();
+    }
 
-      const minX = Math.max(0, b.minX - 1);
-      const minY = Math.max(0, b.minY - 1);
-      const minZ = Math.max(0, b.minZ - 1);
-      const maxX = Math.min(nx - 1, b.maxX + 1);
-      const maxY = Math.min(ny - 1, b.maxY + 1);
-      const maxZ = Math.min(nz - 1, b.maxZ + 1);
+    async function loadStlMesh(url, color, opacity, label) {
+      const r3 = state.recon3d;
+      if (!r3.lib || !url || url === '#') return null;
+      const THREE = r3.lib.THREE;
+      const resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) return null;
+      const loader = new r3.lib.STLLoader();
+      const geometry = loader.parse(await resp.arrayBuffer());
+      geometry.computeVertexNormals();
+      const material = new THREE.MeshPhongMaterial({
+        color,
+        transparent: opacity < 1,
+        opacity,
+        shininess: 45,
+        side: THREE.DoubleSide
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = label;
+      return mesh;
+    }
 
-      for (let z = minZ; z <= maxZ; z += stride) {
-        const zOff = z * xy;
-        for (let y = minY; y <= maxY; y += stride) {
-          const row = zOff + y * nx;
-          for (let x = minX; x <= maxX; x += stride) {
-            const i = row + x;
-            if (seg[i] !== cls) continue;
-            const exposed = (
-              x === 0 || seg[i - 1] !== cls ||
-              x === nx - 1 || seg[i + 1] !== cls ||
-              y === 0 || seg[i - nx] !== cls ||
-              y === ny - 1 || seg[i + nx] !== cls ||
-              z === 0 || seg[i - xy] !== cls ||
-              z === nz - 1 || seg[i + xy] !== cls
-            );
-            if (!exposed) continue;
-            if (pts.length >= maxPts && ((x + y + z) % 2 === 1)) continue;
-            pts.push({
-              x: (x + 0.5 - cx) * dx,
-              y: -(y + 0.5 - cy) * dy,
-              z: (z + 0.5 - cz) * dz,
-            });
-          }
-        }
-      }
-      return pts;
+    function triangleCountOf(object3d) {
+      let total = 0;
+      object3d?.traverse?.((node) => {
+        const pos = node?.geometry?.attributes?.position;
+        if (pos?.count) total += Math.floor(pos.count / 3);
+      });
+      return total;
     }
 
     async function rebuild3dModel() {
@@ -3762,38 +3838,42 @@ const DEMO_HTML = `<!doctype html>
         setRecon3dStatus('recon3dStatusNoSeg');
         return;
       }
-      if (!init3dViewer()) {
+      if (!(await init3dViewer())) {
         setRecon3dStatus('recon3dStatusLibFail');
         return;
       }
       setRecon3dStatus('recon3dStatusBuilding');
       clear3dGroup();
       const r3 = state.recon3d;
+      const THREE = r3.lib.THREE;
       const specs = [
-        { cls: 1, color: '#ef4444', r: 1.05 },
-        { cls: 2, color: '#facc15', r: 1.35 },
-        { cls: 3, color: '#22d3ee', r: 1.00 },
+        { cls: 1, url: findArtifactLink(state.caseData, ['aortic_root_stl']), color: 0xef4444, opacity: 0.72, label: 'aortic_root' },
+        { cls: 2, url: findArtifactLink(state.caseData, ['leaflets_stl']), color: 0xfacc15, opacity: 0.92, label: 'leaflets' },
+        { cls: 3, url: findArtifactLink(state.caseData, ['ascending_aorta_stl']), color: 0x22d3ee, opacity: 0.65, label: 'ascending_aorta' }
       ];
-      const all = [];
+
       for (const sp of specs) {
         if (!r3.classVisible[sp.cls]) continue;
-        const pts = buildClassBoundaryPoints(sp.cls);
-        for (const p of pts) {
-          all.push({ ...p, c: sp.color, r: sp.r });
-        }
+        const mesh = await loadStlMesh(sp.url, sp.color, sp.opacity, sp.label);
+        if (mesh) r3.group.add(mesh);
       }
-      r3.points = all;
-      r3.triangleCount = all.length;
+
+      const centerlineLine = buildCenterlineLineObject(THREE, state.centerlineData?.points);
+      if (centerlineLine) r3.group.add(centerlineLine);
+
+      const annulusLoop = buildAnnulusPlaneObject(THREE, state.annulusPlaneData || state.pipelineResult?.landmarks?.annulus_plane);
+      if (annulusLoop) r3.group.add(annulusLoop);
+
+      fit3dCameraToGroup();
+      r3.triangleCount = triangleCountOf(r3.group);
       render3dCanvas();
-      setRecon3dStatus('recon3dStatusReady', all.length + ' pts');
+      setRecon3dStatus('recon3dStatusReady', r3.triangleCount + ' tris');
     }
 
     function reset3dView() {
       const r3 = state.recon3d;
-      if (!r3.initialized) return;
-      r3.rotX = -0.45;
-      r3.rotY = 0.35;
-      r3.scale = 1.0;
+      if (!r3.initialized || !r3.controls) return;
+      fit3dCameraToGroup();
       render3dCanvas();
     }
 

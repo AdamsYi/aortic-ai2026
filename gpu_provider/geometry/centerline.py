@@ -120,6 +120,32 @@ def _dijkstra_farthest(start: int, adj: list[list[tuple[int, float]]]) -> tuple[
     return end, dist, prev
 
 
+def _dijkstra_to_target(
+    start: int,
+    end: int,
+    adj: list[list[tuple[int, float, float]]],
+) -> tuple[np.ndarray, np.ndarray]:
+    n = len(adj)
+    dist = np.full((n,), np.inf, dtype=np.float64)
+    prev = np.full((n,), -1, dtype=np.int32)
+    dist[start] = 0.0
+    heap: list[tuple[float, int]] = [(0.0, start)]
+    while heap:
+        cur_d, u = heapq.heappop(heap)
+        if cur_d > dist[u] + 1e-9:
+            continue
+        if u == end:
+            break
+        for v, step, radius_weight in adj[u]:
+            edge_cost = float(step / max(0.35, radius_weight))
+            nd = cur_d + edge_cost
+            if nd + 1e-9 < dist[v]:
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(heap, (nd, v))
+    return dist, prev
+
+
 def _reconstruct_path(end: int, prev: np.ndarray) -> list[int]:
     path: list[int] = []
     cur = int(end)
@@ -130,7 +156,61 @@ def _reconstruct_path(end: int, prev: np.ndarray) -> list[int]:
     return path
 
 
-def extract_longest_skeleton_path(skeleton_mask: np.ndarray, spacing_mm: tuple[float, float, float]) -> tuple[np.ndarray, str]:
+def _principal_axis(points: np.ndarray, spacing_mm: tuple[float, float, float]) -> np.ndarray:
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.shape[0] < 3:
+        return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    pts_mm = pts * np.asarray(spacing_mm, dtype=np.float64)[None, :]
+    centered = pts_mm - pts_mm.mean(axis=0, keepdims=True)
+    try:
+        _, _, vh = np.linalg.svd(centered, full_matrices=False)
+        axis = np.asarray(vh[0], dtype=np.float64)
+    except Exception:
+        span = pts_mm.max(axis=0) - pts_mm.min(axis=0)
+        axis = np.zeros((3,), dtype=np.float64)
+        axis[int(np.argmax(span))] = 1.0
+    axis_n = float(np.linalg.norm(axis))
+    if axis_n <= 1e-8:
+        return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    return axis / axis_n
+
+
+def _pick_anchor_indices(
+    points: np.ndarray,
+    degree: list[int],
+    radii_mm: np.ndarray,
+    spacing_mm: tuple[float, float, float],
+) -> tuple[int, int]:
+    pts = np.asarray(points, dtype=np.float64)
+    axis = _principal_axis(pts, spacing_mm)
+    pts_mm = pts * np.asarray(spacing_mm, dtype=np.float64)[None, :]
+    proj = (pts_mm - pts_mm.mean(axis=0, keepdims=True)) @ axis
+    endpoints = np.asarray([i for i, d in enumerate(degree) if d <= 1], dtype=np.int32)
+    candidates = endpoints if endpoints.size >= 2 else np.arange(pts.shape[0], dtype=np.int32)
+    cand_proj = proj[candidates]
+    low_cut = float(np.percentile(cand_proj, 15.0))
+    high_cut = float(np.percentile(cand_proj, 85.0))
+    low_candidates = candidates[cand_proj <= low_cut]
+    high_candidates = candidates[cand_proj >= high_cut]
+    if low_candidates.size == 0:
+        low_candidates = candidates[np.argsort(cand_proj)[: max(1, min(6, candidates.size))]]
+    if high_candidates.size == 0:
+        high_candidates = candidates[np.argsort(cand_proj)[-max(1, min(6, candidates.size)) :]]
+
+    start = int(low_candidates[np.argmax(radii_mm[low_candidates])])
+    end = int(high_candidates[np.argmax(radii_mm[high_candidates])])
+    if start == end:
+        order = np.argsort(cand_proj)
+        start = int(candidates[order[0]])
+        end = int(candidates[order[-1]])
+    return start, end
+
+
+def extract_topology_centerline_path(
+    skeleton_mask: np.ndarray,
+    distance_map_mm: np.ndarray,
+    spacing_mm: tuple[float, float, float],
+) -> tuple[np.ndarray, str]:
     if not np.any(skeleton_mask):
         return np.zeros((0, 3), dtype=np.float64), "skeleton_empty"
 
@@ -145,47 +225,105 @@ def extract_longest_skeleton_path(skeleton_mask: np.ndarray, spacing_mm: tuple[f
     if points.shape[0] < 2:
         return np.zeros((0, 3), dtype=np.float64), "skeleton_too_small"
 
-    adj, degree = _skeleton_graph(points, spacing_mm)
-    endpoints = [i for i, d in enumerate(degree) if d <= 1]
-    if not endpoints:
-        start = 0
+    adj_basic, degree = _skeleton_graph(points, spacing_mm)
+    point_radii = distance_map_mm[points[:, 0], points[:, 1], points[:, 2]].astype(np.float64)
+    start, end = _pick_anchor_indices(points, degree, point_radii, spacing_mm)
+    adj: list[list[tuple[int, float, float]]] = [[] for _ in range(len(adj_basic))]
+    for i, edges in enumerate(adj_basic):
+        for j, step in edges:
+            radius_weight = float((point_radii[i] + point_radii[j]) * 0.5)
+            adj[i].append((j, float(step), radius_weight))
+    dist, prev = _dijkstra_to_target(start, end, adj)
+    if not np.isfinite(dist[end]):
+        far_a, _, _ = _dijkstra_farthest(start, [[(j, s) for (j, s, _r) in edges] for edges in adj])
+        far_b, _, prev_longest = _dijkstra_farthest(far_a, [[(j, s) for (j, s, _r) in edges] for edges in adj])
+        path_idx = _reconstruct_path(far_b, prev_longest)
+        method = "skeleton_longest_path_fallback"
     else:
-        start = endpoints[0]
-    far_a, _, _ = _dijkstra_farthest(start, adj)
-    far_b, _, prev = _dijkstra_farthest(far_a, adj)
-    path_idx = _reconstruct_path(far_b, prev)
+        path_idx = _reconstruct_path(end, prev)
+        method = "minimum_cost_skeleton_path"
     if len(path_idx) < 2:
         return np.zeros((0, 3), dtype=np.float64), "skeleton_path_failed"
-    return points[np.asarray(path_idx, dtype=np.int32)].astype(np.float64), "skeleton_longest_path"
+    return points[np.asarray(path_idx, dtype=np.int32)].astype(np.float64), method
 
 
-def distance_ridge_track(lumen_mask: np.ndarray, distance_map_mm: np.ndarray) -> np.ndarray:
-    nz = int(lumen_mask.shape[2])
-    raw: list[list[float]] = []
-    prev_xy: np.ndarray | None = None
-    for z in range(nz):
-        sl = lumen_mask[:, :, z]
-        if not np.any(sl):
+def _pick_lumen_extreme_seed(
+    lumen_mask: np.ndarray,
+    distance_map_mm: np.ndarray,
+    spacing_mm: tuple[float, float, float],
+    side: str,
+) -> np.ndarray:
+    coords = np.argwhere(lumen_mask)
+    if coords.shape[0] == 0:
+        return np.zeros((3,), dtype=np.int32)
+    axis = _principal_axis(coords, spacing_mm)
+    coords_mm = coords * np.asarray(spacing_mm, dtype=np.float64)[None, :]
+    proj = (coords_mm - coords_mm.mean(axis=0, keepdims=True)) @ axis
+    q = 8.0 if side == "low" else 92.0
+    thr = float(np.percentile(proj, q))
+    if side == "low":
+        candidates = coords[proj <= thr]
+    else:
+        candidates = coords[proj >= thr]
+    if candidates.shape[0] == 0:
+        candidates = coords
+    cand_r = distance_map_mm[candidates[:, 0], candidates[:, 1], candidates[:, 2]]
+    return np.asarray(candidates[int(np.argmax(cand_r))], dtype=np.int32)
+
+
+def minimum_cost_lumen_path(
+    lumen_mask: np.ndarray,
+    distance_map_mm: np.ndarray,
+    spacing_mm: tuple[float, float, float],
+) -> tuple[np.ndarray, str]:
+    if not np.any(lumen_mask):
+        return np.zeros((0, 3), dtype=np.float64), "lumen_empty"
+    shape = lumen_mask.shape
+    start = _pick_lumen_extreme_seed(lumen_mask, distance_map_mm, spacing_mm, "low")
+    end = _pick_lumen_extreme_seed(lumen_mask, distance_map_mm, spacing_mm, "high")
+    start_idx = int(np.ravel_multi_index(tuple(int(v) for v in start), shape))
+    end_idx = int(np.ravel_multi_index(tuple(int(v) for v in end), shape))
+    total = int(np.prod(shape))
+    dist = np.full((total,), np.inf, dtype=np.float64)
+    prev = np.full((total,), -1, dtype=np.int32)
+    dist[start_idx] = 0.0
+    heap: list[tuple[float, int]] = [(0.0, start_idx)]
+
+    while heap:
+        cur_d, flat = heapq.heappop(heap)
+        if cur_d > dist[flat] + 1e-9:
             continue
-        dist_sl = distance_map_mm[:, :, z] * sl.astype(np.float32)
-        if float(dist_sl.max()) <= 0.0:
-            continue
-        cand = np.argwhere(dist_sl >= float(dist_sl.max()) - 1e-4)
-        if cand.shape[0] == 0:
-            continue
-        if prev_xy is None:
-            pick = cand.mean(axis=0)
-        else:
-            d = np.linalg.norm(cand.astype(np.float64) - prev_xy[None, :], axis=1)
-            pick = cand[int(np.argmin(d))].astype(np.float64)
-        prev_xy = np.asarray(pick, dtype=np.float64)
-        raw.append([float(pick[0]), float(pick[1]), float(z)])
-    if len(raw) < 2:
-        return np.zeros((0, 3), dtype=np.float64)
-    pts = np.asarray(raw, dtype=np.float64)
-    x_s = ndimage.gaussian_filter1d(pts[:, 0], sigma=1.0)
-    y_s = ndimage.gaussian_filter1d(pts[:, 1], sigma=1.0)
-    return np.column_stack([x_s, y_s, pts[:, 2]]).astype(np.float64)
+        if flat == end_idx:
+            break
+        x, y, z = np.unravel_index(flat, shape)
+        for ox, oy, oz in OFFSETS:
+            nx = x + ox
+            ny = y + oy
+            nz = z + oz
+            if nx < 0 or ny < 0 or nz < 0 or nx >= shape[0] or ny >= shape[1] or nz >= shape[2]:
+                continue
+            if not bool(lumen_mask[nx, ny, nz]):
+                continue
+            nflat = int(np.ravel_multi_index((nx, ny, nz), shape))
+            step = math.sqrt((ox * spacing_mm[0]) ** 2 + (oy * spacing_mm[1]) ** 2 + (oz * spacing_mm[2]) ** 2)
+            local_radius = float((distance_map_mm[x, y, z] + distance_map_mm[nx, ny, nz]) * 0.5)
+            nd = cur_d + (step / max(0.35, local_radius))
+            if nd + 1e-9 < dist[nflat]:
+                dist[nflat] = nd
+                prev[nflat] = flat
+                heapq.heappush(heap, (nd, nflat))
+
+    if not np.isfinite(dist[end_idx]):
+        return np.zeros((0, 3), dtype=np.float64), "minimum_cost_lumen_path_failed"
+
+    path_flat: list[int] = []
+    cur = end_idx
+    while cur >= 0:
+        path_flat.append(cur)
+        cur = int(prev[cur])
+    path_flat.reverse()
+    points = np.asarray([np.unravel_index(idx, shape) for idx in path_flat], dtype=np.float64)
+    return points, "minimum_cost_lumen_path"
 
 
 def fit_centerline_spline(points_voxel: np.ndarray, affine: np.ndarray, step_mm: float = 1.2) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -249,13 +387,11 @@ def compute_centerline(
     lumen_crop = crop_to_bbox(lumen_mask, bbox)
     distance_map_crop_mm = compute_distance_transform(lumen_crop, spacing_mm)
     skeleton_crop, method = skeletonize_volume(lumen_crop, distance_map_crop_mm)
-    path_vox, path_method = extract_longest_skeleton_path(skeleton_crop, spacing_mm)
+    path_vox, path_method = extract_topology_centerline_path(skeleton_crop, distance_map_crop_mm, spacing_mm)
 
     if path_vox.shape[0] < 2:
-        path_vox = distance_ridge_track(lumen_crop, distance_map_crop_mm)
-        method = f"{method}+distance_ridge_track"
-    else:
-        method = f"{method}+{path_method}"
+        path_vox, path_method = minimum_cost_lumen_path(lumen_crop, distance_map_crop_mm, spacing_mm)
+    method = f"{method}+{path_method}"
 
     if path_vox.shape[0] < 2:
         raise RuntimeError("geometry_centerline_failed")

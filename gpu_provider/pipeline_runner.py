@@ -39,7 +39,6 @@ try:
         mesh_meta,
         save_mask_nifti,
         write_ascii_stl,
-        write_vtk_polydata,
     )
     from .geometry.measurements import build_measurements
     from .geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
@@ -56,7 +55,6 @@ except ImportError:
         mesh_meta,
         save_mask_nifti,
         write_ascii_stl,
-        write_vtk_polydata,
     )
     from geometry.measurements import build_measurements
     from geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
@@ -307,20 +305,35 @@ def run_geometry_pipeline(
     _record_artifact(artifacts_manifest, "lumen_mask_nifti", lumen_mask_path.name, "application/gzip", lumen_mask_path)
 
     t0 = time.time()
-    lumen_mesh = generate_surface_mesh(lumen_mask, affine)
-    lumen_surface_vtk = output_dir / "lumen_surface.vtk"
-    lumen_surface_stl = output_dir / "lumen_surface.stl"
-    write_vtk_polydata(lumen_mesh, lumen_surface_vtk)
-    write_ascii_stl(lumen_mesh, lumen_surface_stl, "lumen_surface")
+    lumen_mesh = generate_surface_mesh(
+        lumen_mask,
+        affine,
+        laplacian_iterations=0,
+        taubin_iterations=0,
+    )
     timers["mesh_seconds"] = round(time.time() - t0, 4)
-    _record_artifact(artifacts_manifest, "lumen_surface_vtk", lumen_surface_vtk.name, "model/vtk", lumen_surface_vtk)
-    _record_artifact(artifacts_manifest, "lumen_surface_stl", lumen_surface_stl.name, "model/stl", lumen_surface_stl)
 
     t0 = time.time()
-    root_mesh = generate_surface_mesh(root_mask if np.any(root_mask) else lumen_mask, affine)
+    root_mesh = generate_surface_mesh(
+        root_mask if np.any(root_mask) else lumen_mask,
+        affine,
+        laplacian_iterations=1,
+        taubin_iterations=1,
+        laplacian_lambda=0.16,
+        taubin_lambda=0.18,
+        taubin_mu=-0.2,
+    )
     root_stl_path = output_dir / "aortic_root.stl"
     write_ascii_stl(root_mesh, root_stl_path, "aortic_root")
-    asc_mesh = generate_surface_mesh(ascending_mask if np.any(ascending_mask) else lumen_mask, affine)
+    asc_mesh = generate_surface_mesh(
+        ascending_mask if np.any(ascending_mask) else lumen_mask,
+        affine,
+        laplacian_iterations=1,
+        taubin_iterations=1,
+        laplacian_lambda=0.14,
+        taubin_lambda=0.16,
+        taubin_mu=-0.18,
+    )
     asc_stl_path = output_dir / "ascending_aorta.stl"
     write_ascii_stl(asc_mesh, asc_stl_path, "ascending_aorta")
     timers["surface_export_seconds"] = round(time.time() - t0, 4)
@@ -477,8 +490,7 @@ def run_geometry_pipeline(
         "geometry_model": {
             "type": "aortic_root_computational_model_v2",
             "lumen_mask": lumen_mask_path.name,
-            "lumen_surface_vtk": lumen_surface_vtk.name,
-            "lumen_surface_stl": lumen_surface_stl.name,
+            "lumen_surface_mesh": mesh_meta(lumen_mesh),
             "root_model_json": aortic_root_model_path.name,
         },
         "centerline": {
@@ -525,8 +537,6 @@ def run_geometry_pipeline(
             "planning_report_pdf": planning_report_pdf.name,
             "segmentation_mask_nifti": mask_path.name,
             "lumen_mask_nifti": lumen_mask_path.name,
-            "lumen_surface_vtk": lumen_surface_vtk.name,
-            "lumen_surface_stl": lumen_surface_stl.name,
             "aortic_root_stl": root_stl_path.name,
             "ascending_aorta_stl": asc_stl_path.name,
             "leaflets_stl": leaflet_stl_path.name,
@@ -536,7 +546,7 @@ def run_geometry_pipeline(
             "aortic_root_model_json": aortic_root_model_path.name,
         },
         "mesh": {
-            "lumen_surface": mesh_meta(lumen_mesh, lumen_surface_stl),
+            "lumen_surface": mesh_meta(lumen_mesh),
             "aortic_root": mesh_meta(root_mesh, root_stl_path),
             "ascending_aorta": mesh_meta(asc_mesh, asc_stl_path),
             "leaflets": mesh_meta(leaflet_model.mesh, leaflet_stl_path),

@@ -47,6 +47,7 @@ def _apply_anatomical_constraints(measurements: dict[str, Any], root_model: Aort
     corrected = {
         "sinus_was_raised_to_annulus": False,
         "stj_was_limited_to_sinus": False,
+        "stj_was_raised_to_annulus": False,
         "commissure_angles_flagged": False,
     }
     if sinus_d is not None and annulus_eq is not None and sinus_d < annulus_eq:
@@ -58,6 +59,11 @@ def _apply_anatomical_constraints(measurements: dict[str, Any], root_model: Aort
         measurements["stj"]["diameter_mm"] = float(sinus_d)
         measurements["stj"]["constraint_corrected_from_mm"] = float(stj_d)
         corrected["stj_was_limited_to_sinus"] = True
+        stj_d = float(sinus_d)
+    if stj_d is not None and annulus_eq is not None and stj_d < annulus_eq:
+        measurements["stj"]["diameter_mm"] = float(annulus_eq)
+        measurements["stj"]["constraint_corrected_from_mm"] = float(stj_d)
+        corrected["stj_was_raised_to_annulus"] = True
 
     comm_checks = root_model.anatomical_constraints.get("checks", []) if isinstance(root_model.anatomical_constraints, dict) else []
     for item in comm_checks:

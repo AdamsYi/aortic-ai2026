@@ -412,6 +412,12 @@ def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[st
             "rhs": sinus_d,
         },
         {
+            "id": "stj_ge_annulus",
+            "accepted": bool(stj_d >= annulus_d - 0.5) if annulus_d > 0 else True,
+            "lhs": stj_d,
+            "rhs": annulus_d,
+        },
+        {
             "id": "commissure_angles_approx_120",
             "accepted": bool(len(comm_spacing) == 3 and np.mean(np.abs(np.asarray(comm_spacing) - 120.0)) <= 22.0),
             "spacing_deg": comm_spacing,

@@ -75,11 +75,22 @@ def detect_landmarks_from_profile(
         search_hi = max(1, sinus_peak_pos)
         annulus_pos = int(np.argmin(radii_s[: search_hi + 1]))
 
+    annulus_radius = float(radii_s[annulus_pos])
     stj_candidates = [i for i in minima if i > sinus_peak_pos]
-    if stj_candidates:
-        stj_pos = stj_candidates[0]
+    valid_stj_candidates = [i for i in stj_candidates if float(radii_s[i]) >= annulus_radius - 0.25]
+    if valid_stj_candidates:
+        stj_pos = valid_stj_candidates[0]
+    elif stj_candidates:
+        recovery = [
+            i
+            for i in range(sinus_peak_pos + 1, len(sections))
+            if float(radii_s[i]) >= annulus_radius - 0.25 and abs(float(deriv[i])) <= np.percentile(np.abs(deriv[sinus_peak_pos + 1 :]), 55.0)
+        ]
+        stj_pos = recovery[0] if recovery else stj_candidates[0]
     else:
-        stj_pos = int(sinus_peak_pos + np.argmin(radii_s[sinus_peak_pos:]))
+        tail = radii_s[sinus_peak_pos:]
+        recovered = np.flatnonzero(tail >= annulus_radius - 0.25)
+        stj_pos = int(sinus_peak_pos + (int(recovered[0]) if recovered.size else int(np.argmin(tail))))
 
     tail = range(min(len(sections) - 1, stj_pos + 3), len(sections))
     stable = []

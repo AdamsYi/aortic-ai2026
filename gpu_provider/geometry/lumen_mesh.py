@@ -54,14 +54,14 @@ def extract_lumen_mask(multiclass_mask: np.ndarray, spacing_mm: tuple[float, flo
     )
     bbox = mask_bounding_box(lumen, margin_vox=margin)
     lumen_crop = crop_to_bbox(lumen, bbox)
-    closing_iter = max(1, mm_to_vox_xy(1.2, spacing_mm))
+    closing_iter = max(1, mm_to_vox_xy(0.8, spacing_mm))
     lumen_crop = ndimage.binary_closing(lumen_crop, structure=np.ones((3, 3, 3), dtype=bool), iterations=closing_iter)
     lumen_crop = ndimage.binary_fill_holes(lumen_crop)
     lumen_crop = remove_small_components(
         lumen_crop,
         min_voxels=max(32, int(round(200.0 / max(1.0, voxel_volume_mm3(spacing_mm))))),
     )
-    lumen_crop = smooth_binary_mask(lumen_crop, spacing_mm, sigma_mm=0.7)
+    lumen_crop = smooth_binary_mask(lumen_crop, spacing_mm, sigma_mm=0.25)
     lumen_crop = ndimage.binary_fill_holes(lumen_crop)
     lumen = paste_bbox(lumen_crop, bbox, lumen.shape, dtype=bool)
     lumen = keep_largest_component(lumen)
@@ -213,10 +213,10 @@ def write_ascii_stl(mesh: SurfaceMesh, out_path: Path, solid_name: str) -> None:
             )
 
 
-def mesh_meta(mesh: SurfaceMesh, out_path: Path) -> dict[str, object]:
+def mesh_meta(mesh: SurfaceMesh, out_path: Path | None = None) -> dict[str, object]:
     return {
         "vertices": int(mesh.vertices_world.shape[0]),
         "faces": int(mesh.faces.shape[0]),
-        "path": str(out_path),
+        "path": str(out_path) if out_path is not None else None,
         "empty_mesh": bool(mesh.faces.shape[0] == 0),
     }
