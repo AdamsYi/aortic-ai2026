@@ -21,11 +21,14 @@ class AorticRootComputationalModel:
     sinotubular_junction: dict[str, Any]
     coronary_ostia: dict[str, Any]
     ascending_axis: dict[str, Any]
+    ascending_aorta_axis: dict[str, Any]
     centerline: dict[str, Any]
     anatomical_constraints: dict[str, Any]
+    confidence_scores: dict[str, Any]
     reference_sections: dict[str, Any]
     annulus_plane: dict[str, Any]
     leaflet_geometry: dict[str, Any]
+    leaflet_meshes: list[dict[str, Any]]
     digital_twin_simulation: dict[str, Any]
 
 
@@ -440,24 +443,89 @@ def build_anatomical_constraints(model: AorticRootComputationalModel) -> dict[st
         },
     ]
     accepted = all(bool(item.get("accepted")) for item in checks)
-    return {"accepted": accepted, "checks": checks}
+    violations = [str(item.get("id")) for item in checks if not bool(item.get("accepted"))]
+    corrections_applied: list[str] = []
+    geometry_method = str(model.reference_sections.get("geometry_stats", {}).get("detection_method") or "")
+    if "regularized" in geometry_method:
+        corrections_applied.append("commissure_angular_regularization")
+    leaflet_regularization = model.leaflet_geometry.get("regularization", {}) if isinstance(model.leaflet_geometry, dict) else {}
+    if bool(leaflet_regularization.get("applied")):
+        corrections_applied.append("leaflet_height_regularization")
+    return {
+        "accepted": accepted,
+        "checks": checks,
+        "violations": violations,
+        "corrections_applied": corrections_applied,
+    }
+
+
+def build_confidence_scores(model: AorticRootComputationalModel) -> dict[str, Any]:
+    annulus_conf = float(model.annulus_plane.get("confidence", 0.0) or 0.0)
+    hinge_conf = float(model.hinge_curve.get("confidence", annulus_conf) or annulus_conf)
+    geom_stats = model.reference_sections.get("geometry_stats", {}) if isinstance(model.reference_sections, dict) else {}
+    spacing_error = geom_stats.get("commissure_spacing_error_deg")
+    if spacing_error is None:
+        commissure_conf = None
+    else:
+        commissure_conf = float(np.clip(1.0 - (float(spacing_error) / 45.0), 0.1, 0.99))
+    left_conf = model.coronary_ostia.get("left", {}).get("confidence")
+    right_conf = model.coronary_ostia.get("right", {}).get("confidence")
+    leaflet_items = model.leaflet_geometry.get("leaflets", []) if isinstance(model.leaflet_geometry, dict) else []
+    leaflet_scores: list[float] = []
+    for item in leaflet_items:
+        status = str(item.get("status") or "uncertain")
+        score = 0.2 if status == "not_found" else (0.45 if status == "uncertain" else 0.8)
+        if bool(item.get("regularized")):
+            score -= 0.1
+        leaflet_scores.append(float(np.clip(score, 0.05, 0.95)))
+    leaflet_conf = float(np.mean(leaflet_scores)) if leaflet_scores else None
+    overall_parts = [annulus_conf, hinge_conf]
+    for extra in [commissure_conf, leaflet_conf, left_conf, right_conf]:
+        if extra is not None:
+            overall_parts.append(float(extra))
+    overall = float(np.mean(overall_parts)) if overall_parts else 0.0
+    return {
+        "annulus_plane": annulus_conf,
+        "hinge_curve": hinge_conf,
+        "commissures": commissure_conf,
+        "coronary_ostia": {
+            "left": float(left_conf) if left_conf is not None else None,
+            "right": float(right_conf) if right_conf is not None else None,
+        },
+        "leaflet_geometry": leaflet_conf,
+        "overall": overall,
+    }
 
 
 def attach_coronary_ostia(model: AorticRootComputationalModel, coronary_ostia: dict[str, Any]) -> AorticRootComputationalModel:
     model.coronary_ostia = coronary_ostia
     model.anatomical_constraints = build_anatomical_constraints(model)
+    model.confidence_scores = build_confidence_scores(model)
     return model
 
 
 def attach_leaflet_geometry(model: AorticRootComputationalModel, leaflet_geometry: dict[str, Any]) -> AorticRootComputationalModel:
     model.leaflet_geometry = leaflet_geometry
+    leaflets = leaflet_geometry.get("leaflets", []) if isinstance(leaflet_geometry, dict) else []
+    model.leaflet_meshes = [
+        {
+            "leaflet_id": item.get("leaflet_id"),
+            "name": item.get("name"),
+            "mesh_vertices": item.get("mesh_vertices"),
+            "mesh_faces": item.get("mesh_faces"),
+            "status": item.get("status"),
+        }
+        for item in leaflets
+    ]
     model.anatomical_constraints = build_anatomical_constraints(model)
+    model.confidence_scores = build_confidence_scores(model)
     return model
 
 
 def attach_digital_twin_simulation(model: AorticRootComputationalModel, digital_twin_simulation: dict[str, Any]) -> AorticRootComputationalModel:
     model.digital_twin_simulation = digital_twin_simulation
     model.anatomical_constraints = build_anatomical_constraints(model)
+    model.confidence_scores = build_confidence_scores(model)
     return model
 
 
@@ -527,8 +595,10 @@ def build_aortic_root_model(
             "right": {"status": "not_evaluated", "height_mm": None, "confidence": 0.0},
         },
         ascending_axis=ascending_axis,
+        ascending_aorta_axis=ascending_axis,
         centerline=centerline,
         anatomical_constraints={},
+        confidence_scores={},
         reference_sections={
             "annulus": annulus_ring,
             "sinus": sinus_ring,
@@ -538,7 +608,9 @@ def build_aortic_root_model(
         },
         annulus_plane=annulus_plane,
         leaflet_geometry={},
+        leaflet_meshes=[],
         digital_twin_simulation={},
     )
     model.anatomical_constraints = build_anatomical_constraints(model)
+    model.confidence_scores = build_confidence_scores(model)
     return model

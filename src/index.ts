@@ -2860,6 +2860,38 @@ const DEMO_HTML = `<!doctype html>
       }
     }
 
+    function getViewerFocusBounds() {
+      const nx = state.dims.x || 1;
+      const ny = state.dims.y || 1;
+      const fallback = state.bodyBounds || { minX: 0, maxX: nx - 1, minY: 0, maxY: ny - 1 };
+      const bounds = state.stats?.classBounds;
+      if (!bounds) return fallback;
+      const root = bounds[1];
+      const leaf = bounds[2];
+      const asc = bounds[3];
+      const selected = [root, leaf, asc].filter((b) => b && b.maxX >= b.minX && b.maxY >= b.minY);
+      if (!selected.length) return fallback;
+      let minX = nx - 1;
+      let minY = ny - 1;
+      let maxX = 0;
+      let maxY = 0;
+      for (const b of selected) {
+        if (b.minX < minX) minX = b.minX;
+        if (b.minY < minY) minY = b.minY;
+        if (b.maxX > maxX) maxX = b.maxX;
+        if (b.maxY > maxY) maxY = b.maxY;
+      }
+      if (maxX <= minX || maxY <= minY) return fallback;
+      const padX = Math.max(8, Math.floor((maxX - minX + 1) * 0.1));
+      const padY = Math.max(8, Math.floor((maxY - minY + 1) * 0.1));
+      return {
+        minX: clamp(minX - padX, 0, nx - 1),
+        maxX: clamp(maxX + padX, 0, nx - 1),
+        minY: clamp(minY - padY, 0, ny - 1),
+        maxY: clamp(maxY + padY, 0, ny - 1)
+      };
+    }
+
     function currentKeySliceName(z) {
       const m = state.keySliceMap || {};
       const names = [];
@@ -2891,7 +2923,7 @@ const DEMO_HTML = `<!doctype html>
     function resetView() {
       const rect = canvas.getBoundingClientRect();
       if (state.dims.x > 0 && state.dims.y > 0 && rect.width > 0 && rect.height > 0) {
-        const b = state.bodyBounds || { minX: 0, maxX: state.dims.x - 1, minY: 0, maxY: state.dims.y - 1 };
+        const b = getViewerFocusBounds();
         const bw = Math.max(1, b.maxX - b.minX + 1);
         const bh = Math.max(1, b.maxY - b.minY + 1);
         const fit = Math.min((rect.width * 0.96) / bw, (rect.height * 0.96) / bh);
@@ -4079,7 +4111,7 @@ const DEMO_HTML = `<!doctype html>
       const cy = rect.height / 2;
       const sx = state.zoom;
       const sy = state.zoom;
-      const b = state.bodyBounds || { minX: 0, maxX: nx - 1, minY: 0, maxY: ny - 1 };
+      const b = getViewerFocusBounds();
       const bw = Math.max(1, b.maxX - b.minX + 1);
       const bh = Math.max(1, b.maxY - b.minY + 1);
       const tx = cx - ((b.minX + bw / 2) * sx) + state.panX;

@@ -84,9 +84,8 @@ def _sanity_checks(measurements: dict[str, Any], root_model: AorticRootModel) ->
     if annulus_eq is not None and stj_d is not None and stj_d > annulus_eq * 2.4:
         errors.append("stj_annulus_ratio_inconsistent")
     if root_model.anatomical_constraints and not bool(root_model.anatomical_constraints.get("accepted", True)):
-        for item in root_model.anatomical_constraints.get("checks", []):
-            if not bool(item.get("accepted")):
-                errors.append(str(item.get("id")))
+        for item in root_model.anatomical_constraints.get("violations", []):
+            errors.append(str(item))
     return {"accepted": len(errors) == 0, "errors": errors}
 
 
@@ -267,10 +266,13 @@ def build_measurements(
             "sinotubular_junction": root_model.sinotubular_junction,
             "coronary_ostia": root_model.coronary_ostia,
             "ascending_axis": root_model.ascending_axis,
+            "ascending_aorta_axis": root_model.ascending_aorta_axis,
             "centerline": root_model.centerline,
             "leaflet_geometry": root_model.leaflet_geometry,
+            "leaflet_meshes": root_model.leaflet_meshes,
             "digital_twin_simulation": root_model.digital_twin_simulation,
             "anatomical_constraints": root_model.anatomical_constraints,
+            "confidence_scores": root_model.confidence_scores,
             "reference_sections": root_model.reference_sections,
         },
         "coronary_detection": coronary,

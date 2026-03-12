@@ -46,7 +46,7 @@ def build_digital_twin_simulation(
             "recommended_graft_size_mm": vsrr.get("recommended_graft_size_mm"),
             "support_segment_length_mm": pears.get("support_segment_length_mm"),
             "annulus_to_stj_mismatch_mm": vsrr.get("annulus_stj_mismatch_mm"),
-            "axis": root_model.ascending_axis,
+            "axis": root_model.ascending_aorta_axis or root_model.ascending_axis,
         },
         "virtual_valve_placement": {
             "status": "available" if nominal_valve is not None else "unavailable",
