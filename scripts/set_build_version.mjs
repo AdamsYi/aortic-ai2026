@@ -18,11 +18,12 @@ if (!hash) {
 }
 
 const original = readFileSync(wranglerPath, 'utf8');
-const updated = original.replace(/BUILD_VERSION = ".*?"/, `BUILD_VERSION = "${hash}"`);
-
-if (updated === original) {
-  throw new Error('failed_to_update_build_version_in_wrangler');
+if (!/BUILD_VERSION = ".*?"/.test(original)) {
+  throw new Error('failed_to_find_build_version_in_wrangler');
 }
 
-writeFileSync(wranglerPath, updated, 'utf8');
+const updated = original.replace(/BUILD_VERSION = ".*?"/, `BUILD_VERSION = "${hash}"`);
+if (updated !== original) {
+  writeFileSync(wranglerPath, updated, 'utf8');
+}
 process.stdout.write(`${hash}\n`);

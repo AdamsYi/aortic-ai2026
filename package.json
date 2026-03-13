@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:versioned": "node scripts/set_build_version.mjs && wrangler deploy",
+    "build:workstation": "node scripts/build_workstation.mjs",
+    "dev": "npm run build:workstation && wrangler dev",
+    "deploy": "npm run build:workstation && wrangler deploy",
+    "deploy:versioned": "node scripts/set_build_version.mjs && npm run build:workstation && wrangler deploy",
+    "check:workstation": "tsc -p tsconfig.workstation.json --noEmit",
     "check:control-plane-clean": "bash scripts/assert_control_plane_clean.sh",
     "d1:migrate:local": "wrangler d1 migrations apply aortic_meta --local",
     "d1:migrate:remote": "wrangler d1 migrations apply aortic_meta --remote",
@@ -14,8 +16,17 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260303.0",
+    "esbuild": "^0.27.4",
     "playwright-core": "^1.58.2",
     "typescript": "^5.7.3",
     "wrangler": "^4.12.0"
+  },
+  "dependencies": {
+    "@cornerstonejs/core": "^4.19.2",
+    "@cornerstonejs/dicom-image-loader": "^4.19.2",
+    "@cornerstonejs/nifti-volume-loader": "^4.19.2",
+    "@cornerstonejs/tools": "^4.19.2",
+    "dicom-parser": "^1.8.21",
+    "fflate": "^0.8.2"
   }
 }

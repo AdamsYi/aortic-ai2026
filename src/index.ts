@@ -1,3 +1,9 @@
+import {
+  WORKSTATION_APP_JS,
+  WORKSTATION_DICOM_WORKER_JS,
+  WORKSTATION_STYLE_CSS,
+} from "./generated/workstationAssets";
+
 interface Env {
   DB: D1Database;
   R2_RAW: R2Bucket;
@@ -11,6 +17,8 @@ interface Env {
   INFERENCE_CALLBACK_SECRET?: string;
   API_BASE_URL?: string;
   BUILD_VERSION?: string;
+  ARTIFACT_LINK_SECRET?: string;
+  ARTIFACT_LINK_TTL_SECONDS?: string;
 }
 
 type JobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -64,10 +72,19 @@ const jsonHeaders = {
 };
 
 const FALLBACK_BUILD_VERSION = "20260312-1800";
+const DEFAULT_SIGNED_LINK_TTL_SECONDS = 3600;
 
 function getBuildVersion(env?: Env): string {
   const raw = String(env?.BUILD_VERSION || "").trim();
   return raw || FALLBACK_BUILD_VERSION;
+}
+
+function getArtifactLinkSecret(env?: Env): string {
+  return String(env?.ARTIFACT_LINK_SECRET || "").trim();
+}
+
+function getArtifactLinkTtlSeconds(env?: Env): number {
+  return parsePositiveInt(env?.ARTIFACT_LINK_TTL_SECONDS, DEFAULT_SIGNED_LINK_TTL_SECONDS);
 }
 
 function textResponse(body: string, contentType: string): Response {
@@ -137,6 +154,308 @@ function toPublicArtifactRecord(row: Record<string, unknown>): Record<string, un
   };
 }
 
+async function hmacSha256Hex(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function timingSafeHexEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function buildSignedPath(path: string, env: Env, ttlSeconds?: number): Promise<string> {
+  const secret = getArtifactLinkSecret(env);
+  if (!secret) return path;
+  const expiresAt = Math.floor(Date.now() / 1000) + Math.max(60, ttlSeconds || getArtifactLinkTtlSeconds(env));
+  const sig = await hmacSha256Hex(secret, `${path}|${expiresAt}`);
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}exp=${expiresAt}&sig=${sig}`;
+}
+
+async function requireSignedAccess(request: Request, env: Env): Promise<Response | null> {
+  const secret = getArtifactLinkSecret(env);
+  if (!secret) return null;
+  const url = new URL(request.url);
+  const expRaw = url.searchParams.get("exp") || "";
+  const sig = (url.searchParams.get("sig") || "").trim();
+  const exp = Number.parseInt(expRaw, 10);
+  if (!Number.isFinite(exp) || exp <= 0) return json({ error: "signed_url_required" }, 401);
+  if (Math.floor(Date.now() / 1000) > exp) return json({ error: "signed_url_expired" }, 401);
+  if (!sig) return json({ error: "signed_url_required" }, 401);
+  const expected = await hmacSha256Hex(secret, `${url.pathname}|${exp}`);
+  if (!timingSafeHexEqual(sig, expected)) return json({ error: "invalid_signature" }, 401);
+  return null;
+}
+
+function deepMergeRecord(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const cur = out[key];
+      out[key] =
+        cur && typeof cur === "object" && !Array.isArray(cur)
+          ? deepMergeRecord(cur as Record<string, unknown>, value as Record<string, unknown>)
+          : deepMergeRecord({}, value as Record<string, unknown>);
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+async function safeFirst<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch {
+    return null;
+  }
+}
+
+async function safeAll(promise: Promise<D1Result<Record<string, unknown>>>): Promise<Array<Record<string, unknown>>> {
+  try {
+    const out = await promise;
+    return (out.results as Array<Record<string, unknown>>) || [];
+  } catch {
+    return [];
+  }
+}
+
+async function safeRun(promise: Promise<unknown>): Promise<boolean> {
+  try {
+    await promise;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeParseJsonText(text: unknown): Record<string, unknown> {
+  if (typeof text !== "string" || !text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function upsertStudyRepository(
+  env: Env,
+  studyId: string,
+  patch: Record<string, unknown>,
+  attrs?: {
+    rawFilename?: string | null;
+    imageBytes?: number | null;
+    imageSha256?: string | null;
+    ingestionFormat?: string | null;
+  }
+): Promise<void> {
+  const current = await safeFirst(
+    env.DB.prepare(`SELECT metadata_json, raw_filename, image_bytes, image_sha256, ingestion_format FROM study_repository WHERE study_id = ?1`)
+      .bind(studyId)
+      .first<Record<string, unknown>>()
+  );
+  const merged = deepMergeRecord(safeParseJsonText(current?.metadata_json), patch);
+  await safeRun(
+    env.DB.prepare(
+      `INSERT INTO study_repository (study_id, raw_filename, image_bytes, image_sha256, ingestion_format, metadata_json)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(study_id) DO UPDATE SET
+         raw_filename = COALESCE(excluded.raw_filename, study_repository.raw_filename),
+         image_bytes = COALESCE(excluded.image_bytes, study_repository.image_bytes),
+         image_sha256 = COALESCE(excluded.image_sha256, study_repository.image_sha256),
+         ingestion_format = COALESCE(excluded.ingestion_format, study_repository.ingestion_format),
+         metadata_json = excluded.metadata_json,
+         updated_at = CURRENT_TIMESTAMP`
+    )
+      .bind(
+        studyId,
+        attrs?.rawFilename ?? (current?.raw_filename as string | null) ?? null,
+        attrs?.imageBytes ?? (current?.image_bytes as number | null) ?? null,
+        attrs?.imageSha256 ?? (current?.image_sha256 as string | null) ?? null,
+        attrs?.ingestionFormat ?? (current?.ingestion_format as string | null) ?? null,
+        JSON.stringify(merged)
+      )
+      .run()
+  );
+}
+
+function summarizePipelineRun(resultJson: Record<string, unknown>, source: string, providerJobId: string | null, env: Env): Record<string, unknown> {
+  const inputMeta = (resultJson.input_metadata && typeof resultJson.input_metadata === "object"
+    ? (resultJson.input_metadata as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  const pipeline = (resultJson.pipeline && typeof resultJson.pipeline === "object"
+    ? (resultJson.pipeline as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  const pipelineVersion = (resultJson.pipeline_version && typeof resultJson.pipeline_version === "object"
+    ? (resultJson.pipeline_version as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  const model = (resultJson.aortic_root_computational_model && typeof resultJson.aortic_root_computational_model === "object"
+    ? (resultJson.aortic_root_computational_model as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  const phaseMeta = (model.phase_metadata && typeof model.phase_metadata === "object"
+    ? (model.phase_metadata as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  return {
+    provider_job_id: providerJobId,
+    source_mode: source,
+    pipeline_version: stringOr(pipelineVersion.pipeline_version, stringOr(pipeline.pipeline_version, "unknown")),
+    build_version: getBuildVersion(env),
+    computational_model: stringOr(pipelineVersion.computational_model, stringOr(model.type, "unknown")),
+    centerline_method: stringOr(pipelineVersion.centerline_method, stringOr((resultJson.centerline as Record<string, unknown> | undefined)?.method, "unknown")),
+    measurement_method: stringOr(pipelineVersion.measurement_method, stringOr(pipeline.measurement_method, "unknown")),
+    input_kind: stringOr(inputMeta.input_kind, stringOr((pipeline.input_prep as Record<string, unknown> | undefined)?.input_kind, "unknown")),
+    reported_phase: stringOr(phaseMeta.reported_phase, stringOr(inputMeta.reported_phase, "unknown")),
+    selected_phase: stringOr(phaseMeta.phase_guess, stringOr(inputMeta.phase_guess, "unknown")),
+    runtime_seconds: typeof pipeline.runtime_seconds === "number" ? pipeline.runtime_seconds : null,
+    stage_timings_json: JSON.stringify(resultJson.stage_timings_seconds || {}),
+    run_summary_json: JSON.stringify(
+      sanitizePublicValue({
+        input_metadata: inputMeta,
+        pipeline,
+        pipeline_version: pipelineVersion,
+        phase_metadata: phaseMeta,
+        provenance: model.provenance,
+        risk_flags: resultJson.risk_flags,
+      }) || {}
+    ),
+  };
+}
+
+async function recordPipelineRun(
+  env: Env,
+  jobId: string,
+  studyId: string,
+  resultJson: Record<string, unknown>,
+  source: "mock" | "inline" | "callback",
+  providerJobId: string | null
+): Promise<void> {
+  const summary = summarizePipelineRun(resultJson, source, providerJobId, env);
+  await safeRun(
+    env.DB.prepare(
+      `INSERT INTO pipeline_runs (
+         id, job_id, study_id, provider_job_id, source_mode, pipeline_version, build_version, computational_model,
+         centerline_method, measurement_method, input_kind, reported_phase, selected_phase, runtime_seconds,
+         stage_timings_json, run_summary_json
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+       ON CONFLICT(job_id) DO UPDATE SET
+         provider_job_id = excluded.provider_job_id,
+         source_mode = excluded.source_mode,
+         pipeline_version = excluded.pipeline_version,
+         build_version = excluded.build_version,
+         computational_model = excluded.computational_model,
+         centerline_method = excluded.centerline_method,
+         measurement_method = excluded.measurement_method,
+         input_kind = excluded.input_kind,
+         reported_phase = excluded.reported_phase,
+         selected_phase = excluded.selected_phase,
+         runtime_seconds = excluded.runtime_seconds,
+         stage_timings_json = excluded.stage_timings_json,
+         run_summary_json = excluded.run_summary_json,
+         updated_at = CURRENT_TIMESTAMP`
+    )
+      .bind(
+        crypto.randomUUID(),
+        jobId,
+        studyId,
+        nullableString(summary.provider_job_id),
+        nullableString(summary.source_mode),
+        nullableString(summary.pipeline_version),
+        nullableString(summary.build_version),
+        nullableString(summary.computational_model),
+        nullableString(summary.centerline_method),
+        nullableString(summary.measurement_method),
+        nullableString(summary.input_kind),
+        nullableString(summary.reported_phase),
+        nullableString(summary.selected_phase),
+        summary.runtime_seconds,
+        String(summary.stage_timings_json || "{}"),
+        String(summary.run_summary_json || "{}")
+      )
+      .run()
+  );
+}
+
+async function getPipelineRun(jobId: string, env: Env): Promise<Record<string, unknown> | null> {
+  const row = await safeFirst(
+    env.DB.prepare(
+      `SELECT provider_job_id, source_mode, pipeline_version, build_version, computational_model,
+              centerline_method, measurement_method, input_kind, reported_phase, selected_phase,
+              runtime_seconds, stage_timings_json, run_summary_json, created_at, updated_at
+       FROM pipeline_runs WHERE job_id = ?1`
+    )
+      .bind(jobId)
+      .first<Record<string, unknown>>()
+  );
+  if (!row) return null;
+  return {
+    ...row,
+    stage_timings: safeParseJsonText(row.stage_timings_json),
+    run_summary: safeParseJsonText(row.run_summary_json),
+  };
+}
+
+async function recordArtifactAccess(
+  env: Env,
+  request: Request,
+  scope: "study_raw" | "job_artifact",
+  studyId: string | null,
+  jobId: string | null,
+  artifactType: string | null,
+  accessMode: "signed" | "unsigned"
+): Promise<void> {
+  await safeRun(
+    env.DB.prepare(
+      `INSERT INTO artifact_access_audit (id, scope, study_id, job_id, artifact_type, access_mode, client_ip, user_agent)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+    )
+      .bind(
+        crypto.randomUUID(),
+        scope,
+        studyId,
+        jobId,
+        artifactType,
+        accessMode,
+        nullableString(request.headers.get("cf-connecting-ip")),
+        nullableString(request.headers.get("user-agent"))
+      )
+      .run()
+  );
+}
+
+async function buildJobLinks(jobId: string, studyId: string, env: Env): Promise<Record<string, string>> {
+  const links = {
+    raw_ct: `/studies/${studyId}/raw`,
+    mask_multiclass: `/jobs/${jobId}/artifacts/mask_output`,
+    segmentation_mask_nifti: `/jobs/${jobId}/artifacts/segmentation_mask_nifti`,
+    result_json: `/jobs/${jobId}/artifacts/result_json`,
+    provider_receipt: `/jobs/${jobId}/artifacts/provider_receipt`,
+    measurements_json: `/jobs/${jobId}/artifacts/measurements_json`,
+    planning_report_pdf: `/jobs/${jobId}/artifacts/planning_report_pdf`,
+    aortic_root_stl: `/jobs/${jobId}/artifacts/aortic_root_stl`,
+    ascending_aorta_stl: `/jobs/${jobId}/artifacts/ascending_aorta_stl`,
+    leaflets_stl: `/jobs/${jobId}/artifacts/leaflets_stl`,
+    centerline_json: `/jobs/${jobId}/artifacts/centerline_json`,
+    annulus_plane_json: `/jobs/${jobId}/artifacts/annulus_plane_json`,
+    aortic_root_model_json: `/jobs/${jobId}/artifacts/aortic_root_model_json`,
+    leaflet_model_json: `/jobs/${jobId}/artifacts/leaflet_model_json`,
+    job_api: `/jobs/${jobId}`,
+  };
+  const out: Record<string, string> = {};
+  for (const [key, path] of Object.entries(links)) out[key] = await buildSignedPath(path, env);
+  return out;
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     try {
@@ -182,6 +501,10 @@ export default {
         return textResponse(getDemoAppJs(getBuildVersion(env)), "text/javascript; charset=utf-8");
       }
 
+      if (request.method === "GET" && path === `/assets/dicom-zip-worker.${getBuildVersion(env)}.js`) {
+        return textResponse(getDicomZipWorkerJs(), "text/javascript; charset=utf-8");
+      }
+
       if (request.method === "GET" && path === "/demo") {
         return html(renderDemoHtml(getBuildVersion(env)));
       }
@@ -207,7 +530,7 @@ export default {
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/raw")) {
         const parts = path.split("/");
-        return streamStudyRaw(parts[2] ?? "", env);
+        return streamStudyRaw(request, parts[2] ?? "", env);
       }
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/meta")) {
@@ -215,9 +538,19 @@ export default {
         return getStudyMeta(parts[2] ?? "", env);
       }
 
+      if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/repository")) {
+        const parts = path.split("/");
+        return getStudyRepository(parts[2] ?? "", env);
+      }
+
+      if (request.method === "GET" && path.startsWith("/workstation/cases/")) {
+        const parts = path.split("/");
+        return getWorkstationCase(parts[3] ?? "", env);
+      }
+
       if (request.method === "GET" && path.startsWith("/jobs/") && path.includes("/artifacts/")) {
         const parts = path.split("/");
-        return streamJobArtifact(parts[2] ?? "", parts[4] ?? "", env);
+        return streamJobArtifact(request, parts[2] ?? "", parts[4] ?? "", env);
       }
 
       if (request.method === "GET" && path.startsWith("/jobs/")) {
@@ -291,6 +624,28 @@ async function createUploadUrl(payload: any, env: Env): Promise<Response> {
     .bind(sessionId, studyId, objectKey, tokenHash, expiresAt)
     .run();
 
+  await upsertStudyRepository(
+    env,
+    studyId,
+    {
+      upload_request: {
+        filename: safeFilename,
+        modality: stringOr(payload.modality, "CTA"),
+        image_format: stringOr(payload.image_format, "nifti"),
+        source_dataset: nullableString(payload.source_dataset),
+        phase: nullableString(payload.phase),
+        created_at: new Date().toISOString(),
+      },
+      repository: {
+        raw_object_key: objectKey,
+      },
+    },
+    {
+      rawFilename: safeFilename,
+      ingestionFormat: stringOr(payload.image_format, "nifti"),
+    }
+  );
+
   return json(
     {
       study_id: studyId,
@@ -360,9 +715,9 @@ async function consumeUploadSession(request: Request, env: Env, sessionId: strin
   const tokenHash = await sha256Hex(token);
   if (tokenHash !== row.upload_token_hash) return json({ error: "invalid_token" }, 401);
 
-  if (!request.body) return json({ error: "missing_body" }, 400);
-
-  const putResult = await env.R2_RAW.put(row.object_key, request.body, {
+  const bodyBytes = new Uint8Array(await request.arrayBuffer());
+  if (!bodyBytes.byteLength) return json({ error: "missing_body" }, 400);
+  const putResult = await env.R2_RAW.put(row.object_key, bodyBytes, {
     httpMetadata: {
       contentType: request.headers.get("content-type") || "application/octet-stream"
     }
@@ -370,6 +725,22 @@ async function consumeUploadSession(request: Request, env: Env, sessionId: strin
 
   await env.DB.prepare(`UPDATE upload_sessions SET consumed = 1 WHERE id = ?1`).bind(sessionId).run();
   await env.DB.prepare(`UPDATE studies SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(row.study_id).run();
+  await upsertStudyRepository(
+    env,
+    String(row.study_id),
+    {
+      upload_result: {
+        etag: putResult?.etag ?? null,
+        version: putResult?.version ?? null,
+        uploaded_at: new Date().toISOString(),
+        content_type: request.headers.get("content-type") || "application/octet-stream",
+      },
+    },
+    {
+      imageBytes: bodyBytes.byteLength,
+      imageSha256: await sha256HexFromBytes(bodyBytes),
+    }
+  );
 
   return json({
     ok: true,
@@ -438,10 +809,15 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
     .bind(jobId)
     .all();
 
+  const links = await buildJobLinks(jobId, String(job.study_id), env);
+  const pipelineRun = await getPipelineRun(jobId, env);
+
   return json({
     ...job,
     artifacts: (artifacts.results as Array<Record<string, unknown>>).map((row) => toPublicArtifactRecord(row)),
-    metrics: metrics.results
+    metrics: metrics.results,
+    links,
+    pipeline_run: pipelineRun
   });
 }
 
@@ -551,6 +927,9 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
   const labelKeys = extractLabelKeys(resultPayload);
   const clinicalTargets = buildClinicalTargets(labelKeys);
 
+  const links = await buildJobLinks(jobId, rawStudyId, env);
+  const pipelineRun = await getPipelineRun(jobId, env);
+
   return json({
     ...job,
     artifacts: (artifacts.results as Array<Record<string, unknown>>).map((row) => toPublicArtifactRecord(row)),
@@ -561,35 +940,344 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
       process_seconds: processSeconds,
       total_seconds: totalSeconds
     },
-    links: {
-      raw_ct: `/studies/${rawStudyId}/raw`,
-      mask_multiclass: `/jobs/${jobId}/artifacts/mask_output`,
-      segmentation_mask_nifti: `/jobs/${jobId}/artifacts/segmentation_mask_nifti`,
-      result_json: `/jobs/${jobId}/artifacts/result_json`,
-      provider_receipt: `/jobs/${jobId}/artifacts/provider_receipt`,
-      measurements_json: `/jobs/${jobId}/artifacts/measurements_json`,
-      planning_report_pdf: `/jobs/${jobId}/artifacts/planning_report_pdf`,
-      aortic_root_stl: `/jobs/${jobId}/artifacts/aortic_root_stl`,
-      ascending_aorta_stl: `/jobs/${jobId}/artifacts/ascending_aorta_stl`,
-      leaflets_stl: `/jobs/${jobId}/artifacts/leaflets_stl`,
-      centerline_json: `/jobs/${jobId}/artifacts/centerline_json`,
-      annulus_plane_json: `/jobs/${jobId}/artifacts/annulus_plane_json`,
-      aortic_root_model_json: `/jobs/${jobId}/artifacts/aortic_root_model_json`,
-      leaflet_model_json: `/jobs/${jobId}/artifacts/leaflet_model_json`,
-      job_api: `/jobs/${jobId}`
-    },
+    links,
     study_meta: {
       raw_study_id: rawStudyId,
       source_dataset: preferredStudy?.source_dataset || null,
       phase: preferredStudy?.phase || null
     },
+    pipeline_run: pipelineRun || (resultPayload ? summarizePipelineRun(resultPayload, "historical", null, env) : null),
     label_keys: labelKeys,
     clinical_targets: clinicalTargets
   });
 }
 
-async function streamStudyRaw(studyId: string, env: Env): Promise<Response> {
+async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
+  if (!jobId) return json({ error: "missing_job_id" }, 400);
+
+  const job = await env.DB.prepare(
+    `SELECT id, study_id, job_type, status, model_tag, error_message, created_at, started_at, finished_at
+     FROM jobs WHERE id = ?1`
+  )
+    .bind(jobId)
+    .first<Record<string, unknown>>();
+  if (!job) return json({ error: "job_not_found" }, 404);
+
+  const study = await env.DB.prepare(
+    `SELECT id, patient_code, source_dataset, image_key, image_format, modality, phase, created_at, updated_at
+     FROM studies WHERE id = ?1`
+  )
+    .bind(String(job.study_id))
+    .first<Record<string, unknown>>();
+  if (!study) return json({ error: "study_not_found" }, 404);
+
+  const repository = await safeFirst(
+    env.DB.prepare(
+      `SELECT raw_filename, image_bytes, image_sha256, ingestion_format, metadata_json, created_at, updated_at
+       FROM study_repository WHERE study_id = ?1`
+    )
+      .bind(String(study.id))
+      .first<Record<string, unknown>>()
+  );
+  const pipelineRun = await getPipelineRun(jobId, env);
+  const links = await buildJobLinks(jobId, String(study.id), env);
+
+  const rawHead = await env.R2_RAW.head(String(study.image_key));
+  const resultJson = await readArtifactJson(env, jobId, "result_json");
+  const measurementsJson = await readArtifactJson(env, jobId, "measurements_json");
+  const modelJson = await readArtifactJson(env, jobId, "aortic_root_model_json");
+  const annulusPlaneJson = await readArtifactJson(env, jobId, "annulus_plane_json");
+  const centerlineJson = await readArtifactJson(env, jobId, "centerline_json");
+  const leafletModelJson = await readArtifactJson(env, jobId, "leaflet_model_json");
+
+  const model = pickObject(modelJson) || {};
+  const measurements = pickObject(measurementsJson) || pickObject(resultJson?.measurements) || pickObject(resultJson) || null;
+  const measurementContract =
+    pickObject(measurementsJson?.measurement_contract)
+    || pickObject(resultJson?.measurement_contract)
+    || pickObject(resultJson?.planning_evidence)
+    || null;
+  const planningEvidence =
+    pickObject(measurementsJson?.planning_evidence)
+    || pickObject(resultJson?.planning_evidence)
+    || null;
+
+  const annulusPlane = normalizePlaneDefinition(
+    pickObject(annulusPlaneJson)
+    || pickObject(model.annulus_plane)
+    || pickObject(model.annulus_ring),
+    "annulus"
+  );
+  const stjPlane = normalizePlaneDefinition(
+    pickObject(model.sinotubular_junction),
+    "stj"
+  );
+  const centerline =
+    normalizeCenterline(centerlineJson)
+    || normalizeCenterline(model.centerline);
+  const bootstrapPoint =
+    toPointArray(annulusPlane?.origin_world)
+    || toPointArray(stjPlane?.origin_world)
+    || (Array.isArray(centerline?.points_world) && centerline.points_world.length ? toPointArray(centerline.points_world[0]) : null);
+  const initialCenterlineIndex = Number.isFinite(Number(annulusPlane?.source_index))
+    ? Number(annulusPlane?.source_index)
+    : 0;
+
+  const payload = {
+    build_version: getBuildVersion(env),
+    job,
+    study_meta: {
+      id: study.id,
+      patient_code: study.patient_code,
+      source_dataset: study.source_dataset,
+      image_format: study.image_format,
+      modality: study.modality,
+      phase: study.phase,
+      repository: repository
+        ? {
+            raw_filename: repository.raw_filename,
+            image_bytes: repository.image_bytes,
+            image_sha256: repository.image_sha256,
+            ingestion_format: repository.ingestion_format,
+            metadata: safeParseJsonText(repository.metadata_json),
+          }
+        : null,
+    },
+    pipeline_run: pipelineRun || (resultJson ? summarizePipelineRun(resultJson, "historical", null, env) : null),
+    links,
+    volume_source: {
+      source_kind: inferVolumeSourceKind(study, repository),
+      loader_kind: inferVolumeSourceKind(study, repository) === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
+      signed_url: links.raw_ct,
+      content_type: rawHead?.httpMetadata?.contentType || null,
+      filename: String(repository?.raw_filename || String(study.image_key || "").split("/").pop() || ""),
+      frame_of_reference_hint: readNestedString(model, ["phase_metadata", "frame_of_reference_uid"]),
+      spacing_hint: readNumberArray(model.spacing_mm),
+      direction_hint: readNumberArray(model.direction),
+    },
+    display_planes: {
+      annulus: annulusPlane,
+      stj: stjPlane,
+      centerline: buildCenterlinePlane(centerline, initialCenterlineIndex),
+    },
+    viewer_bootstrap: {
+      focus_world: bootstrapPoint,
+      aux_mode: "annulus",
+      centerline_index: initialCenterlineIndex,
+    },
+    centerline,
+    model_landmarks_summary: buildModelLandmarksSummary(model, leafletModelJson),
+    measurement_contract: sanitizePublicValue(measurementContract),
+    planning_evidence: sanitizePublicValue(planningEvidence),
+    measurements: sanitizePublicValue(measurements),
+    aortic_root_model: sanitizePublicValue(modelJson || null),
+  };
+
+  return json(payload);
+}
+
+async function readArtifactJson(env: Env, jobId: string, artifactType: string): Promise<Record<string, unknown> | null> {
+  const artifact = await safeFirst(
+    env.DB.prepare(
+      `SELECT object_key FROM artifacts WHERE job_id = ?1 AND artifact_type = ?2 ORDER BY created_at DESC LIMIT 1`
+    )
+      .bind(jobId, artifactType)
+      .first<{ object_key: string }>()
+  );
+  if (!artifact?.object_key) return null;
+  const obj = await env.R2_MASK.get(artifact.object_key);
+  if (!obj) return null;
+  return safeJsonObject(await obj.text());
+}
+
+function inferVolumeSourceKind(study: Record<string, unknown>, repository: Record<string, unknown> | null): "nifti" | "dicom_zip" {
+  const format = String(study.image_format || repository?.ingestion_format || "").toLowerCase();
+  const filename = String(repository?.raw_filename || study.image_key || "").toLowerCase();
+  if (format.includes("dicom") || filename.endsWith(".zip") || filename.endsWith(".dicom.zip")) return "dicom_zip";
+  return "nifti";
+}
+
+function normalizePlaneDefinition(input: Record<string, unknown> | null, fallbackId: string): Record<string, unknown> | null {
+  if (!input) return null;
+  const origin =
+    toPointArray(input.origin_world)
+    || toPointArray(input.center_world)
+    || toPointArray(input.origin_voxel)
+    || null;
+  const normal =
+    toPointArray(input.normal_world)
+    || null;
+  const basisU = toPointArray(input.basis_u_world);
+  const basisV = toPointArray(input.basis_v_world);
+  if (!origin || !normal) return null;
+  return {
+    id: String(input.label || fallbackId),
+    label: String(input.label || fallbackId),
+    status: nullableString(input.status) || nullableString(input.detection_method) || "derived",
+    confidence: readFiniteNumber(input.confidence),
+    origin_world: origin,
+    normal_world: normal,
+    basis_u_world: basisU || null,
+    basis_v_world: basisV || null,
+    ring_points_world: Array.isArray(input.ring_points_world) ? input.ring_points_world.map((point) => toPointArray(point)).filter(Boolean) : null,
+    source_index: readFiniteNumber(input.index),
+  };
+}
+
+function normalizeCenterline(input: unknown): Record<string, unknown> | null {
+  const record = pickObject(input);
+  if (!record) return null;
+  let points = Array.isArray(record.points_world)
+    ? record.points_world.map((point) => toPointArray(point)).filter(Boolean)
+    : [];
+  let sMm = Array.isArray(record.s_mm) ? record.s_mm.map((value) => Number(value)).filter(Number.isFinite) : [];
+  let tangentsWorld: Array<[number, number, number]> | null = null;
+  if (!points.length && Array.isArray(record.points)) {
+    const legacyPoints = record.points
+      .map((entry) => pickObject(entry))
+      .filter(Boolean) as Array<Record<string, unknown>>;
+    points = legacyPoints
+      .map((entry) => toPointArray(entry.world) || toPointArray(entry.point_world) || toPointArray(entry.voxel))
+      .filter((value): value is [number, number, number] => Boolean(value));
+    const legacySMm = legacyPoints
+      .map((entry) => readFiniteNumber(entry.s_mm))
+      .filter((value): value is number => typeof value === "number");
+    if (legacySMm.length === points.length) sMm = legacySMm;
+    const legacyTangents = legacyPoints
+      .map((entry) => toPointArray(entry.tangent_world))
+      .filter((value): value is [number, number, number] => Boolean(value));
+    if (legacyTangents.length === points.length) tangentsWorld = legacyTangents;
+  }
+  if (!points.length) return null;
+  return {
+    point_count: points.length,
+    points_world: points,
+    s_mm: sMm.length === points.length ? sMm : null,
+    tangents_world: tangentsWorld,
+    method: nullableString(record.method) || null,
+  };
+}
+
+function buildCenterlinePlane(centerline: Record<string, unknown> | null, index: number): Record<string, unknown> | null {
+  if (!centerline || !Array.isArray(centerline.points_world) || !centerline.points_world.length) return null;
+  const points = centerline.points_world as Array<unknown>;
+  const clamped = Math.max(0, Math.min(points.length - 1, Math.round(index || 0)));
+  const origin = toPointArray(points[clamped]);
+  if (!origin) return null;
+  const tangent =
+    (Array.isArray(centerline.tangents_world) ? toPointArray(centerline.tangents_world[clamped]) : null)
+    || computeCenterlineTangent(points, clamped);
+  const basisU = normalizeVector(crossProduct(tangent, [0, 1, 0])) || normalizeVector(crossProduct(tangent, [1, 0, 0]));
+  const basisV = basisU ? normalizeVector(crossProduct(basisU, tangent)) : null;
+  return {
+    id: "centerline",
+    label: "centerline_orthogonal",
+    status: "derived",
+    confidence: 1,
+    origin_world: origin,
+    normal_world: tangent,
+    basis_u_world: basisU,
+    basis_v_world: basisV,
+    source_index: clamped,
+  };
+}
+
+function buildModelLandmarksSummary(
+  model: Record<string, unknown>,
+  leafletModelJson: Record<string, unknown> | null
+): Record<string, unknown> {
+  const coronary = pickObject(model.coronary_ostia);
+  const leaflets = leafletModelJson && Array.isArray((leafletModelJson as Record<string, unknown>).leaflets)
+    ? ((leafletModelJson as Record<string, unknown>).leaflets as Array<unknown>)
+        .map((entry) => pickObject(entry))
+        .filter(Boolean)
+        .map((entry) => ({
+          label: String(entry?.label || entry?.cusp || "leaflet"),
+          status: nullableString(entry?.status) || "unknown",
+          confidence: readFiniteNumber(entry?.confidence),
+        }))
+    : [];
+  return {
+    annulus: normalizeLandmarkSummary(pickObject(model.annulus_plane) || pickObject(model.annulus_ring)),
+    stj: normalizeLandmarkSummary(pickObject(model.sinotubular_junction)),
+    commissures: Array.isArray(model.commissures)
+      ? (model.commissures as Array<unknown>).map((entry) => normalizeLandmarkSummary(pickObject(entry))).filter(Boolean)
+      : [],
+    coronary_ostia: coronary
+      ? {
+          left: normalizeLandmarkSummary(pickObject(coronary.left)),
+          right: normalizeLandmarkSummary(pickObject(coronary.right)),
+        }
+      : null,
+    leaflet_status: leaflets,
+  };
+}
+
+function normalizeLandmarkSummary(input: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!input) return null;
+  return {
+    label: String(input.label || input.id || "landmark"),
+    status: nullableString(input.status) || nullableString(input.detection_method) || "derived",
+    confidence: readFiniteNumber(input.confidence),
+    origin_world: toPointArray(input.origin_world) || toPointArray(input.center_world) || null,
+  };
+}
+
+function toPointArray(value: unknown): [number, number, number] | null {
+  if (!Array.isArray(value) || value.length < 3) return null;
+  const out: [number, number, number] = [Number(value[0]), Number(value[1]), Number(value[2])];
+  return out.every(Number.isFinite) ? out : null;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
+}
+
+function readNumberArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const out = value.map((item) => Number(item)).filter(Number.isFinite);
+  return out.length ? out : null;
+}
+
+function computeCenterlineTangent(points: Array<unknown>, index: number): [number, number, number] {
+  const prev = toPointArray(points[Math.max(0, index - 1)]) || toPointArray(points[index]) || [0, 0, 0];
+  const next = toPointArray(points[Math.min(points.length - 1, index + 1)]) || prev;
+  return normalizeVector([next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]]) || [0, 0, 1];
+}
+
+function crossProduct(
+  a: [number, number, number],
+  b: [number, number, number]
+): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function normalizeVector(
+  value: [number, number, number]
+): [number, number, number] | null {
+  const len = Math.hypot(value[0], value[1], value[2]);
+  if (!Number.isFinite(len) || len < 1e-8) return null;
+  return [value[0] / len, value[1] / len, value[2] / len];
+}
+
+function readNestedString(root: Record<string, unknown>, path: string[]): string | null {
+  let current: unknown = root;
+  for (const part of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return nullableString(current);
+}
+
+async function streamStudyRaw(request: Request, studyId: string, env: Env): Promise<Response> {
   if (!studyId) return json({ error: "missing_study_id" }, 400);
+  const authError = await requireSignedAccess(request, env);
+  if (authError) return authError;
 
   const study = await env.DB.prepare(`SELECT image_key FROM studies WHERE id = ?1`)
     .bind(studyId)
@@ -605,6 +1293,7 @@ async function streamStudyRaw(studyId: string, env: Env): Promise<Response> {
   headers.set("content-type", obj.httpMetadata?.contentType || "application/octet-stream");
   headers.set("content-disposition", `attachment; filename="${filename}"`);
   headers.set("content-length", String(obj.size));
+  await recordArtifactAccess(env, request, "study_raw", studyId, null, "raw_ct", getArtifactLinkSecret(env) ? "signed" : "unsigned");
 
   return new Response(obj.body, { status: 200, headers });
 }
@@ -618,18 +1307,95 @@ async function getStudyMeta(studyId: string, env: Env): Promise<Response> {
     .bind(studyId)
     .first<Record<string, unknown>>();
   if (!study) return json({ error: "study_not_found" }, 404);
-  return json(study);
+  const repository = await safeFirst(
+    env.DB.prepare(
+      `SELECT raw_filename, image_bytes, image_sha256, ingestion_format, metadata_json, created_at, updated_at
+       FROM study_repository WHERE study_id = ?1`
+    )
+      .bind(studyId)
+      .first<Record<string, unknown>>()
+  );
+  const latestRun = await safeFirst(
+    env.DB.prepare(
+      `SELECT job_id, pipeline_version, computational_model, centerline_method, measurement_method,
+              input_kind, reported_phase, selected_phase, runtime_seconds, updated_at
+       FROM pipeline_runs WHERE study_id = ?1 ORDER BY updated_at DESC LIMIT 1`
+    )
+      .bind(studyId)
+      .first<Record<string, unknown>>()
+  );
+  return json({
+    ...study,
+    repository: repository
+      ? {
+          ...repository,
+          metadata: safeParseJsonText(repository.metadata_json),
+          raw_ct_link: await buildSignedPath(`/studies/${studyId}/raw`, env),
+        }
+      : null,
+    latest_pipeline_run: latestRun || null,
+  });
 }
 
-async function streamJobArtifact(jobId: string, artifactType: string, env: Env): Promise<Response> {
+async function getStudyRepository(studyId: string, env: Env): Promise<Response> {
+  if (!studyId) return json({ error: "missing_study_id" }, 400);
+  const study = await env.DB.prepare(
+    `SELECT id, patient_code, source_dataset, image_format, modality, phase, created_at, updated_at
+     FROM studies WHERE id = ?1`
+  )
+    .bind(studyId)
+    .first<Record<string, unknown>>();
+  if (!study) return json({ error: "study_not_found" }, 404);
+  const repository = await safeFirst(
+    env.DB.prepare(
+      `SELECT raw_filename, image_bytes, image_sha256, ingestion_format, metadata_json, created_at, updated_at
+       FROM study_repository WHERE study_id = ?1`
+    )
+      .bind(studyId)
+      .first<Record<string, unknown>>()
+  );
+  const jobs = await safeAll(
+    env.DB.prepare(
+      `SELECT id, status, job_type, model_tag, created_at, started_at, finished_at
+       FROM jobs WHERE study_id = ?1 ORDER BY created_at DESC LIMIT 10`
+    )
+      .bind(studyId)
+      .all()
+  );
+  const runs = await safeAll(
+    env.DB.prepare(
+      `SELECT job_id, pipeline_version, computational_model, centerline_method, measurement_method,
+              input_kind, reported_phase, selected_phase, runtime_seconds, updated_at
+       FROM pipeline_runs WHERE study_id = ?1 ORDER BY updated_at DESC LIMIT 10`
+    )
+      .bind(studyId)
+      .all()
+  );
+  return json({
+    study,
+    repository: repository
+      ? {
+          ...repository,
+          metadata: safeParseJsonText(repository.metadata_json),
+          raw_ct_link: await buildSignedPath(`/studies/${studyId}/raw`, env),
+        }
+      : null,
+    jobs,
+    pipeline_runs: runs,
+  });
+}
+
+async function streamJobArtifact(request: Request, jobId: string, artifactType: string, env: Env): Promise<Response> {
   if (!jobId) return json({ error: "missing_job_id" }, 400);
   if (!artifactType) return json({ error: "missing_artifact_type" }, 400);
+  const authError = await requireSignedAccess(request, env);
+  if (authError) return authError;
 
   const artifact = await env.DB.prepare(
-    `SELECT object_key FROM artifacts WHERE job_id = ?1 AND artifact_type = ?2 ORDER BY created_at DESC LIMIT 1`
+    `SELECT object_key, job_id FROM artifacts WHERE job_id = ?1 AND artifact_type = ?2 ORDER BY created_at DESC LIMIT 1`
   )
     .bind(jobId, artifactType)
-    .first<{ object_key: string }>();
+    .first<{ object_key: string; job_id: string }>();
 
   if (!artifact?.object_key) return json({ error: "artifact_not_found" }, 404);
 
@@ -642,6 +1408,18 @@ async function streamJobArtifact(jobId: string, artifactType: string, env: Env):
   headers.set("content-type", contentType);
   headers.set("content-disposition", `attachment; filename="${filename}"`);
   headers.set("content-length", String(obj.size));
+  const job = await safeFirst(
+    env.DB.prepare(`SELECT study_id FROM jobs WHERE id = ?1`).bind(jobId).first<{ study_id: string }>()
+  );
+  await recordArtifactAccess(
+    env,
+    request,
+    "job_artifact",
+    job?.study_id || null,
+    jobId,
+    artifactType,
+    getArtifactLinkSecret(env) ? "signed" : "unsigned"
+  );
 
   if (artifactType.endsWith("_json") || contentType.includes("application/json")) {
     const text = await obj.text();
@@ -834,14 +1612,33 @@ async function applyInferenceOutputToJob(
   source: "mock" | "inline" | "callback"
 ): Promise<void> {
   const hasResultJson = payload.result_json && typeof payload.result_json === "object";
+  let safeResultJson: Record<string, unknown> | null = null;
 
   if (hasResultJson) {
-    const safeResultJson = sanitizePublicResultJson(payload.result_json as Record<string, unknown>) || {};
+    safeResultJson = sanitizePublicResultJson(payload.result_json as Record<string, unknown>) || {};
     await writeJsonArtifact(env, jobId, studyId, "result_json", "result.json", {
       ...safeResultJson,
       _source: source,
       _provider_job_id: payload.provider_job_id || null
     });
+    await recordPipelineRun(env, jobId, studyId, safeResultJson, source, payload.provider_job_id || null);
+    await upsertStudyRepository(
+      env,
+      studyId,
+      {
+        input_metadata: (safeResultJson.input_metadata && typeof safeResultJson.input_metadata === "object"
+          ? (safeResultJson.input_metadata as Record<string, unknown>)
+          : {}),
+        latest_pipeline: (safeResultJson.pipeline && typeof safeResultJson.pipeline === "object"
+          ? (safeResultJson.pipeline as Record<string, unknown>)
+          : {}),
+        pipeline_version: (safeResultJson.pipeline_version && typeof safeResultJson.pipeline_version === "object"
+          ? (safeResultJson.pipeline_version as Record<string, unknown>)
+          : {}),
+        last_job_id: jobId,
+        updated_from_source: source,
+      }
+    );
   }
 
   if (payload.mask_base64) {
@@ -1085,6 +1882,11 @@ function safeJsonObject(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function pickObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
 
 function extractLabelKeys(resultPayload: Record<string, unknown> | null): string[] {
@@ -2622,16 +3424,19 @@ const DEMO_HTML = `<!doctype html>
     }
 
     function findArtifactLink(data, preferredTypes) {
+      const linkMap = (data && typeof data === 'object' && data.links && typeof data.links === 'object') ? data.links : null;
+      for (const type of preferredTypes) {
+        const fromLinks = linkMap && typeof linkMap[type] === 'string' && linkMap[type].trim() ? linkMap[type] : null;
+        if (fromLinks) return absLink(fromLinks);
+      }
       const list = Array.isArray(data?.artifacts) ? data.artifacts : [];
       for (const type of preferredTypes) {
         const hit = list.find((a) => String(a?.artifact_type || '') === type);
+        if (hit?.download_url && typeof hit.download_url === 'string') return absLink(hit.download_url);
         if (hit) return absLink('/jobs/' + encodeURIComponent(data.id) + '/artifacts/' + encodeURIComponent(type));
       }
       if (list.length > 0) return null;
-      const fromLinks = preferredTypes
-        .map((type) => data?.links?.[type])
-        .find((x) => typeof x === 'string' && x.trim());
-      return fromLinks ? absLink(fromLinks) : null;
+      return null;
     }
 
     async function loadSegmentationMask(url) {
@@ -2740,7 +3545,7 @@ const DEMO_HTML = `<!doctype html>
         }
       } catch {}
 
-      const links = {
+      const links = job.links || {
         raw_ct: '/studies/' + studyId + '/raw',
         segmentation_mask_nifti: '/jobs/' + jobId + '/artifacts/segmentation_mask_nifti',
         result_json: '/jobs/' + jobId + '/artifacts/result_json',
@@ -2764,6 +3569,7 @@ const DEMO_HTML = `<!doctype html>
         status: job.status || 'unknown',
         artifacts: job.artifacts || [],
         metrics: job.metrics || [],
+        pipeline_run: job.pipeline_run || null,
         study_meta: studyMeta,
         links,
         clinical_targets: {
@@ -4766,11 +5572,13 @@ const DEMO_HTML = `<!doctype html>
 </html>`;
 
 function getDemoStyleCss(): string {
+  if (WORKSTATION_STYLE_CSS && WORKSTATION_STYLE_CSS.trim()) return WORKSTATION_STYLE_CSS;
   const match = DEMO_HTML.match(/<style>([\s\S]*?)<\/style>/);
   return match?.[1]?.trim() || "";
 }
 
 function getDemoAppJs(buildVersion: string): string {
+  if (WORKSTATION_APP_JS && WORKSTATION_APP_JS.trim()) return WORKSTATION_APP_JS;
   const match = DEMO_HTML.match(/<script type="module">([\s\S]*?)<\/script>/);
   const body = match?.[1]?.trim() || "";
   const bootstrap = `
@@ -4797,7 +5605,39 @@ await ensureFreshBuild();
   return `${bootstrap}\n${body}\n`;
 }
 
+function getDicomZipWorkerJs(): string {
+  return WORKSTATION_DICOM_WORKER_JS || "";
+}
+
 function renderDemoHtml(buildVersion: string): string {
+  if (WORKSTATION_APP_JS && WORKSTATION_STYLE_CSS) {
+    const cssHref = `/assets/style.${buildVersion}.css?v=${buildVersion}`;
+    const jsSrc = `/assets/app.${buildVersion}.js?v=${buildVersion}`;
+    const importMap = {
+      imports: {
+        "@cornerstonejs/core": "https://esm.sh/@cornerstonejs/core@4.19.2?bundle",
+        "@cornerstonejs/tools": "https://esm.sh/@cornerstonejs/tools@4.19.2?bundle",
+        "@cornerstonejs/dicom-image-loader": "https://esm.sh/@cornerstonejs/dicom-image-loader@4.19.2?bundle",
+        "@cornerstonejs/nifti-volume-loader": "https://esm.sh/@cornerstonejs/nifti-volume-loader@4.19.2?bundle",
+      },
+    };
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="aortic-build-version" content="${buildVersion}" />
+  <title>AorticAI Structural Heart Workstation</title>
+  <link rel="stylesheet" href="${cssHref}" />
+  <script type="importmap">${JSON.stringify(importMap)}</script>
+</head>
+<body>
+  <div id="app"></div>
+  <script>window.__AORTIC_BUILD_VERSION__=${JSON.stringify(buildVersion)};</script>
+  <script type="module" src="${jsSrc}"></script>
+</body>
+</html>`;
+  }
   const cssHref = `/assets/style.${buildVersion}.css?v=${buildVersion}`;
   const jsSrc = `/assets/app.${buildVersion}.js?v=${buildVersion}`;
   return DEMO_HTML
