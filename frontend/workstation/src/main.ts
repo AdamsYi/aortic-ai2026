@@ -156,6 +156,7 @@ const VIEWPORT_IDS: Record<ViewportKey, string> = {
 const RENDERING_ENGINE_ID = 'aorticai-mpr-engine';
 const TOOL_GROUP_ID = 'aorticai-mpr-tools';
 const MPR_INIT_TIMEOUT_MS = 4000;
+const THREE_INIT_TIMEOUT_MS = 5000;
 const ROOT = document.getElementById('app');
 
 if (!ROOT) {
@@ -176,6 +177,8 @@ let currentActiveViewport: ViewportKey = 'axial';
 let currentBootStage: BootStage = 'loading_shell';
 let lastBootError: string | null = null;
 let mprWatchdogHandle: number | null = null;
+let lastMprError: string | null = null;
+let lastThreeError: string | null = null;
 
 const DOM = {
   headerStatus: null as HTMLDivElement | null,
@@ -435,14 +438,17 @@ function showFatalError(error: unknown, detail?: string): void {
 function showMprFailure(error: unknown): void {
   clearMprWatchdog();
   const text = error instanceof Error ? error.message : String(error);
+  lastMprError = text;
   if (DOM.mprStatus) DOM.mprStatus.textContent = `MPR unavailable: ${text}`;
   (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
     if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'aux unavailable' : 'mpr unavailable';
   });
+  updateViewerState();
 }
 
 function showThreeFailure(error: unknown): void {
   const text = error instanceof Error ? error.message : String(error);
+  lastThreeError = text;
   if (DOM.threeFallback) {
     DOM.threeFallback.innerHTML = `
       <div class="three-fallback-card">
@@ -453,6 +459,7 @@ function showThreeFailure(error: unknown): void {
     `;
     DOM.threeFallback.classList.remove('hidden');
   }
+  updateViewerState();
 }
 
 async function retryLatestCase(): Promise<void> {
@@ -527,9 +534,16 @@ async function loadCase(jobId: string): Promise<void> {
     attachViewportInteractions();
     await syncCrosshair(getBootstrapWorldPoint(activeCase));
     await applyAuxViewportMode();
+  } else if (volumeFailure) {
+    setBootStage('ready', 'Planning outputs loaded while MPR is unavailable');
+    if (DOM.headerStatus) {
+      DOM.headerStatus.textContent = `Case ${jobId} loaded with MPR unavailable`;
+    }
   }
   const threeFailure = await initializeThreePanel(activeCase);
-  if (!session && volumeFailure) {
+  if (!session && volumeFailure && threeFailure) {
+    setBootStage('ready', 'Planning outputs loaded while both MPR and 3D viewers are unavailable');
+  } else if (!session && volumeFailure) {
     setBootStage('ready', 'Planning and 3D remain available while CT volume failed to initialize');
   } else if (threeFailure) {
     setBootStage('ready', 'CT workstation is available while 3D viewer failed to initialize');
@@ -566,7 +580,11 @@ async function initializeViewerSession(casePayload: WorkstationCasePayload): Pro
 
 async function initializeThreePanel(casePayload: WorkstationCasePayload): Promise<unknown | null> {
   try {
-    await ensureThreeViewer(casePayload);
+    await withTimeout(
+      ensureThreeViewer(casePayload),
+      THREE_INIT_TIMEOUT_MS,
+      `three_initialization_timeout_after_${THREE_INIT_TIMEOUT_MS}ms`
+    );
     clearThreeFailure();
     return null;
   } catch (error) {
@@ -1052,6 +1070,11 @@ function updateViewerState(): void {
       qa_flags: activeCase?.viewer_bootstrap?.qa_flags || null,
       bootstrap_warnings: activeCase?.viewer_bootstrap?.bootstrap_warnings || null,
       case_job_id: activeCase?.job?.id || null,
+      boot_stage: currentBootStage,
+      session_available: Boolean(session),
+      three_runtime_available: Boolean(threeRuntime),
+      last_mpr_error: lastMprError,
+      last_three_error: lastThreeError,
     },
     null,
     2
@@ -1216,15 +1239,19 @@ async function destroySession(): Promise<void> {
 
 function clearMprFailure(): void {
   clearMprWatchdog();
+  lastMprError = null;
   if (DOM.mprStatus) DOM.mprStatus.textContent = 'MPR ready. Crosshair synchronization active.';
   (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
     if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = `${humanize(key)} ready`;
   });
+  updateViewerState();
 }
 
 function clearThreeFailure(): void {
+  lastThreeError = null;
   DOM.threeFallback?.classList.add('hidden');
   if (DOM.threeFallback) DOM.threeFallback.innerHTML = '';
+  updateViewerState();
 }
 
 function disposeThreeObject(object: THREE.Object3D): void {
