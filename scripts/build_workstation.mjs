@@ -12,6 +12,41 @@ const workerEntry = path.join(repoRoot, 'frontend/workstation/src/dicomZip.worke
 const cssPath = path.join(repoRoot, 'frontend/workstation/src/styles.css');
 const outputPath = path.join(repoRoot, 'src/generated/workstationAssets.ts');
 
+const browserBuiltinShimPlugin = {
+  name: 'browser-builtin-shim',
+  setup(build) {
+    const builtins = new Set(['fs', 'path', 'module', 'worker_threads']);
+    build.onResolve({ filter: /.*/ }, (args) => {
+      if (!builtins.has(args.path)) return null;
+      return { path: args.path, namespace: 'browser-builtin-shim' };
+    });
+    build.onLoad({ filter: /.*/, namespace: 'browser-builtin-shim' }, ({ path: shimPath }) => {
+      if (shimPath === 'path') {
+        return {
+          contents: `
+            const passthrough = (value = '') => String(value);
+            export const normalize = passthrough;
+            export const dirname = () => '';
+            export const join = (...parts) => parts.filter(Boolean).join('/');
+            export default { normalize, dirname, join };
+          `,
+          loader: 'js',
+        };
+      }
+      return {
+        contents: `
+          const unavailable = () => { throw new Error(${JSON.stringify(`${shimPath} is unavailable in the browser workstation bundle`)}); };
+          export const readFileSync = unavailable;
+          export const readFile = unavailable;
+          export const existsSync = () => false;
+          export default {};
+        `,
+        loader: 'js',
+      };
+    });
+  },
+};
+
 const appBuild = await esbuild.build({
   entryPoints: [appEntry],
   bundle: true,
@@ -20,12 +55,13 @@ const appBuild = await esbuild.build({
   target: ['es2022'],
   write: false,
   logLevel: 'silent',
-  external: [
-    '@cornerstonejs/core',
-    '@cornerstonejs/tools',
-    '@cornerstonejs/dicom-image-loader',
-    '@cornerstonejs/nifti-volume-loader',
-  ],
+  loader: { '.wasm': 'dataurl' },
+  plugins: [browserBuiltinShimPlugin],
+  conditions: ['browser'],
+  mainFields: ['browser', 'module', 'main'],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
 });
 
 const workerBuild = await esbuild.build({

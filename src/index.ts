@@ -822,7 +822,7 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
 }
 
 async function getLatestDemoCase(env: Env): Promise<Response> {
-  const job = await env.DB.prepare(
+  const jobRows = await env.DB.prepare(
     `SELECT
        j.id,
        j.study_id,
@@ -873,8 +873,37 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
          ELSE 2
        END,
        j.created_at DESC
-     LIMIT 1`
-  ).first<Record<string, unknown>>();
+     LIMIT 20`
+  ).all<Record<string, unknown>>();
+
+  const candidates = Array.isArray(jobRows.results) ? jobRows.results : [];
+  let job: Record<string, unknown> | null = null;
+  let preferredStudy: { id: string; image_key: string; source_dataset: string | null; phase: string | null } | null = null;
+
+  for (const candidate of candidates) {
+    const studyId = String(candidate.study_id || "");
+    if (!studyId) continue;
+    const candidateStudy = await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
+      .bind(studyId)
+      .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>();
+    const imageKey = String(candidateStudy?.image_key || "").trim();
+    if (!imageKey) continue;
+    const head = await env.R2_RAW.head(imageKey);
+    if (!head?.size) continue;
+    job = candidate;
+    preferredStudy = candidateStudy;
+    break;
+  }
+
+  if (!job && candidates.length) {
+    job = candidates[0];
+    const fallbackStudyId = String(job.study_id || "");
+    preferredStudy = fallbackStudyId
+      ? await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
+          .bind(fallbackStudyId)
+          .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>()
+      : null;
+  }
 
   if (!job) {
     return json({ error: "no_succeeded_case_yet" }, 404);
@@ -882,10 +911,6 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
 
   const jobId = String(job.id);
   const studyId = String(job.study_id);
-  const jobStudy = await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
-    .bind(studyId)
-    .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>();
-  const preferredStudy = jobStudy;
   const rawStudyId = preferredStudy?.id || studyId;
 
   const artifacts = await env.DB.prepare(
@@ -1022,6 +1047,20 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
   const initialCenterlineIndex = Number.isFinite(Number(annulusPlane?.source_index))
     ? Number(annulusPlane?.source_index)
     : 0;
+  const volumeSourceKind = inferVolumeSourceKind(study, repository);
+  const runtimeWarnings: string[] = [];
+  if (centerlineJson && !("points_world" in centerlineJson) && "points" in centerlineJson) {
+    runtimeWarnings.push("legacy_centerline_payload");
+  }
+  if (!pipelineRun && resultJson) {
+    runtimeWarnings.push("historical_pipeline_run_inferred");
+  }
+  const qaFlags = {
+    centerline_available: Array.isArray(centerline?.points_world) && centerline.points_world.length > 0,
+    annulus_plane_available: Boolean(annulusPlane?.origin_world && annulusPlane?.normal_world),
+    stj_plane_available: Boolean(stjPlane?.origin_world && stjPlane?.normal_world),
+    leaflet_summary_available: Boolean(model.leaflet_meshes || leafletModelJson),
+  };
 
   const payload = {
     build_version: getBuildVersion(env),
@@ -1046,8 +1085,8 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
     pipeline_run: pipelineRun || (resultJson ? summarizePipelineRun(resultJson, "historical", null, env) : null),
     links,
     volume_source: {
-      source_kind: inferVolumeSourceKind(study, repository),
-      loader_kind: inferVolumeSourceKind(study, repository) === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
+      source_kind: volumeSourceKind,
+      loader_kind: volumeSourceKind === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
       signed_url: links.raw_ct,
       content_type: rawHead?.httpMetadata?.contentType || null,
       filename: String(repository?.raw_filename || String(study.image_key || "").split("/").pop() || ""),
@@ -1064,6 +1103,15 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
       focus_world: bootstrapPoint,
       aux_mode: "annulus",
       centerline_index: initialCenterlineIndex,
+      runtime_requirements: {
+        source_kind: volumeSourceKind,
+        loader_kind: volumeSourceKind === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
+        supports_mpr: Boolean(links.raw_ct),
+        supports_aux_plane: Boolean(qaFlags.annulus_plane_available || qaFlags.stj_plane_available || qaFlags.centerline_available),
+        supports_cpr: false,
+      },
+      qa_flags: qaFlags,
+      bootstrap_warnings: runtimeWarnings,
     },
     centerline,
     model_landmarks_summary: buildModelLandmarksSummary(model, leafletModelJson),
@@ -5613,14 +5661,6 @@ function renderDemoHtml(buildVersion: string): string {
   if (WORKSTATION_APP_JS && WORKSTATION_STYLE_CSS) {
     const cssHref = `/assets/style.${buildVersion}.css?v=${buildVersion}`;
     const jsSrc = `/assets/app.${buildVersion}.js?v=${buildVersion}`;
-    const importMap = {
-      imports: {
-        "@cornerstonejs/core": "https://esm.sh/@cornerstonejs/core@4.19.2?bundle",
-        "@cornerstonejs/tools": "https://esm.sh/@cornerstonejs/tools@4.19.2?bundle",
-        "@cornerstonejs/dicom-image-loader": "https://esm.sh/@cornerstonejs/dicom-image-loader@4.19.2?bundle",
-        "@cornerstonejs/nifti-volume-loader": "https://esm.sh/@cornerstonejs/nifti-volume-loader@4.19.2?bundle",
-      },
-    };
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -5629,7 +5669,6 @@ function renderDemoHtml(buildVersion: string): string {
   <meta name="aortic-build-version" content="${buildVersion}" />
   <title>AorticAI Structural Heart Workstation</title>
   <link rel="stylesheet" href="${cssHref}" />
-  <script type="importmap">${JSON.stringify(importMap)}</script>
 </head>
 <body>
   <div id="app"></div>

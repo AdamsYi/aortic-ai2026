@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260303.0",
+    "@types/three": "^0.183.1",
     "esbuild": "^0.27.4",
     "playwright-core": "^1.58.2",
     "typescript": "^5.7.3",
@@ -27,6 +28,7 @@
     "@cornerstonejs/nifti-volume-loader": "^4.19.2",
     "@cornerstonejs/tools": "^4.19.2",
     "dicom-parser": "^1.8.21",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "three": "^0.179.1"
   }
 }

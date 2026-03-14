@@ -19,6 +19,9 @@ import {
   init as cornerstoneToolsInit,
   synchronizers,
 } from '@cornerstonejs/tools';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 
 declare global {
   interface Window {
@@ -56,6 +59,8 @@ type CenterlinePayload = {
   point_count?: number;
   points_world?: Point3[];
   s_mm?: number[];
+  tangents_world?: Point3[];
+  method?: string | null;
 };
 
 type ModelLandmarksSummary = {
@@ -82,6 +87,15 @@ type WorkstationCasePayload = {
     focus_world?: Point3 | null;
     aux_mode?: AuxMode;
     centerline_index?: number | null;
+    runtime_requirements?: {
+      source_kind?: string;
+      loader_kind?: string;
+      supports_mpr?: boolean;
+      supports_aux_plane?: boolean;
+      supports_cpr?: boolean;
+    } | null;
+    qa_flags?: Record<string, boolean> | null;
+    bootstrap_warnings?: string[] | null;
   } | null;
   centerline?: CenterlinePayload | null;
   model_landmarks_summary?: ModelLandmarksSummary | null;
@@ -101,8 +115,13 @@ type ViewerSession = {
   toolGroupId: string;
   volumeId: string;
   volumeImageIds: string[];
-  syncs: Array<{ destroy?: () => void }>;
+  syncs: SyncController[];
   dicomImageIds: string[];
+};
+
+type SyncController = {
+  add: (target: { renderingEngineId: string; viewportId: string }) => void;
+  destroy?: () => void;
 };
 
 type ThreeRuntime = {
@@ -114,7 +133,18 @@ type ThreeRuntime = {
   animationHandle: number | null;
   raycaster: any;
   pointer: any;
+  resizeHandler: (() => void) | null;
 };
+
+type BootStage =
+  | 'loading_shell'
+  | 'loading_runtime'
+  | 'loading_case_index'
+  | 'loading_case_payload'
+  | 'initializing_volume'
+  | 'initializing_viewports'
+  | 'ready'
+  | 'failed';
 
 const BUILD_VERSION = window.__AORTIC_BUILD_VERSION__ || 'dev';
 const VIEWPORT_IDS: Record<ViewportKey, string> = {
@@ -125,6 +155,7 @@ const VIEWPORT_IDS: Record<ViewportKey, string> = {
 };
 const RENDERING_ENGINE_ID = 'aorticai-mpr-engine';
 const TOOL_GROUP_ID = 'aorticai-mpr-tools';
+const MPR_INIT_TIMEOUT_MS = 4000;
 const ROOT = document.getElementById('app');
 
 if (!ROOT) {
@@ -142,9 +173,18 @@ let currentCenterlineIndex = 0;
 let dicomZipWorker: Worker | null = null;
 let threeRuntime: ThreeRuntime | null = null;
 let currentActiveViewport: ViewportKey = 'axial';
+let currentBootStage: BootStage = 'loading_shell';
+let lastBootError: string | null = null;
+let mprWatchdogHandle: number | null = null;
 
 const DOM = {
   headerStatus: null as HTMLDivElement | null,
+  bootStage: null as HTMLDivElement | null,
+  bootOverlay: null as HTMLDivElement | null,
+  bootOverlayTitle: null as HTMLHeadingElement | null,
+  bootOverlayText: null as HTMLParagraphElement | null,
+  bootOverlayDetail: null as HTMLPreElement | null,
+  retryLatestButton: null as HTMLButtonElement | null,
   caseMeta: null as HTMLDivElement | null,
   mprStatus: null as HTMLDivElement | null,
   auxMode: null as HTMLSelectElement | null,
@@ -160,6 +200,7 @@ const DOM = {
   evidenceList: null as HTMLUListElement | null,
   rawBlock: null as HTMLPreElement | null,
   threeStage: null as HTMLDivElement | null,
+  threeFallback: null as HTMLDivElement | null,
   viewportElements: {} as Record<ViewportKey, HTMLDivElement>,
   viewportCards: {} as Record<ViewportKey, HTMLDivElement>,
   viewportBadges: {} as Record<ViewportKey, HTMLDivElement>,
@@ -180,6 +221,7 @@ function renderShell(): void {
           <button id="focus-annulus">Jump Annulus</button>
           <button id="focus-stj">Jump STJ</button>
           <div class="status-chip" id="header-status">Booting workstation...</div>
+          <div class="status-chip" id="boot-stage">loading_shell</div>
         </div>
       </header>
       <main class="workspace-grid">
@@ -226,6 +268,7 @@ function renderShell(): void {
           </div>
           <div class="three-stage">
             <div class="three-root" id="three-root"></div>
+            <div class="three-fallback hidden" id="three-fallback"></div>
           </div>
           <div class="legend">
             <div class="legend-item"><span class="legend-swatch" style="background:#58b8ff"></span>Aortic root</div>
@@ -270,10 +313,26 @@ function renderShell(): void {
           </div>
         </aside>
       </main>
+      <div class="boot-overlay hidden" id="boot-overlay">
+        <div class="boot-card">
+          <h2 id="boot-overlay-title">Loading workstation</h2>
+          <p id="boot-overlay-text">Preparing runtime...</p>
+          <pre class="code-block hidden" id="boot-overlay-detail"></pre>
+          <div class="boot-actions">
+            <button id="retry-latest">Retry Latest Case</button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
   DOM.headerStatus = document.getElementById('header-status') as HTMLDivElement;
+  DOM.bootStage = document.getElementById('boot-stage') as HTMLDivElement;
+  DOM.bootOverlay = document.getElementById('boot-overlay') as HTMLDivElement;
+  DOM.bootOverlayTitle = document.getElementById('boot-overlay-title') as HTMLHeadingElement;
+  DOM.bootOverlayText = document.getElementById('boot-overlay-text') as HTMLParagraphElement;
+  DOM.bootOverlayDetail = document.getElementById('boot-overlay-detail') as HTMLPreElement;
+  DOM.retryLatestButton = document.getElementById('retry-latest') as HTMLButtonElement;
   DOM.caseMeta = document.getElementById('case-meta') as HTMLDivElement;
   DOM.mprStatus = document.getElementById('mpr-status') as HTMLDivElement;
   DOM.auxMode = document.getElementById('aux-mode') as HTMLSelectElement;
@@ -289,6 +348,7 @@ function renderShell(): void {
   DOM.evidenceList = document.getElementById('evidence-list') as HTMLUListElement;
   DOM.rawBlock = document.getElementById('viewer-state') as HTMLPreElement;
   DOM.threeStage = document.getElementById('three-root') as HTMLDivElement;
+  DOM.threeFallback = document.getElementById('three-fallback') as HTMLDivElement;
 
   (['axial', 'sagittal', 'coronal', 'aux'] as ViewportKey[]).forEach((key) => {
     DOM.viewportElements[key] = document.getElementById(`viewport-${key}`) as HTMLDivElement;
@@ -298,6 +358,7 @@ function renderShell(): void {
   });
 
   DOM.loadLatestButton?.addEventListener('click', () => void loadLatestCase());
+  DOM.retryLatestButton?.addEventListener('click', () => void retryLatestCase());
   DOM.focusAnnulusButton?.addEventListener('click', () => focusPlane('annulus'));
   DOM.focusStjButton?.addEventListener('click', () => focusPlane('stj'));
   DOM.focusRootButton?.addEventListener('click', () => focusRoot());
@@ -310,6 +371,7 @@ function renderShell(): void {
     updateCenterlineLabel();
     void applyAuxViewportMode();
   });
+  setBootStage('loading_shell');
 }
 
 function renderViewportCard(key: ViewportKey, label: string): string {
@@ -326,9 +388,83 @@ function renderViewportCard(key: ViewportKey, label: string): string {
   `;
 }
 
+function bootStageLabel(stage: BootStage): string {
+  return {
+    loading_shell: 'Loading shell',
+    loading_runtime: 'Loading runtime',
+    loading_case_index: 'Loading case index',
+    loading_case_payload: 'Loading case payload',
+    initializing_volume: 'Initializing volume',
+    initializing_viewports: 'Initializing MPR',
+    ready: 'Ready',
+    failed: 'Failed',
+  }[stage];
+}
+
+function setBootStage(stage: BootStage, detail?: string): void {
+  currentBootStage = stage;
+  const label = bootStageLabel(stage);
+  if (DOM.bootStage) DOM.bootStage.textContent = stage;
+  setStatus(detail ? `${label}: ${detail}` : label);
+  if (stage !== 'failed') {
+    lastBootError = null;
+    DOM.bootOverlay?.classList.add('hidden');
+    DOM.bootOverlayDetail?.classList.add('hidden');
+    if (DOM.bootOverlayDetail) DOM.bootOverlayDetail.textContent = '';
+  }
+}
+
+function showFatalError(error: unknown, detail?: string): void {
+  currentBootStage = 'failed';
+  const text = error instanceof Error ? error.stack || error.message : String(error);
+  lastBootError = text;
+  if (DOM.bootStage) DOM.bootStage.textContent = 'failed';
+  if (DOM.bootOverlayTitle) DOM.bootOverlayTitle.textContent = 'Workstation bootstrap failed';
+  if (DOM.bootOverlayText) {
+    DOM.bootOverlayText.textContent = detail || 'The workstation could not complete startup. The page is staying visible so you can retry without a blank screen.';
+  }
+  if (DOM.bootOverlayDetail) {
+    DOM.bootOverlayDetail.textContent = text;
+    DOM.bootOverlayDetail.classList.remove('hidden');
+  }
+  DOM.bootOverlay?.classList.remove('hidden');
+  setStatus(`Failed: ${detail || 'bootstrap error'}`);
+  console.error(error);
+}
+
+function showMprFailure(error: unknown): void {
+  clearMprWatchdog();
+  const text = error instanceof Error ? error.message : String(error);
+  if (DOM.mprStatus) DOM.mprStatus.textContent = `MPR unavailable: ${text}`;
+  (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
+    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'aux unavailable' : 'mpr unavailable';
+  });
+}
+
+function showThreeFailure(error: unknown): void {
+  const text = error instanceof Error ? error.message : String(error);
+  if (DOM.threeFallback) {
+    DOM.threeFallback.innerHTML = `
+      <div class="three-fallback-card">
+        <h3>3D viewer unavailable</h3>
+        <p>The CT workstation and planning outputs remain available, but the mesh viewer failed to initialize.</p>
+        <pre class="code-block">${escapeHtml(text)}</pre>
+      </div>
+    `;
+    DOM.threeFallback.classList.remove('hidden');
+  }
+}
+
+async function retryLatestCase(): Promise<void> {
+  setBootStage('loading_case_index', 'Retrying latest case');
+  await loadLatestCase();
+}
+
 async function bootstrap(): Promise<void> {
   renderShell();
+  setBootStage('loading_runtime', 'Checking build freshness');
   await enforceVersionFreshness();
+  setBootStage('loading_runtime', 'Initializing Cornerstone3D runtime');
   await initializeCornerstoneOnce();
   await loadLatestCase();
 }
@@ -360,11 +496,14 @@ async function initializeCornerstoneOnce(): Promise<void> {
     toolsRegistered = true;
   }
   cornerstoneReady = true;
+  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Cornerstone3D runtime ready. Resolving default case...';
   setStatus('Cornerstone3D initialized. Loading default case...');
 }
 
 async function loadLatestCase(): Promise<void> {
+  setBootStage('loading_case_index', 'Resolving latest processed CTA case');
   setStatus('Resolving latest processed CTA case...');
+  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Looking up the latest processed CTA case...';
   const latest = await fetchJson<Record<string, unknown>>('/demo/latest-case');
   const jobId = String(latest.id || latest.job_id || '').trim();
   if (!jobId) throw new Error('latest_case_missing_job_id');
@@ -372,88 +511,163 @@ async function loadLatestCase(): Promise<void> {
 }
 
 async function loadCase(jobId: string): Promise<void> {
+  setBootStage('loading_case_payload', `Loading case ${jobId}`);
   setStatus(`Loading workstation case ${jobId}...`);
+  if (DOM.mprStatus) DOM.mprStatus.textContent = `Loading case ${jobId}...`;
   activeCase = await fetchJson<WorkstationCasePayload>(`/workstation/cases/${encodeURIComponent(jobId)}`);
   updateHeaderMeta(activeCase);
+  renderSidePanels(activeCase);
   await destroySession();
-  session = await createViewerSession(activeCase);
+  const volumeFailure = await initializeViewerSession(activeCase);
   currentAuxMode = activeCase.viewer_bootstrap?.aux_mode || 'annulus';
   if (DOM.auxMode) DOM.auxMode.value = currentAuxMode;
   currentCenterlineIndex = clampCenterlineIndex(activeCase.viewer_bootstrap?.centerline_index ?? 0);
   updateCenterlineControl(activeCase.centerline);
-  attachViewportInteractions();
-  await syncCrosshair(getBootstrapWorldPoint(activeCase));
-  await applyAuxViewportMode();
-  await ensureThreeViewer(activeCase);
-  renderSidePanels(activeCase);
-  setStatus(`Case ready: ${jobId}`);
+  if (session) {
+    attachViewportInteractions();
+    await syncCrosshair(getBootstrapWorldPoint(activeCase));
+    await applyAuxViewportMode();
+  }
+  const threeFailure = await initializeThreePanel(activeCase);
+  if (!session && volumeFailure) {
+    setBootStage('ready', 'Planning and 3D remain available while CT volume failed to initialize');
+  } else if (threeFailure) {
+    setBootStage('ready', 'CT workstation is available while 3D viewer failed to initialize');
+  } else {
+    setBootStage('ready', `Case ${jobId} ready`);
+  }
+  if (DOM.headerStatus) {
+    DOM.headerStatus.textContent = !session && volumeFailure
+      ? `Case ${jobId} loaded with MPR unavailable`
+      : threeFailure
+        ? `Case ${jobId} loaded with 3D viewer unavailable`
+        : `Case ready: ${jobId}`;
+  }
+}
+
+async function initializeViewerSession(casePayload: WorkstationCasePayload): Promise<unknown | null> {
+  try {
+    setBootStage('initializing_volume', `Preparing ${casePayload.volume_source.loader_kind}`);
+    armMprWatchdog();
+    session = await withTimeout(
+      createViewerSession(casePayload),
+      MPR_INIT_TIMEOUT_MS,
+      `mpr_initialization_timeout_after_${MPR_INIT_TIMEOUT_MS}ms`
+    );
+    setBootStage('initializing_viewports', 'Synchronizing axial, sagittal, coronal, and auxiliary MPR');
+    clearMprFailure();
+    return null;
+  } catch (error) {
+    session = null;
+    showMprFailure(error);
+    return error;
+  }
+}
+
+async function initializeThreePanel(casePayload: WorkstationCasePayload): Promise<unknown | null> {
+  try {
+    await ensureThreeViewer(casePayload);
+    clearThreeFailure();
+    return null;
+  } catch (error) {
+    showThreeFailure(error);
+    return error;
+  }
 }
 
 async function createViewerSession(casePayload: WorkstationCasePayload): Promise<ViewerSession> {
   const renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
-  renderingEngine.setViewports([
-    createViewportInput('axial', CoreEnums.OrientationAxis.AXIAL),
-    createViewportInput('sagittal', CoreEnums.OrientationAxis.SAGITTAL),
-    createViewportInput('coronal', CoreEnums.OrientationAxis.CORONAL),
-    createViewportInput('aux', CoreEnums.OrientationAxis.AXIAL),
-  ]);
+  const syncs: SyncController[] = [];
+  let volumeId = '';
+  let imageIds: string[] = [];
+  let dicomImageIds: string[] = [];
+  let toolGroupCreated = false;
+  try {
+    renderingEngine.setViewports([
+      createViewportInput('axial', CoreEnums.OrientationAxis.AXIAL),
+      createViewportInput('sagittal', CoreEnums.OrientationAxis.SAGITTAL),
+      createViewportInput('coronal', CoreEnums.OrientationAxis.CORONAL),
+      createViewportInput('aux', CoreEnums.OrientationAxis.AXIAL),
+    ]);
 
-  const { volumeId, imageIds, dicomImageIds } = await loadVolumeFromSource(casePayload.volume_source, String(casePayload.job.id || 'case'));
-  const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
-  if (typeof (volume as { load?: () => void }).load === 'function') {
-    (volume as { load: () => void }).load();
+    const source = await loadVolumeFromSource(casePayload.volume_source, String(casePayload.job.id || 'case'));
+    volumeId = source.volumeId;
+    imageIds = source.imageIds;
+    dicomImageIds = source.dicomImageIds;
+    const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
+    if (typeof (volume as { load?: () => Promise<unknown> | void }).load === 'function') {
+      const maybePromise = (volume as { load: () => Promise<unknown> | void }).load();
+      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
+        await maybePromise;
+      }
+    }
+
+    await setVolumesForViewports(
+      renderingEngine,
+      [{ volumeId }],
+      Object.values(VIEWPORT_IDS)
+    );
+
+    const toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
+    if (!toolGroup) throw new Error('tool_group_creation_failed');
+    toolGroupCreated = true;
+    toolGroup.addTool(CrosshairsTool.toolName);
+    toolGroup.addTool(PanTool.toolName);
+    toolGroup.addTool(ZoomTool.toolName);
+    toolGroup.setToolActive(CrosshairsTool.toolName, {
+      bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+    });
+    toolGroup.setToolActive(PanTool.toolName, {
+      bindings: [{ mouseButton: ToolEnums.MouseBindings.Auxiliary }],
+    });
+    toolGroup.setToolActive(ZoomTool.toolName, {
+      bindings: [{ mouseButton: ToolEnums.MouseBindings.Secondary }],
+    });
+
+    syncs.push(
+      synchronizers.createCameraPositionSynchronizer(`mpr-camera-${Date.now()}`),
+      synchronizers.createVOISynchronizer(`mpr-voi-${Date.now()}`, {
+        syncInvertState: true,
+        syncColormap: false,
+      }),
+      synchronizers.createZoomPanSynchronizer(`mpr-zoom-${Date.now()}`)
+    );
+
+    for (const viewportId of Object.values(VIEWPORT_IDS)) {
+      toolGroup.addViewport(viewportId, RENDERING_ENGINE_ID);
+      syncs.forEach((sync) => sync.add({ renderingEngineId: RENDERING_ENGINE_ID, viewportId }));
+    }
+
+    Object.entries(VIEWPORT_IDS).forEach(([key, viewportId]) => {
+      const viewport = renderingEngine.getViewport(viewportId) as any;
+      if (key !== 'aux') viewport.setOrientation(defaultOrientationForKey(key as ViewportKey), true);
+      viewport.render();
+    });
+
+    return {
+      renderingEngine,
+      viewportIds: VIEWPORT_IDS,
+      toolGroupId: TOOL_GROUP_ID,
+      volumeId,
+      volumeImageIds: imageIds,
+      syncs,
+      dicomImageIds,
+    };
+  } catch (error) {
+    syncs.forEach((sync) => sync.destroy?.());
+    if (toolGroupCreated) {
+      try { ToolGroupManager.destroyToolGroup(TOOL_GROUP_ID); } catch {}
+    }
+    try { renderingEngine.destroy(); } catch {}
+    if (volumeId) {
+      try { cache.removeVolumeLoadObject(volumeId); } catch {}
+    }
+    if (dicomImageIds.length) {
+      try { cornerstoneDICOMImageLoader.wadouri.fileManager.purge(); } catch {}
+    }
+    try { cache.purgeCache(); } catch {}
+    throw error;
   }
-
-  await setVolumesForViewports(
-    renderingEngine,
-    [{ volumeId }],
-    Object.values(VIEWPORT_IDS)
-  );
-
-  const toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
-  if (!toolGroup) throw new Error('tool_group_creation_failed');
-  toolGroup.addTool(CrosshairsTool.toolName);
-  toolGroup.addTool(PanTool.toolName);
-  toolGroup.addTool(ZoomTool.toolName);
-  toolGroup.setToolActive(CrosshairsTool.toolName, {
-    bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
-  });
-  toolGroup.setToolActive(PanTool.toolName, {
-    bindings: [{ mouseButton: ToolEnums.MouseBindings.Auxiliary }],
-  });
-  toolGroup.setToolActive(ZoomTool.toolName, {
-    bindings: [{ mouseButton: ToolEnums.MouseBindings.Secondary }],
-  });
-
-  const syncs = [
-    synchronizers.createCameraPositionSynchronizer(`mpr-camera-${Date.now()}`),
-    synchronizers.createVOISynchronizer(`mpr-voi-${Date.now()}`, {
-      syncInvertState: true,
-      syncColormap: false,
-    }),
-    synchronizers.createZoomPanSynchronizer(`mpr-zoom-${Date.now()}`),
-  ];
-
-  for (const viewportId of Object.values(VIEWPORT_IDS)) {
-    toolGroup.addViewport(viewportId, RENDERING_ENGINE_ID);
-    syncs.forEach((sync) => sync.add({ renderingEngineId: RENDERING_ENGINE_ID, viewportId }));
-  }
-
-  Object.entries(VIEWPORT_IDS).forEach(([key, viewportId]) => {
-    const viewport = renderingEngine.getViewport(viewportId) as any;
-    if (key !== 'aux') viewport.setOrientation(defaultOrientationForKey(key as ViewportKey), true);
-    viewport.render();
-  });
-
-  return {
-    renderingEngine,
-    viewportIds: VIEWPORT_IDS,
-    toolGroupId: TOOL_GROUP_ID,
-    volumeId,
-    volumeImageIds: imageIds,
-    syncs,
-    dicomImageIds,
-  };
 }
 
 function createViewportInput(key: ViewportKey, orientation: any) {
@@ -482,14 +696,18 @@ function defaultOrientationForKey(key: ViewportKey): any {
 }
 
 async function loadVolumeFromSource(source: VolumeSource, caseId: string): Promise<{ volumeId: string; imageIds: string[]; dicomImageIds: string[] }> {
+  const resolvedSourceUrl = resolveAbsoluteUrl(source.signed_url);
   if (source.loader_kind === 'cornerstone-nifti') {
-    const imageIds = await createNiftiImageIdsAndCacheMetadata({ url: source.signed_url });
+    const imageIds = await createNiftiImageIdsAndCacheMetadata({ url: resolvedSourceUrl });
     const volumeId = `cornerstoneStreamingImageVolume:${caseId}:nifti`;
     return { volumeId, imageIds, dicomImageIds: [] };
   }
 
-  const zipBuffer = await fetchArrayBuffer(source.signed_url);
+  const zipBuffer = await fetchArrayBuffer(resolvedSourceUrl);
   const entries = await unzipDicomZip(zipBuffer);
+  if (!entries.entries.length) {
+    throw new Error('dicom_zip_empty_after_unpack');
+  }
   const imageIds: string[] = [];
   for (const entry of entries.entries) {
     const file = new File([entry.buffer], entry.name, { type: 'application/dicom' });
@@ -767,6 +985,13 @@ function collectPlanningRows(payload: Record<string, unknown> | null | undefined
 
 function collectQaItems(casePayload: WorkstationCasePayload): string[] {
   const items: string[] = [];
+  const qaFlags = casePayload.viewer_bootstrap?.qa_flags || null;
+  const warnings = casePayload.viewer_bootstrap?.bootstrap_warnings || [];
+  if (qaFlags) {
+    Object.entries(qaFlags).forEach(([key, value]) => {
+      items.push(`${escapeHtml(humanize(key))}: <span class="badge-${value ? 'ok' : 'warn'}">${value ? 'available' : 'missing'}</span>`);
+    });
+  }
   const summary = casePayload.model_landmarks_summary || {};
   const annulus = pickObject(summary.annulus);
   if (annulus) items.push(formatQaLine('Annulus', annulus.status, annulus.confidence));
@@ -788,6 +1013,9 @@ function collectQaItems(casePayload: WorkstationCasePayload): string[] {
   if (!items.length && casePayload.centerline?.point_count) {
     items.push(`Centerline points: ${casePayload.centerline.point_count}`);
   }
+  warnings.forEach((warning) => {
+    items.push(`${escapeHtml(humanize(warning))}: <span class="badge-warn">warning</span>`);
+  });
   return items;
 }
 
@@ -820,6 +1048,9 @@ function updateViewerState(): void {
       centerline_index: currentCenterlineIndex,
       crosshair_world: currentCrosshairWorld,
       volume_source: activeCase?.volume_source || null,
+      runtime_requirements: activeCase?.viewer_bootstrap?.runtime_requirements || null,
+      qa_flags: activeCase?.viewer_bootstrap?.qa_flags || null,
+      bootstrap_warnings: activeCase?.viewer_bootstrap?.bootstrap_warnings || null,
       case_job_id: activeCase?.job?.id || null,
     },
     null,
@@ -836,47 +1067,44 @@ async function ensureThreeViewer(casePayload: WorkstationCasePayload): Promise<v
 }
 
 async function createThreeRuntime(container: HTMLDivElement): Promise<ThreeRuntime> {
-  const THREE_URL = 'https://esm.sh/three@0.179.1?bundle';
-  const ORBIT_URL = 'https://esm.sh/three@0.179.1/examples/jsm/controls/OrbitControls.js';
-  const STL_URL = 'https://esm.sh/three@0.179.1/examples/jsm/loaders/STLLoader.js';
-  const [THREE, orbitMod] = await Promise.all([import(THREE_URL), import(ORBIT_URL)]);
-  const { OrbitControls } = orbitMod as any;
-  const scene = new (THREE as any).Scene();
-  scene.background = new (THREE as any).Color(0x020812);
-  const camera = new (THREE as any).PerspectiveCamera(40, Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight), 0.1, 5000);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x020812);
+  const camera = new THREE.PerspectiveCamera(40, Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight), 0.1, 5000);
   camera.position.set(0, -130, 130);
-  const renderer = new (THREE as any).WebGLRenderer({ antialias: true, alpha: false });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight));
   container.replaceChildren(renderer.domElement);
+  DOM.threeFallback?.classList.add('hidden');
+  if (DOM.threeFallback) DOM.threeFallback.innerHTML = '';
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.target.set(0, 0, 0);
 
-  const ambient = new (THREE as any).AmbientLight(0xffffff, 1.35);
+  const ambient = new THREE.AmbientLight(0xffffff, 1.35);
   scene.add(ambient);
-  const dirA = new (THREE as any).DirectionalLight(0xffffff, 1.1);
+  const dirA = new THREE.DirectionalLight(0xffffff, 1.1);
   dirA.position.set(120, 120, 180);
   scene.add(dirA);
-  const dirB = new (THREE as any).DirectionalLight(0x77aaff, 0.7);
+  const dirB = new THREE.DirectionalLight(0x77aaff, 0.7);
   dirB.position.set(-90, -60, 120);
   scene.add(dirB);
 
-  const rootGroup = new (THREE as any).Group();
+  const rootGroup = new THREE.Group();
   scene.add(rootGroup);
 
-  const raycaster = new (THREE as any).Raycaster();
-  const pointer = new (THREE as any).Vector2();
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
   const animate = () => {
     controls.update();
     renderer.render(scene, camera);
     runtime.animationHandle = requestAnimationFrame(animate);
   };
-  const runtime: ThreeRuntime = { scene, camera, renderer, controls, rootGroup, animationHandle: null, raycaster, pointer };
+  const resizeHandler = () => resizeThreeRuntime(runtime, container);
+  const runtime: ThreeRuntime = { scene, camera, renderer, controls, rootGroup, animationHandle: null, raycaster, pointer, resizeHandler };
   animate();
-  window.addEventListener('resize', () => resizeThreeRuntime(runtime, container));
-  (runtime as any).THREE_URLS = { THREE_URL, STL_URL };
+  window.addEventListener('resize', resizeHandler);
   return runtime;
 }
 
@@ -887,39 +1115,41 @@ function resizeThreeRuntime(runtime: ThreeRuntime, container: HTMLDivElement): v
 }
 
 async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCasePayload): Promise<void> {
-  const THREE = await import((runtime as any).THREE_URLS.THREE_URL);
-  const { STLLoader } = await import((runtime as any).THREE_URLS.STL_URL) as any;
   const loader = new STLLoader();
-  runtime.rootGroup.clear();
+  while (runtime.rootGroup.children.length) {
+    const child = runtime.rootGroup.children[0];
+    runtime.rootGroup.remove(child);
+    disposeThreeObject(child);
+  }
 
   const materials = {
-    root: new (THREE as any).MeshPhongMaterial({ color: 0x58b8ff, transparent: true, opacity: 0.9, shininess: 40 }),
-    ascending: new (THREE as any).MeshPhongMaterial({ color: 0x7ef0c3, transparent: true, opacity: 0.82, shininess: 40 }),
-    leaflets: new (THREE as any).MeshPhongMaterial({ color: 0xffd36b, transparent: true, opacity: 0.88, shininess: 30 }),
+    root: new THREE.MeshPhongMaterial({ color: 0x58b8ff, transparent: true, opacity: 0.9, shininess: 40 }),
+    ascending: new THREE.MeshPhongMaterial({ color: 0x7ef0c3, transparent: true, opacity: 0.82, shininess: 40 }),
+    leaflets: new THREE.MeshPhongMaterial({ color: 0xffd36b, transparent: true, opacity: 0.88, shininess: 30 }),
   };
 
   await Promise.all([
-    maybeLoadStl(THREE, casePayload.links.aortic_root_stl, loader, materials.root, runtime.rootGroup),
-    maybeLoadStl(THREE, casePayload.links.ascending_aorta_stl, loader, materials.ascending, runtime.rootGroup),
-    maybeLoadStl(THREE, casePayload.links.leaflets_stl, loader, materials.leaflets, runtime.rootGroup),
+    maybeLoadStl(casePayload.links.aortic_root_stl, loader, materials.root, runtime.rootGroup),
+    maybeLoadStl(casePayload.links.ascending_aorta_stl, loader, materials.ascending, runtime.rootGroup),
+    maybeLoadStl(casePayload.links.leaflets_stl, loader, materials.leaflets, runtime.rootGroup),
   ]);
 
   if (Array.isArray(casePayload.centerline?.points_world) && casePayload.centerline!.points_world!.length > 1) {
-    const points = casePayload.centerline!.points_world!.map((point) => new (THREE as any).Vector3(point[0], point[1], point[2]));
-    const geometry = new (THREE as any).BufferGeometry().setFromPoints(points);
-    const line = new (THREE as any).Line(geometry, new (THREE as any).LineBasicMaterial({ color: 0xffffff }));
+    const points = casePayload.centerline!.points_world!.map((point) => new THREE.Vector3(point[0], point[1], point[2]));
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
     line.name = 'centerline';
     runtime.rootGroup.add(line);
   }
 
   const annulusPlane = casePayload.display_planes?.annulus;
-  if (annulusPlane) runtime.rootGroup.add(buildPlaneMesh(THREE, annulusPlane, 18, 0xff7b89, 'annulus-plane'));
+  if (annulusPlane) runtime.rootGroup.add(buildPlaneMesh(annulusPlane, 18, 0xff7b89, 'annulus-plane'));
   const stjPlane = casePayload.display_planes?.stj;
-  if (stjPlane) runtime.rootGroup.add(buildPlaneMesh(THREE, stjPlane, 18, 0x9f8cff, 'stj-plane'));
+  if (stjPlane) runtime.rootGroup.add(buildPlaneMesh(stjPlane, 18, 0x9f8cff, 'stj-plane'));
 
-  const box = new (THREE as any).Box3().setFromObject(runtime.rootGroup);
-  const center = box.isEmpty() ? new (THREE as any).Vector3(0, 0, 0) : box.getCenter(new (THREE as any).Vector3());
-  const size = box.isEmpty() ? 120 : box.getSize(new (THREE as any).Vector3()).length();
+  const box = new THREE.Box3().setFromObject(runtime.rootGroup);
+  const center = box.isEmpty() ? new THREE.Vector3(0, 0, 0) : box.getCenter(new THREE.Vector3());
+  const size = box.isEmpty() ? 120 : box.getSize(new THREE.Vector3()).length();
   runtime.controls.target.copy(center);
   runtime.camera.position.set(center.x + size * 0.8, center.y - size * 0.9, center.z + size * 0.7);
   runtime.camera.lookAt(center);
@@ -927,16 +1157,16 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
   updateThreePlaneHighlights();
 }
 
-async function maybeLoadStl(THREE: any, url: string | undefined, loader: any, material: any, group: any): Promise<void> {
+async function maybeLoadStl(url: string | undefined, loader: STLLoader, material: THREE.Material, group: THREE.Group): Promise<void> {
   if (!url) return;
-  const geometry = await loader.loadAsync(url);
+  const geometry = await loader.loadAsync(resolveAbsoluteUrl(url));
   geometry.computeVertexNormals?.();
-  const object = new THREE.Mesh(geometry, material.clone ? material.clone() : material);
+  const object = new THREE.Mesh(geometry, material.clone());
   object.name = url;
   group.add(object);
 }
 
-function buildPlaneMesh(THREE: any, plane: PlaneDefinition, radius: number, color: number, name: string): any {
+function buildPlaneMesh(plane: PlaneDefinition, radius: number, color: number, name: string): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(radius, radius, 1, 1);
   const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geometry, material);
@@ -960,13 +1190,14 @@ function updateThreePlaneHighlights(): void {
   if (!threeRuntime || !activeCase) return;
   const aux = planeForMode(activeCase, currentAuxMode, currentCenterlineIndex);
   const existing = threeRuntime.rootGroup.getObjectByName('aux-plane');
-  if (existing) threeRuntime.rootGroup.remove(existing);
+  if (existing) {
+    threeRuntime.rootGroup.remove(existing);
+    disposeThreeObject(existing);
+  }
   if (!aux) return;
-  import((threeRuntime as any).THREE_URLS.THREE_URL).then((THREE) => {
-    const mesh = buildPlaneMesh(THREE as any, aux, 20, 0xffffff, 'aux-plane');
-    mesh.material.opacity = 0.12;
-    threeRuntime?.rootGroup.add(mesh);
-  }).catch(() => void 0);
+  const mesh = buildPlaneMesh(aux, 20, 0xffffff, 'aux-plane');
+  (mesh.material as THREE.MeshBasicMaterial).opacity = 0.12;
+  threeRuntime.rootGroup.add(mesh);
 }
 
 async function destroySession(): Promise<void> {
@@ -981,6 +1212,32 @@ async function destroySession(): Promise<void> {
     }
   }
   session = null;
+}
+
+function clearMprFailure(): void {
+  clearMprWatchdog();
+  if (DOM.mprStatus) DOM.mprStatus.textContent = 'MPR ready. Crosshair synchronization active.';
+  (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
+    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = `${humanize(key)} ready`;
+  });
+}
+
+function clearThreeFailure(): void {
+  DOM.threeFallback?.classList.add('hidden');
+  if (DOM.threeFallback) DOM.threeFallback.innerHTML = '';
+}
+
+function disposeThreeObject(object: THREE.Object3D): void {
+  object.traverse((node: THREE.Object3D) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose?.();
+    const material = mesh.material;
+    if (Array.isArray(material)) {
+      material.forEach((entry) => entry.dispose?.());
+    } else {
+      material?.dispose?.();
+    }
+  });
 }
 
 function metricRowFromValue(label: string, key: string, value: unknown, contract: Record<string, unknown> | null): MetricRow | null {
@@ -1049,7 +1306,6 @@ function readMetricValue(value: unknown): number | null {
 
 function setStatus(text: string): void {
   if (DOM.headerStatus) DOM.headerStatus.textContent = text;
-  if (DOM.mprStatus) DOM.mprStatus.textContent = text;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -1081,6 +1337,48 @@ function escapeHtml(input: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function resolveAbsoluteUrl(url: string): string {
+  return new URL(url, window.location.origin).toString();
+}
+
+function armMprWatchdog(): void {
+  clearMprWatchdog();
+  mprWatchdogHandle = window.setTimeout(() => {
+    if (currentBootStage !== 'initializing_volume' && currentBootStage !== 'initializing_viewports') {
+      return;
+    }
+    showMprFailure(new Error(`mpr_initialization_timeout_after_${MPR_INIT_TIMEOUT_MS}ms`));
+    setBootStage('ready', 'MPR unavailable. Planning outputs remain visible while CT volume initialization is skipped.');
+    if (DOM.headerStatus) {
+      DOM.headerStatus.textContent = 'Case loaded with MPR unavailable';
+    }
+    if (activeCase) {
+      void initializeThreePanel(activeCase);
+    }
+  }, MPR_INIT_TIMEOUT_MS);
+}
+
+function clearMprWatchdog(): void {
+  if (mprWatchdogHandle !== null) {
+    window.clearTimeout(mprWatchdogHandle);
+    mprWatchdogHandle = null;
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorCode: string): Promise<T> {
+  let timeoutHandle: number | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = window.setTimeout(() => reject(new Error(errorCode)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
+  }
 }
 
 function toPoint3(value: unknown): Point3 {
@@ -1130,14 +1428,8 @@ function formatConfidence(value: unknown): string {
 }
 
 bootstrap().catch((error) => {
-  console.error(error);
-  document.body.innerHTML = `
-    <div class="error-screen">
-      <div class="error-card">
-        <h1>Workstation bootstrap failed</h1>
-        <p>The MPR workstation could not initialize. This milestone keeps clinical measurements authoritative on the backend model, so frontend bootstrap failures must be visible instead of silently falling back.</p>
-        <pre class="code-block">${escapeHtml(error instanceof Error ? error.stack || error.message : String(error))}</pre>
-      </div>
-    </div>
-  `;
+  if (!DOM.bootOverlay) {
+    renderShell();
+  }
+  showFatalError(error, 'The workstation shell loaded, but startup did not complete. You can retry the latest case without a blank page.');
 });
