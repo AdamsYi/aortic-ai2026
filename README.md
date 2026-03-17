@@ -1,9 +1,51 @@
-# Aortic AI Web Platform (Worker + Win GPU)
+# AorticAI Production Template
+
+This repository now contains a manifest-first default showcase/reference case:
+- `cases/default_clinical_case/artifacts/case_manifest.json` is the single source of truth
+- `cases/default_clinical_case/artifacts/planning.json` is the planning artifact source
+- `services/api` is the only business-truth layer
+- Cloudflare Worker remains the only public entrypoint
+
+The default case is a placeholder-only showcase bundle:
+- no real CTA data
+- renderable NIfTI / STL / PDF assets
+- full measurements / planning / QA / download flow
+- explicit success + failure coexistence
+
+Repository policy:
+- `src/generated/workstationAssets.ts` and `src/generated/defaultCaseBundle.ts` are committed generated files.
+- They must stay in sync with `npm run build:web`; review and submit them as part of the template change set.
+- `frontend/workstation/` is retained as migration-era reference source only and no longer participates in build or runtime.
+
+Quickstart:
+
+```bash
+npm install
+npm run build:web
+npx tsc --noEmit
+npm run test:schema
+npm run test:unit
+```
+
+E2E showcase run:
+
+```bash
+npm run test:e2e
+```
+
+`default_clinical_case` is intentionally both:
+- default instant-open case
+- showcase case
+- reference implementation case
+
+Unspecified items: no specific constraint.
+
+# Aortic AI Web Platform (Worker + External GPU Provider)
 
 This repository now targets a real web-driven pipeline:
 - browser upload and orchestration
 - Cloudflare Worker gateway
-- Windows GPU FastAPI inference backend
+- external GPU FastAPI inference backend (Windows workstation or Linux cloud GPU)
 - real segmentation masks + centerline-orthogonal geometry measurements (no placeholders)
 
 Core exports per case:
@@ -30,6 +72,11 @@ Core tables:
 Helper table:
 - `upload_sessions` (ephemeral upload token flow)
 
+Governance tables:
+- `study_repository` (study traceability / metadata registry)
+- `pipeline_runs` (pipeline version + provenance + runtime tracking)
+- `artifact_access_audit` (artifact download audit log)
+
 ## 2) Endpoints
 
 - `GET /health`
@@ -40,9 +87,15 @@ Helper table:
 - `POST /jobs` -> enqueue segmentation
 - `GET /jobs/:id` -> query status + artifacts + metrics
 - `GET /studies/:id/raw` -> download raw CT file
+- `GET /studies/:id/meta` -> study metadata + repository summary
+- `GET /studies/:id/repository` -> study repository view + recent jobs/runs
 - `GET /jobs/:id/artifacts/:artifact_type` -> download artifact by type
 - `POST /callbacks/inference` -> inference provider callback (for webhook mode)
 - `POST /providers/mock-inference` -> built-in mock provider (for zero-cost webhook flow)
+
+Artifact download model:
+- if `ARTIFACT_LINK_SECRET` is set, `/studies/:id/raw` and `/jobs/:id/artifacts/:type` require signed URLs
+- signed links are returned from `GET /jobs/:id` and `GET /demo/latest-case`
 
 `/demo/latest-case` includes `clinical_targets` focused on:
 - `pears` (pre-op 3D mesh planning readiness)
@@ -86,6 +139,10 @@ npm run d1:migrate:local
 npm run d1:migrate:remote
 ```
 
+Important:
+- this repo now includes `migrations/0002_governance.sql`
+- apply both migrations before using study repository / pipeline run traceability features
+
 Run locally:
 
 ```bash
@@ -119,6 +176,13 @@ Environment variables in `wrangler.toml`:
 - `INFERENCE_MAX_INPUT_BYTES`
 - `API_BASE_URL` (used to build callback URL)
 - `INFERENCE_WEBHOOK_URL`
+- `ARTIFACT_LINK_TTL_SECONDS`
+
+Recommended secret:
+
+```bash
+npx wrangler secret put ARTIFACT_LINK_SECRET
+```
 
 ## 4.2 Start Now (No Talk)
 
@@ -155,9 +219,17 @@ One-shot attach + validation (recommended):
 ./scripts/attach_windows_gpu_and_validate.sh http://<win-gpu-host>:8000
 ```
 
+Linux cloud GPU path:
+
+```bash
+./scripts/deploy_linux_gpu_provider.sh <ssh-target> [public_provider_base_url]
+./scripts/attach_linux_gpu_and_validate.sh <ssh-target> [public_provider_base_url]
+```
+
 Important:
 - If Worker runs on Cloudflare (not local dev), `192.168.x.x` / `10.x.x.x` private IP is not directly reachable from cloud runtime.
 - Expose your Windows provider as a public HTTPS endpoint first (Cloudflare Tunnel / Tailscale Funnel), then switch webhook to that public URL.
+- For Linux cloud GPU, image build, provider selftest, and Worker end-to-end CTA validation all run on the remote GPU host; the Mac remains control-plane only.
 
 3. Submit a case and check job status:
 
