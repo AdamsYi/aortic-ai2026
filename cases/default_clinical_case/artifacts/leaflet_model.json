@@ -1,0 +1,204 @@
+{
+  "leaflets": [
+    {
+      "cusp_label": "L",
+      "status": "legacy_summary",
+      "confidence": 0.28,
+      "hinge_curve_world": [],
+      "free_edge_world": [],
+      "geometric_height_mm": {
+        "value": 17.0,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_placeholder_value",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.28
+        },
+        "uncertainty": {
+          "flag": "PLACEHOLDER_ONLY",
+          "message": "Legacy leaflet summary only.",
+          "clinician_review_required": true
+        }
+      },
+      "effective_height_mm": {
+        "value": null,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_leaflet_summary_only",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.18
+        },
+        "uncertainty": {
+          "flag": "NOT_AVAILABLE",
+          "message": "Effective height is not available for showcase default case.",
+          "clinician_review_required": true
+        }
+      },
+      "coaptation_height_mm": {
+        "value": null,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_leaflet_summary_only",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.18
+        },
+        "uncertainty": {
+          "flag": "NOT_AVAILABLE",
+          "message": "Coaptation height is not available for showcase default case.",
+          "clinician_review_required": true
+        }
+      },
+      "evidence": {
+        "method": "legacy_placeholder_leaflet",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.28
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "Leaflet model is intentionally legacy-only in the showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    {
+      "cusp_label": "N",
+      "status": "legacy_summary",
+      "confidence": 0.28,
+      "hinge_curve_world": [],
+      "free_edge_world": [],
+      "geometric_height_mm": {
+        "value": 17.2,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_placeholder_value",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.28
+        },
+        "uncertainty": {
+          "flag": "PLACEHOLDER_ONLY",
+          "message": "Legacy leaflet summary only.",
+          "clinician_review_required": true
+        }
+      },
+      "effective_height_mm": {
+        "value": null,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_leaflet_summary_only",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.18
+        },
+        "uncertainty": {
+          "flag": "NOT_AVAILABLE",
+          "message": "Effective height is not available for showcase default case.",
+          "clinician_review_required": true
+        }
+      },
+      "coaptation_height_mm": {
+        "value": null,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_leaflet_summary_only",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.18
+        },
+        "uncertainty": {
+          "flag": "NOT_AVAILABLE",
+          "message": "Coaptation height is not available for showcase default case.",
+          "clinician_review_required": true
+        }
+      },
+      "evidence": {
+        "method": "legacy_placeholder_leaflet",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.28
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "Leaflet model is intentionally legacy-only in the showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    {
+      "cusp_label": "R",
+      "status": "legacy_summary",
+      "confidence": 0.28,
+      "hinge_curve_world": [],
+      "free_edge_world": [],
+      "geometric_height_mm": {
+        "value": 16.8,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_placeholder_value",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.28
+        },
+        "uncertainty": {
+          "flag": "PLACEHOLDER_ONLY",
+          "message": "Legacy leaflet summary only.",
+          "clinician_review_required": true
+        }
+      },
+      "effective_height_mm": {
+        "value": null,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_leaflet_summary_only",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.18
+        },
+        "uncertainty": {
+          "flag": "NOT_AVAILABLE",
+          "message": "Effective height is not available for showcase default case.",
+          "clinician_review_required": true
+        }
+      },
+      "coaptation_height_mm": {
+        "value": null,
+        "unit": "mm",
+        "evidence": {
+          "method": "legacy_leaflet_summary_only",
+          "source_type": "literature",
+          "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+          "confidence": 0.18
+        },
+        "uncertainty": {
+          "flag": "NOT_AVAILABLE",
+          "message": "Coaptation height is not available for showcase default case.",
+          "clinician_review_required": true
+        }
+      },
+      "evidence": {
+        "method": "legacy_placeholder_leaflet",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.28
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "Leaflet model is intentionally legacy-only in the showcase case.",
+        "clinician_review_required": true
+      }
+    }
+  ],
+  "evidence": {
+    "method": "showcase_legacy_leaflet_model",
+    "source_type": "literature",
+    "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+    "confidence": 0.28
+  },
+  "uncertainty": {
+    "flag": "NOT_AVAILABLE",
+    "message": "Leaflet model is intentionally partial to demonstrate honest fallback behavior.",
+    "clinician_review_required": true
+  }
+}

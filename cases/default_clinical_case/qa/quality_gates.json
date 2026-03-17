@@ -1,0 +1,12 @@
+{
+  "sinus_ge_annulus": true,
+  "stj_le_sinus": true,
+  "commissure_spacing_ok": true,
+  "coronary_height_reasonable": true,
+  "notes": [
+    "Default showcase case enforces sinus >= annulus.",
+    "Default showcase case enforces STJ <= sinus.",
+    "Default showcase case enforces commissure spacing ≈ 120°.",
+    "Default showcase case enforces coronary heights reasonable."
+  ]
+}

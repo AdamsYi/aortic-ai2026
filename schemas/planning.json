@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/planning.json",
+  "title": "AorticAI Planning Artifact",
+  "type": "object",
+  "required": ["tavi", "vsrr", "pears"],
+  "properties": {
+    "tavi": {
+      "type": "object",
+      "required": [
+        "valve_size_suggestion",
+        "coronary_obstruction_risk",
+        "optimal_projection_angle",
+        "access_route_assessment"
+      ],
+      "properties": {
+        "valve_size_suggestion": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "coronary_obstruction_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "optimal_projection_angle": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "access_route_assessment": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+      },
+      "additionalProperties": false
+    },
+    "vsrr": {
+      "type": "object",
+      "required": [
+        "commissural_geometry_status",
+        "leaflet_geometry_status",
+        "graft_sizing"
+      ],
+      "properties": {
+        "commissural_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "leaflet_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "graft_sizing": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+      },
+      "additionalProperties": false
+    },
+    "pears": {
+      "type": "object",
+      "required": ["external_root_geometry_status", "support_region_status"],
+      "properties": {
+        "external_root_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "support_region_status": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

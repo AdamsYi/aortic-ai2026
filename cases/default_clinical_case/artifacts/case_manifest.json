@@ -1,0 +1,78 @@
+{
+  "case_id": "default_clinical_case",
+  "case_role": ["default", "showcase", "reference"],
+  "display_name": {
+    "zh-CN": "默认展示病例（占位）",
+    "en": "Default Showcase Case (Placeholder)"
+  },
+  "placeholder": true,
+  "not_real_cta": true,
+  "build_version": "template-placeholder",
+  "artifact_index": {
+    "case_manifest": "artifacts/case_manifest.json",
+    "planning": "artifacts/planning.json",
+    "centerline": "artifacts/centerline.json",
+    "aortic_root_model": "artifacts/aortic_root_model.json",
+    "measurements": "artifacts/measurements.json",
+    "leaflet_model": "artifacts/leaflet_model.json"
+  },
+  "mesh_index": {
+    "aortic_root": "meshes/aortic_root.stl",
+    "annulus_ring": "meshes/annulus_ring.stl",
+    "leaflet_L": "meshes/leaflet_L.stl",
+    "leaflet_N": "meshes/leaflet_N.stl",
+    "leaflet_R": "meshes/leaflet_R.stl"
+  },
+  "report_index": {
+    "report_pdf": "reports/report.pdf"
+  },
+  "qa_index": {
+    "quality_gates": "qa/quality_gates.json",
+    "failure_flags": "qa/failure_flags.json"
+  },
+  "capabilities": {
+    "cpr": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "cpr_artifact_missing"
+    },
+    "coronary_ostia": {
+      "available": true,
+      "inferred": false,
+      "legacy": false,
+      "source": "artifact",
+      "reason": null
+    },
+    "leaflet_geometry": {
+      "available": false,
+      "inferred": false,
+      "legacy": true,
+      "source": "legacy_summary",
+      "reason": "leaflet_geometry_legacy_only"
+    },
+    "pears_geometry": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "pears_geometry_not_generated"
+    }
+  },
+  "planning_summary": {
+    "tavi_status": "available",
+    "vsrr_status": "partial",
+    "pears_status": "partial"
+  },
+  "quality_gates_summary": {
+    "sinus_ge_annulus": true,
+    "stj_le_sinus": true,
+    "commissure_spacing_ok": true,
+    "coronary_height_reasonable": true
+  },
+  "uncertainty_summary": {
+    "clinician_review_required": true,
+    "failing_fields": ["coronary_height_right_mm", "access_route_assessment", "leaflet_geometry_status"]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/failure_flags.json",
+  "title": "AorticAI Failure Flags",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["field", "status", "uncertainty"],
+        "properties": {
+          "field": { "type": "string" },
+          "status": { "type": "string" },
+          "reason": { "type": ["string", "null"] },
+          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        }
+      }
+    }
+  }
+}

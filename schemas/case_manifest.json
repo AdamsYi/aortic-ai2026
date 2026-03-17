@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/case_manifest.json",
+  "title": "AorticAI Default Case Manifest",
+  "type": "object",
+  "required": [
+    "case_id",
+    "case_role",
+    "display_name",
+    "placeholder",
+    "not_real_cta",
+    "artifact_index",
+    "mesh_index",
+    "report_index",
+    "qa_index",
+    "capabilities",
+    "planning_summary",
+    "quality_gates_summary",
+    "uncertainty_summary"
+  ],
+  "properties": {
+    "case_id": { "type": "string" },
+    "case_role": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 3
+    },
+    "display_name": {
+      "type": "object",
+      "required": ["zh-CN", "en"],
+      "properties": {
+        "zh-CN": { "type": "string" },
+        "en": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "placeholder": { "type": "boolean" },
+    "not_real_cta": { "type": "boolean" },
+    "build_version": { "type": "string" },
+    "artifact_index": { "type": "object" },
+    "mesh_index": { "type": "object" },
+    "report_index": { "type": "object" },
+    "qa_index": { "type": "object" },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "cpr": { "$ref": "common.json#/$defs/CapabilityState" },
+        "coronary_ostia": { "$ref": "common.json#/$defs/CapabilityState" },
+        "leaflet_geometry": { "$ref": "common.json#/$defs/CapabilityState" },
+        "pears_geometry": { "$ref": "common.json#/$defs/CapabilityState" }
+      },
+      "required": ["cpr", "coronary_ostia", "leaflet_geometry", "pears_geometry"],
+      "additionalProperties": false
+    },
+    "planning_summary": { "type": "object" },
+    "quality_gates_summary": { "type": "object" },
+    "uncertainty_summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

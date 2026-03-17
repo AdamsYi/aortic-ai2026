@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "field": "coronary_height_right_mm",
+      "status": "failed",
+      "reason": "intentional_showcase_failure_example",
+      "uncertainty": {
+        "flag": "DETECTION_FAILED",
+        "message": "Right coronary height is intentionally null in the showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    {
+      "field": "access_route_assessment",
+      "status": "failed",
+      "reason": "missing_access_route_input_in_placeholder_case",
+      "uncertainty": {
+        "flag": "MISSING_INPUT",
+        "message": "No access-route volume is bundled with the placeholder showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    {
+      "field": "leaflet_geometry_status",
+      "status": "legacy_only",
+      "reason": "legacy_only_leaflet_geometry",
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "Full cusp-wise leaflet geometry is not available in the default showcase case.",
+        "clinician_review_required": true
+      }
+    }
+  ]
+}

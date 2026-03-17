@@ -1,0 +1,160 @@
+{
+  "measurements": {
+    "annulus_equivalent_diameter_mm": {
+      "value": 23.8,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_annulus_polygon",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Annulus equivalent diameter is showcase-only.",
+        "clinician_review_required": true
+      }
+    },
+    "annulus_area_mm2": {
+      "value": 445.6,
+      "unit": "mm2",
+      "evidence": {
+        "method": "placeholder_annulus_polygon",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Annulus area is showcase-only.",
+        "clinician_review_required": true
+      }
+    },
+    "annulus_perimeter_mm": {
+      "value": 75.4,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_annulus_polygon",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Annulus perimeter is showcase-only.",
+        "clinician_review_required": true
+      }
+    },
+    "sinus_diameter_mm": {
+      "value": 34.2,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_sinus_section",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.8
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Sinus diameter is showcase-only.",
+        "clinician_review_required": true
+      }
+    },
+    "stj_diameter_mm": {
+      "value": 28.1,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_stj_section",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.78
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "STJ diameter is showcase-only.",
+        "clinician_review_required": true
+      }
+    },
+    "ascending_aorta_diameter_mm": {
+      "value": 31.0,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_ascending_section",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.77
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Ascending diameter is showcase-only.",
+        "clinician_review_required": true
+      }
+    },
+    "coronary_height_left_mm": {
+      "value": 12.4,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_annulus_to_ostium_distance",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.72
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Left coronary height is a placeholder geometry-derived distance.",
+        "clinician_review_required": true
+      }
+    },
+    "coronary_height_right_mm": {
+      "value": null,
+      "unit": "mm",
+      "evidence": {
+        "method": "placeholder_annulus_to_ostium_distance",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.25
+      },
+      "uncertainty": {
+        "flag": "DETECTION_FAILED",
+        "message": "Right coronary height is intentionally null in the showcase case to prove honest failure handling.",
+        "clinician_review_required": true
+      }
+    },
+    "leaflet_effective_height_mm": {
+      "value": null,
+      "unit": "mm",
+      "evidence": {
+        "method": "legacy_leaflet_summary_only",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.19
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "Full cusp-wise leaflet geometry is not available in the placeholder showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    "calcium_burden_ml": {
+      "value": 0.8,
+      "unit": "mL",
+      "evidence": {
+        "method": "placeholder_hu_volume_proxy",
+        "source_type": "literature",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.45
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Calcium burden is a placeholder proxy value for showcase display only.",
+        "clinician_review_required": true
+      }
+    }
+  },
+  "constraints": {
+    "sinus_ge_annulus": true,
+    "stj_le_sinus": true,
+    "commissure_spacing_ok": true,
+    "coronary_height_reasonable": true
+  }
+}

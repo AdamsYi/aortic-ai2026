@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/aortic_root_computational_model.json",
+  "title": "AorticRootComputationalModel",
+  "type": "object",
+  "required": [
+    "model_id",
+    "case_id",
+    "coordinate_system",
+    "centerline",
+    "annulus_ring",
+    "hinge_curve",
+    "commissures",
+    "sinus_peaks",
+    "sinotubular_junction",
+    "ascending_aorta_axis",
+    "coronary_ostia",
+    "leaflet_meshes",
+    "quality_gates"
+  ],
+  "properties": {
+    "model_id": { "type": "string" },
+    "case_id": { "type": "string" },
+    "coordinate_system": { "type": "string" },
+    "centerline": { "$ref": "centerline.json" },
+    "annulus_ring": {
+      "type": "object",
+      "required": ["origin_world", "normal_world", "ring_points_world", "evidence", "uncertainty"],
+      "properties": {
+        "origin_world": { "$ref": "common.json#/$defs/Vector3" },
+        "normal_world": { "$ref": "common.json#/$defs/Vector3" },
+        "ring_points_world": { "type": "array", "items": { "$ref": "common.json#/$defs/Vector3" } },
+        "evidence": { "$ref": "common.json#/$defs/Evidence" },
+        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+      },
+      "additionalProperties": true
+    },
+    "hinge_curve": {
+      "type": "object",
+      "required": ["points_world", "evidence", "uncertainty"],
+      "properties": {
+        "points_world": { "type": "array", "items": { "$ref": "common.json#/$defs/Vector3" } },
+        "evidence": { "$ref": "common.json#/$defs/Evidence" },
+        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+      },
+      "additionalProperties": true
+    },
+    "commissures": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["name", "point_world", "evidence", "uncertainty"],
+        "properties": {
+          "name": { "type": "string" },
+          "point_world": { "$ref": "common.json#/$defs/Vector3" },
+          "evidence": { "$ref": "common.json#/$defs/Evidence" },
+          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "sinus_peaks": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["name", "point_world", "evidence", "uncertainty"],
+        "properties": {
+          "name": { "type": "string" },
+          "point_world": { "$ref": "common.json#/$defs/Vector3" },
+          "evidence": { "$ref": "common.json#/$defs/Evidence" },
+          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "sinotubular_junction": {
+      "type": "object",
+      "required": ["origin_world", "normal_world", "evidence", "uncertainty"],
+      "properties": {
+        "origin_world": { "$ref": "common.json#/$defs/Vector3" },
+        "normal_world": { "$ref": "common.json#/$defs/Vector3" },
+        "evidence": { "$ref": "common.json#/$defs/Evidence" },
+        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+      },
+      "additionalProperties": true
+    },
+    "ascending_aorta_axis": {
+      "type": "object",
+      "required": ["origin_world", "direction_world", "evidence", "uncertainty"],
+      "properties": {
+        "origin_world": { "$ref": "common.json#/$defs/Vector3" },
+        "direction_world": { "$ref": "common.json#/$defs/Vector3" },
+        "evidence": { "$ref": "common.json#/$defs/Evidence" },
+        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+      },
+      "additionalProperties": true
+    },
+    "coronary_ostia": {
+      "type": "object",
+      "required": ["left", "right"],
+      "properties": {
+        "left": {
+          "type": "object",
+          "required": ["status", "point_world", "evidence", "uncertainty"],
+          "properties": {
+            "status": { "type": "string" },
+            "point_world": { "$ref": "common.json#/$defs/Vector3" },
+            "evidence": { "$ref": "common.json#/$defs/Evidence" },
+            "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          },
+          "additionalProperties": true
+        },
+        "right": {
+          "type": "object",
+          "required": ["status", "point_world", "evidence", "uncertainty"],
+          "properties": {
+            "status": { "type": "string" },
+            "point_world": { "$ref": "common.json#/$defs/Vector3" },
+            "evidence": { "$ref": "common.json#/$defs/Evidence" },
+            "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "leaflet_meshes": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["cusp_label", "mesh_path", "evidence", "uncertainty"],
+        "properties": {
+          "cusp_label": { "type": "string" },
+          "mesh_path": { "type": "string" },
+          "evidence": { "$ref": "common.json#/$defs/Evidence" },
+          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "quality_gates": {
+      "type": "object",
+      "required": ["sinus_ge_annulus", "stj_le_sinus", "commissure_spacing_ok", "coronary_height_reasonable"],
+      "properties": {
+        "sinus_ge_annulus": { "type": "boolean" },
+        "stj_le_sinus": { "type": "boolean" },
+        "commissure_spacing_ok": { "type": "boolean" },
+        "coronary_height_reasonable": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

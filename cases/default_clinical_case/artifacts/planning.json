@@ -1,0 +1,159 @@
+{
+  "tavi": {
+    "valve_size_suggestion": {
+      "value": {
+        "recommended_device": "26 mm balloon-expandable",
+        "sizing_basis": "annulus area / perimeter placeholder"
+      },
+      "unit": "device",
+      "evidence": {
+        "method": "precomputed_showcase_rule",
+        "source_type": "device_ifu",
+        "source_ref": "PIE_3MENSIO_AORTIC_VALVE",
+        "confidence": 0.72
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Showcase-only planning suggestion derived from placeholder annulus metrics.",
+        "clinician_review_required": true
+      }
+    },
+    "coronary_obstruction_risk": {
+      "value": {
+        "category": "intermediate",
+        "rationale": "LM height preserved; RCA not confidently visualized in showcase placeholder."
+      },
+      "unit": "category",
+      "evidence": {
+        "method": "geometry_placeholder_risk_banding",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.61
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Risk band is placeholder-grade because coronary geometry is only partially represented.",
+        "clinician_review_required": true
+      }
+    },
+    "optimal_projection_angle": {
+      "value": {
+        "lao_rao_deg": 8,
+        "cra_cau_deg": 5
+      },
+      "unit": "degrees",
+      "evidence": {
+        "method": "annulus_plane_placeholder_projection",
+        "source_type": "guideline",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.68
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Projection angle is a geometry-grade showcase estimate.",
+        "clinician_review_required": true
+      }
+    },
+    "access_route_assessment": {
+      "value": null,
+      "unit": "category",
+      "evidence": {
+        "method": "not_available_in_default_showcase",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.0
+      },
+      "uncertainty": {
+        "flag": "MISSING_INPUT",
+        "message": "No iliofemoral access-route volume is bundled with the placeholder showcase case.",
+        "clinician_review_required": true
+      }
+    }
+  },
+  "vsrr": {
+    "commissural_geometry_status": {
+      "value": {
+        "status": "acceptable",
+        "spacing_mean_deg": 120
+      },
+      "unit": "status",
+      "evidence": {
+        "method": "commissural_spacing_from_placeholder_model",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.74
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Commissural geometry is consistent with showcase model constraints, not a patient-specific root.",
+        "clinician_review_required": true
+      }
+    },
+    "leaflet_geometry_status": {
+      "value": null,
+      "unit": "status",
+      "evidence": {
+        "method": "legacy_leaflet_summary_only",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.22
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "The default showcase case intentionally exposes legacy leaflet status without full cusp-wise geometry.",
+        "clinician_review_required": true
+      }
+    },
+    "graft_sizing": {
+      "value": {
+        "recommended_graft_mm": 30
+      },
+      "unit": "mm",
+      "evidence": {
+        "method": "root_geometry_placeholder_graft_rule",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.58
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Graft size is a showcase estimate derived from placeholder annulus and sinus geometry.",
+        "clinician_review_required": true
+      }
+    }
+  },
+  "pears": {
+    "external_root_geometry_status": {
+      "value": null,
+      "unit": "status",
+      "evidence": {
+        "method": "not_generated_for_default_showcase",
+        "source_type": "literature",
+        "source_ref": "PEARS_EXOVASC_LIT",
+        "confidence": 0.0
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "External root geometry is intentionally unavailable in the default placeholder showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    "support_region_status": {
+      "value": {
+        "status": "not_evaluated"
+      },
+      "unit": "status",
+      "evidence": {
+        "method": "placeholder_case_no_pears_mesh",
+        "source_type": "literature",
+        "source_ref": "PEARS_EXOVASC_LIT",
+        "confidence": 0.0
+      },
+      "uncertainty": {
+        "flag": "NOT_AVAILABLE",
+        "message": "Support region planning is not evaluated in this showcase placeholder case.",
+        "clinician_review_required": true
+      }
+    }
+  }
+}

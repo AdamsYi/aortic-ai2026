@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/quality_gates.json",
+  "title": "AorticAI Quality Gates",
+  "type": "object",
+  "required": [
+    "sinus_ge_annulus",
+    "stj_le_sinus",
+    "commissure_spacing_ok",
+    "coronary_height_reasonable",
+    "notes"
+  ],
+  "properties": {
+    "sinus_ge_annulus": { "type": "boolean" },
+    "stj_le_sinus": { "type": "boolean" },
+    "commissure_spacing_ok": { "type": "boolean" },
+    "coronary_height_reasonable": { "type": "boolean" },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "description": "Anatomical constraints: sinus >= annulus, STJ <= sinus, commissure spacing ≈ 120°, coronary heights reasonable."
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/centerline.json",
+  "title": "AorticAI Centerline Artifact",
+  "type": "object",
+  "required": [
+    "method",
+    "status",
+    "confidence",
+    "fallback_reason",
+    "points_world",
+    "tangents_world",
+    "s_mm",
+    "radii_mm",
+    "branch_graph",
+    "evidence",
+    "uncertainty"
+  ],
+  "properties": {
+    "method": { "type": "string" },
+    "status": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "fallback_reason": { "type": ["string", "null"] },
+    "points_world": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "common.json#/$defs/Vector3" }
+    },
+    "tangents_world": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "common.json#/$defs/Vector3" }
+    },
+    "s_mm": { "type": "array", "items": { "type": "number" } },
+    "radii_mm": { "type": "array", "items": { "type": "number" } },
+    "branch_graph": { "type": ["object", "null"] },
+    "evidence": { "$ref": "common.json#/$defs/Evidence" },
+    "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+  },
+  "additionalProperties": true
+}

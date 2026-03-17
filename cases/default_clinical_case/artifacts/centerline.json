@@ -1,0 +1,39 @@
+{
+  "method": "showcase_placeholder_centerline",
+  "status": "ready",
+  "confidence": 0.81,
+  "fallback_reason": null,
+  "points_world": [
+    { "x": 0.0, "y": 0.0, "z": 0.0 },
+    { "x": 0.0, "y": 0.0, "z": 8.0 },
+    { "x": 0.5, "y": 0.2, "z": 16.0 },
+    { "x": 1.0, "y": 0.6, "z": 24.0 },
+    { "x": 1.5, "y": 1.0, "z": 32.0 },
+    { "x": 1.9, "y": 1.5, "z": 40.0 }
+  ],
+  "tangents_world": [
+    { "x": 0.0, "y": 0.0, "z": 1.0 },
+    { "x": 0.0, "y": 0.0, "z": 1.0 },
+    { "x": 0.1, "y": 0.0, "z": 0.99 },
+    { "x": 0.1, "y": 0.1, "z": 0.98 },
+    { "x": 0.1, "y": 0.1, "z": 0.98 },
+    { "x": 0.1, "y": 0.1, "z": 0.98 }
+  ],
+  "s_mm": [0.0, 8.0, 16.1, 24.3, 32.6, 40.9],
+  "radii_mm": [12.0, 12.3, 12.8, 13.1, 13.4, 13.7],
+  "branch_graph": {
+    "type": "single_root_showcase",
+    "branches": []
+  },
+  "evidence": {
+    "method": "showcase_precomputed_curve",
+    "source_type": "algorithm",
+    "source_ref": "VMTK_CENTERLINES",
+    "confidence": 0.81
+  },
+  "uncertainty": {
+    "flag": "PLACEHOLDER_ONLY",
+    "message": "This centerline is a showcase placeholder used to render the default case.",
+    "clinician_review_required": true
+  }
+}

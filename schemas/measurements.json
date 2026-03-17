@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/measurements.json",
+  "title": "AorticAI Measurements Artifact",
+  "type": "object",
+  "required": ["measurements", "constraints"],
+  "properties": {
+    "measurements": {
+      "type": "object",
+      "required": [
+        "annulus_equivalent_diameter_mm",
+        "annulus_area_mm2",
+        "annulus_perimeter_mm",
+        "sinus_diameter_mm",
+        "stj_diameter_mm",
+        "ascending_aorta_diameter_mm",
+        "coronary_height_left_mm",
+        "coronary_height_right_mm",
+        "leaflet_effective_height_mm",
+        "calcium_burden_ml"
+      ],
+      "properties": {
+        "annulus_equivalent_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "annulus_area_mm2": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "annulus_perimeter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "sinus_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "stj_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "ascending_aorta_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "coronary_height_left_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "coronary_height_right_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "leaflet_effective_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "calcium_burden_ml": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+      },
+      "additionalProperties": true
+    },
+    "constraints": {
+      "type": "object",
+      "required": [
+        "sinus_ge_annulus",
+        "stj_le_sinus",
+        "commissure_spacing_ok",
+        "coronary_height_reasonable"
+      ],
+      "properties": {
+        "sinus_ge_annulus": { "type": "boolean" },
+        "stj_le_sinus": { "type": "boolean" },
+        "commissure_spacing_ok": { "type": "boolean" },
+        "coronary_height_reasonable": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

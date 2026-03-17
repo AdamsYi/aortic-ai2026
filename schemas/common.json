@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/common.json",
+  "title": "AorticAI Common Types",
+  "$defs": {
+    "Vector3": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "Evidence": {
+      "type": "object",
+      "required": ["method", "source_type", "source_ref", "confidence"],
+      "properties": {
+        "method": { "type": "string" },
+        "source_type": {
+          "type": "string",
+          "enum": ["guideline", "literature", "algorithm", "device_ifu", "manual", "other"]
+        },
+        "source_ref": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "Uncertainty": {
+      "type": "object",
+      "required": ["flag", "message", "clinician_review_required"],
+      "properties": {
+        "flag": {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "MISSING_INPUT",
+            "DETECTION_FAILED",
+            "LOW_CONFIDENCE",
+            "ANATOMY_CONSTRAINT_VIOLATION",
+            "OUT_OF_RANGE",
+            "IMAGE_QUALITY_LIMITATION",
+            "MODEL_INCONSISTENCY",
+            "PLACEHOLDER_ONLY",
+            "NOT_AVAILABLE"
+          ]
+        },
+        "message": { "type": "string" },
+        "clinician_review_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ScalarMeasurement": {
+      "type": "object",
+      "required": ["value", "unit", "evidence", "uncertainty"],
+      "properties": {
+        "value": { "type": ["number", "string", "boolean", "object", "array", "null"] },
+        "unit": { "type": "string" },
+        "evidence": { "$ref": "common.json#/$defs/Evidence" },
+        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+      },
+      "additionalProperties": false
+    },
+    "CapabilityState": {
+      "type": "object",
+      "required": ["available", "inferred", "legacy", "source", "reason"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "inferred": { "type": "boolean" },
+        "legacy": { "type": "boolean" },
+        "source": { "type": ["string", "null"] },
+        "reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}

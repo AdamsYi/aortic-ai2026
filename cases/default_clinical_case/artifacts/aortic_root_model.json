@@ -1,0 +1,216 @@
+{
+  "model_id": "default-showcase-model-v1",
+  "case_id": "default_clinical_case",
+  "coordinate_system": "WORLD",
+  "centerline": {
+    "method": "showcase_placeholder_centerline",
+    "status": "ready",
+    "confidence": 0.81,
+    "fallback_reason": null,
+    "points_world": [
+      { "x": 0.0, "y": 0.0, "z": 0.0 },
+      { "x": 0.0, "y": 0.0, "z": 8.0 },
+      { "x": 0.5, "y": 0.2, "z": 16.0 },
+      { "x": 1.0, "y": 0.6, "z": 24.0 },
+      { "x": 1.5, "y": 1.0, "z": 32.0 },
+      { "x": 1.9, "y": 1.5, "z": 40.0 }
+    ],
+    "tangents_world": [
+      { "x": 0.0, "y": 0.0, "z": 1.0 },
+      { "x": 0.0, "y": 0.0, "z": 1.0 },
+      { "x": 0.1, "y": 0.0, "z": 0.99 },
+      { "x": 0.1, "y": 0.1, "z": 0.98 },
+      { "x": 0.1, "y": 0.1, "z": 0.98 },
+      { "x": 0.1, "y": 0.1, "z": 0.98 }
+    ],
+    "s_mm": [0.0, 8.0, 16.1, 24.3, 32.6, 40.9],
+    "radii_mm": [12.0, 12.3, 12.8, 13.1, 13.4, 13.7],
+    "branch_graph": {
+      "type": "single_root_showcase",
+      "branches": []
+    },
+    "evidence": {
+      "method": "showcase_precomputed_curve",
+      "source_type": "algorithm",
+      "source_ref": "VMTK_CENTERLINES",
+      "confidence": 0.81
+    },
+    "uncertainty": {
+      "flag": "PLACEHOLDER_ONLY",
+      "message": "Default showcase centerline only.",
+      "clinician_review_required": true
+    }
+  },
+  "annulus_ring": {
+    "origin_world": { "x": 0.0, "y": 0.0, "z": 4.0 },
+    "normal_world": { "x": 0.0, "y": 0.0, "z": 1.0 },
+    "ring_points_world": [
+      { "x": 11.0, "y": 0.0, "z": 4.0 },
+      { "x": 0.0, "y": 11.0, "z": 4.0 },
+      { "x": -11.0, "y": 0.0, "z": 4.0 },
+      { "x": 0.0, "y": -11.0, "z": 4.0 }
+    ],
+    "evidence": {
+      "method": "placeholder_annulus_plane",
+      "source_type": "guideline",
+      "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+      "confidence": 0.83
+    },
+    "uncertainty": {
+      "flag": "PLACEHOLDER_ONLY",
+      "message": "Annulus plane is a placeholder geometry for showcase rendering.",
+      "clinician_review_required": true
+    }
+  },
+  "hinge_curve": {
+    "points_world": [
+      { "x": 11.0, "y": 0.0, "z": 4.0 },
+      { "x": 7.0, "y": 7.0, "z": 4.0 },
+      { "x": 0.0, "y": 11.0, "z": 4.0 },
+      { "x": -7.0, "y": 7.0, "z": 4.0 },
+      { "x": -11.0, "y": 0.0, "z": 4.0 },
+      { "x": -7.0, "y": -7.0, "z": 4.0 },
+      { "x": 0.0, "y": -11.0, "z": 4.0 }
+    ],
+    "evidence": {
+      "method": "placeholder_hinge_curve",
+      "source_type": "literature",
+      "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+      "confidence": 0.76
+    },
+    "uncertainty": {
+      "flag": "PLACEHOLDER_ONLY",
+      "message": "Hinge curve is a placeholder showcase curve.",
+      "clinician_review_required": true
+    }
+  },
+  "commissures": [
+    {
+      "name": "C1",
+      "point_world": { "x": 9.0, "y": 0.0, "z": 13.0 },
+      "evidence": { "method": "placeholder_landmark", "source_type": "guideline", "source_ref": "SCCT_TAVI_CT_CONSENSUS", "confidence": 0.77 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Showcase-only commissure point.", "clinician_review_required": true }
+    },
+    {
+      "name": "C2",
+      "point_world": { "x": -4.5, "y": 7.8, "z": 13.0 },
+      "evidence": { "method": "placeholder_landmark", "source_type": "guideline", "source_ref": "SCCT_TAVI_CT_CONSENSUS", "confidence": 0.77 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Showcase-only commissure point.", "clinician_review_required": true }
+    },
+    {
+      "name": "C3",
+      "point_world": { "x": -4.5, "y": -7.8, "z": 13.0 },
+      "evidence": { "method": "placeholder_landmark", "source_type": "guideline", "source_ref": "SCCT_TAVI_CT_CONSENSUS", "confidence": 0.77 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Showcase-only commissure point.", "clinician_review_required": true }
+    }
+  ],
+  "sinus_peaks": [
+    {
+      "name": "S1",
+      "point_world": { "x": 14.0, "y": 0.0, "z": 17.0 },
+      "evidence": { "method": "placeholder_landmark", "source_type": "guideline", "source_ref": "SCCT_TAVI_CT_CONSENSUS", "confidence": 0.75 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Showcase-only sinus peak.", "clinician_review_required": true }
+    },
+    {
+      "name": "S2",
+      "point_world": { "x": -7.0, "y": 12.1, "z": 17.0 },
+      "evidence": { "method": "placeholder_landmark", "source_type": "guideline", "source_ref": "SCCT_TAVI_CT_CONSENSUS", "confidence": 0.75 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Showcase-only sinus peak.", "clinician_review_required": true }
+    },
+    {
+      "name": "S3",
+      "point_world": { "x": -7.0, "y": -12.1, "z": 17.0 },
+      "evidence": { "method": "placeholder_landmark", "source_type": "guideline", "source_ref": "SCCT_TAVI_CT_CONSENSUS", "confidence": 0.75 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Showcase-only sinus peak.", "clinician_review_required": true }
+    }
+  ],
+  "sinotubular_junction": {
+    "origin_world": { "x": 0.8, "y": 0.4, "z": 24.0 },
+    "normal_world": { "x": 0.1, "y": 0.1, "z": 0.98 },
+    "evidence": {
+      "method": "placeholder_stj_plane",
+      "source_type": "guideline",
+      "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+      "confidence": 0.79
+    },
+    "uncertainty": {
+      "flag": "PLACEHOLDER_ONLY",
+      "message": "STJ plane is placeholder-only.",
+      "clinician_review_required": true
+    }
+  },
+  "ascending_aorta_axis": {
+    "origin_world": { "x": 0.8, "y": 0.4, "z": 24.0 },
+    "direction_world": { "x": 0.1, "y": 0.1, "z": 0.98 },
+    "evidence": {
+      "method": "placeholder_ascending_axis",
+      "source_type": "algorithm",
+      "source_ref": "ITK_CORE",
+      "confidence": 0.79
+    },
+    "uncertainty": {
+      "flag": "PLACEHOLDER_ONLY",
+      "message": "Ascending axis is placeholder-only.",
+      "clinician_review_required": true
+    }
+  },
+  "coronary_ostia": {
+    "left": {
+      "status": "detected",
+      "point_world": { "x": 8.5, "y": 4.0, "z": 18.0 },
+      "evidence": {
+        "method": "placeholder_ostium_landmark",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.73
+      },
+      "uncertainty": {
+        "flag": "PLACEHOLDER_ONLY",
+        "message": "Left coronary ostium is represented by a placeholder point.",
+        "clinician_review_required": true
+      }
+    },
+    "right": {
+      "status": "uncertain",
+      "point_world": { "x": -7.5, "y": -3.5, "z": 14.0 },
+      "evidence": {
+        "method": "placeholder_ostium_landmark",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.41
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Right coronary ostium is intentionally low-confidence to demonstrate honest fallback behavior.",
+        "clinician_review_required": true
+      }
+    }
+  },
+  "leaflet_meshes": [
+    {
+      "cusp_label": "L",
+      "mesh_path": "meshes/leaflet_L.stl",
+      "evidence": { "method": "placeholder_mesh", "source_type": "algorithm", "source_ref": "NNUNET_FRAMEWORK", "confidence": 0.4 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Leaflet mesh is placeholder-only.", "clinician_review_required": true }
+    },
+    {
+      "cusp_label": "N",
+      "mesh_path": "meshes/leaflet_N.stl",
+      "evidence": { "method": "placeholder_mesh", "source_type": "algorithm", "source_ref": "NNUNET_FRAMEWORK", "confidence": 0.4 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Leaflet mesh is placeholder-only.", "clinician_review_required": true }
+    },
+    {
+      "cusp_label": "R",
+      "mesh_path": "meshes/leaflet_R.stl",
+      "evidence": { "method": "placeholder_mesh", "source_type": "algorithm", "source_ref": "NNUNET_FRAMEWORK", "confidence": 0.4 },
+      "uncertainty": { "flag": "PLACEHOLDER_ONLY", "message": "Leaflet mesh is placeholder-only.", "clinician_review_required": true }
+    }
+  ],
+  "quality_gates": {
+    "sinus_ge_annulus": true,
+    "stj_le_sinus": true,
+    "commissure_spacing_ok": true,
+    "coronary_height_reasonable": true,
+    "notes": "Showcase case still enforces sinus >= annulus, STJ <= sinus, commissure spacing ≈ 120°, coronary heights reasonable."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/leaflet_model.json",
+  "title": "AorticAI Leaflet Model",
+  "type": "object",
+  "required": ["leaflets", "evidence", "uncertainty"],
+  "properties": {
+    "leaflets": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "cusp_label",
+          "status",
+          "confidence",
+          "geometric_height_mm",
+          "effective_height_mm",
+          "coaptation_height_mm",
+          "evidence",
+          "uncertainty"
+        ],
+        "properties": {
+          "cusp_label": { "type": "string", "enum": ["L", "N", "R"] },
+          "status": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "hinge_curve_world": {
+            "type": "array",
+            "items": { "$ref": "common.json#/$defs/Vector3" }
+          },
+          "free_edge_world": {
+            "type": "array",
+            "items": { "$ref": "common.json#/$defs/Vector3" }
+          },
+          "geometric_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+          "effective_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+          "coaptation_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+          "evidence": { "$ref": "common.json#/$defs/Evidence" },
+          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "evidence": { "$ref": "common.json#/$defs/Evidence" },
+    "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+  },
+  "additionalProperties": true
+}
