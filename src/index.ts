@@ -1,8 +1,27 @@
 import {
   WORKSTATION_APP_JS,
+  WORKSTATION_APP_SHA256,
+  WORKSTATION_ASSET_DIGEST,
+  WORKSTATION_BUILD_VERSION,
   WORKSTATION_DICOM_WORKER_JS,
+  WORKSTATION_DICOM_WORKER_SHA256,
   WORKSTATION_STYLE_CSS,
+  WORKSTATION_STYLE_SHA256,
 } from "./generated/workstationAssets";
+import {
+  DEFAULT_CASE_BUNDLE,
+  DEFAULT_CASE_DIGEST,
+} from "./generated/defaultCaseBundle";
+import {
+  createDefaultCaseStoreFromBundle,
+  handleDefaultCaseArtifact,
+  handleDefaultCaseImaging,
+  handleDefaultCaseMesh,
+  handleDefaultCaseQa,
+  handleDefaultCaseReport,
+  handleDefaultCaseSummary,
+  handleDefaultCaseWorkstation,
+} from "../services/api/defaultCaseHandlers";
 
 interface Env {
   DB: D1Database;
@@ -16,7 +35,6 @@ interface Env {
   INFERENCE_MAX_INPUT_BYTES?: string;
   INFERENCE_CALLBACK_SECRET?: string;
   API_BASE_URL?: string;
-  BUILD_VERSION?: string;
   ARTIFACT_LINK_SECRET?: string;
   ARTIFACT_LINK_TTL_SECONDS?: string;
 }
@@ -71,12 +89,29 @@ const jsonHeaders = {
   "access-control-allow-headers": "content-type,authorization,x-callback-secret"
 };
 
-const FALLBACK_BUILD_VERSION = "20260312-1800";
+const FALLBACK_BUILD_VERSION = "dev-unset";
 const DEFAULT_SIGNED_LINK_TTL_SECONDS = 3600;
+const DEFAULT_CASE_ID = "default_clinical_case";
+const defaultCaseStore = createDefaultCaseStoreFromBundle(DEFAULT_CASE_BUNDLE);
 
-function getBuildVersion(env?: Env): string {
-  const raw = String(env?.BUILD_VERSION || "").trim();
+function getBuildVersion(): string {
+  const raw = String(WORKSTATION_BUILD_VERSION || "").trim();
   return raw || FALLBACK_BUILD_VERSION;
+}
+
+function getLegacyEnvBuildVersion(env?: Env): string | null {
+  const candidate = env && "BUILD_VERSION" in env ? String((env as Env & { BUILD_VERSION?: string }).BUILD_VERSION || "").trim() : "";
+  return candidate || null;
+}
+
+function getWorkstationAssetHashes(): Record<string, string> {
+  return {
+    asset_digest: String(WORKSTATION_ASSET_DIGEST || "").trim(),
+    app_sha256: String(WORKSTATION_APP_SHA256 || "").trim(),
+    style_sha256: String(WORKSTATION_STYLE_SHA256 || "").trim(),
+    dicom_worker_sha256: String(WORKSTATION_DICOM_WORKER_SHA256 || "").trim(),
+    default_case_digest: String(DEFAULT_CASE_DIGEST || "").trim(),
+  };
 }
 
 function getArtifactLinkSecret(env?: Env): string {
@@ -290,7 +325,14 @@ async function upsertStudyRepository(
   );
 }
 
-function summarizePipelineRun(resultJson: Record<string, unknown>, source: string, providerJobId: string | null, env: Env): Record<string, unknown> {
+function summarizePipelineRun(
+  resultJson: Record<string, unknown>,
+  source: string,
+  providerJobId: string | null,
+  env: Env,
+  options?: { historical?: boolean }
+): Record<string, unknown> {
+  const historical = options?.historical === true;
   const inputMeta = (resultJson.input_metadata && typeof resultJson.input_metadata === "object"
     ? (resultJson.input_metadata as Record<string, unknown>)
     : {}) as Record<string, unknown>;
@@ -300,17 +342,33 @@ function summarizePipelineRun(resultJson: Record<string, unknown>, source: strin
   const pipelineVersion = (resultJson.pipeline_version && typeof resultJson.pipeline_version === "object"
     ? (resultJson.pipeline_version as Record<string, unknown>)
     : {}) as Record<string, unknown>;
+  const runtime = (resultJson.runtime && typeof resultJson.runtime === "object"
+    ? (resultJson.runtime as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
   const model = (resultJson.aortic_root_computational_model && typeof resultJson.aortic_root_computational_model === "object"
     ? (resultJson.aortic_root_computational_model as Record<string, unknown>)
     : {}) as Record<string, unknown>;
   const phaseMeta = (model.phase_metadata && typeof model.phase_metadata === "object"
     ? (model.phase_metadata as Record<string, unknown>)
     : {}) as Record<string, unknown>;
+  const sourceMode = historical ? "historical_inferred" : source;
+  const inferenceMode = historical ? "historical_inferred" : (source === "mock" ? "mock" : getInferenceMode(env));
+  const providerTarget = historical
+    ? nullableString(runtime.provider_target)
+    : nullableString(runtime.provider_target) || (inferenceMode === "webhook" ? nullableString(env.INFERENCE_WEBHOOK_URL) : null);
+  const providerRuntime = nullableString(runtime.provider_runtime);
+  const buildVersion = historical
+    ? stringOr(pipelineVersion.build_version, stringOr(runtime.build_version, "historical_inferred"))
+    : getBuildVersion();
   return {
     provider_job_id: providerJobId,
-    source_mode: source,
+    source_mode: sourceMode,
+    inference_mode: inferenceMode,
+    inferred: historical,
+    provider_target: providerTarget,
+    provider_runtime: providerRuntime,
     pipeline_version: stringOr(pipelineVersion.pipeline_version, stringOr(pipeline.pipeline_version, "unknown")),
-    build_version: getBuildVersion(env),
+    build_version: buildVersion,
     computational_model: stringOr(pipelineVersion.computational_model, stringOr(model.type, "unknown")),
     centerline_method: stringOr(pipelineVersion.centerline_method, stringOr((resultJson.centerline as Record<string, unknown> | undefined)?.method, "unknown")),
     measurement_method: stringOr(pipelineVersion.measurement_method, stringOr(pipeline.measurement_method, "unknown")),
@@ -324,6 +382,13 @@ function summarizePipelineRun(resultJson: Record<string, unknown>, source: strin
         input_metadata: inputMeta,
         pipeline,
         pipeline_version: pipelineVersion,
+        runtime: {
+          ...runtime,
+          provider_target: providerTarget,
+          provider_runtime: providerRuntime,
+          inference_mode: inferenceMode,
+          build_version: buildVersion,
+        },
         phase_metadata: phaseMeta,
         provenance: model.provenance,
         risk_flags: resultJson.risk_flags,
@@ -405,6 +470,60 @@ async function getPipelineRun(jobId: string, env: Env): Promise<Record<string, u
   };
 }
 
+function materializePipelineRun(record: Record<string, unknown>, env: Env, inferred = false): Record<string, unknown> {
+  const stageTimings = safeParseJsonText(record.stage_timings_json);
+  const runSummary = safeParseJsonText(record.run_summary_json);
+  const sourceMode = inferred ? "historical_inferred" : stringOr(record.source_mode, "unknown");
+  const inferenceMode = nullableString(record.inference_mode)
+    || readNestedString(runSummary, ["runtime", "inference_mode"])
+    || (sourceMode === "mock" ? "mock" : inferred ? "historical_inferred" : getInferenceMode(env));
+  const providerTarget = nullableString(record.provider_target)
+    || nullableString(runSummary.provider_target)
+    || readNestedString(runSummary, ["runtime", "provider_target"])
+    || (!inferred && inferenceMode === "webhook" ? nullableString(env.INFERENCE_WEBHOOK_URL) : null);
+  const providerRuntime = nullableString(record.provider_runtime)
+    || nullableString(runSummary.provider_runtime)
+    || readNestedString(runSummary, ["runtime", "provider_runtime"]);
+  const buildVersion = nullableString(record.build_version)
+    || readNestedString(runSummary, ["runtime", "build_version"])
+    || (inferred ? "historical_inferred" : getBuildVersion());
+  const pipelineVersion = nullableString(record.pipeline_version)
+    || nullableString(runSummary.pipeline_version)
+    || readNestedString(runSummary, ["pipeline_version"])
+    || "unknown";
+  return sanitizePublicValue({
+    ...record,
+    source_mode: sourceMode,
+    inference_mode: inferenceMode,
+    inferred,
+    provider_target: providerTarget,
+    provider_runtime: providerRuntime,
+    build_version: buildVersion,
+    pipeline_version: pipelineVersion,
+    stage_timings: stageTimings,
+    run_summary: runSummary,
+  }) as Record<string, unknown>;
+}
+
+async function resolvePipelineRun(
+  jobId: string,
+  env: Env,
+  resultJson?: Record<string, unknown> | null
+): Promise<Record<string, unknown> | null> {
+  const stored = await getPipelineRun(jobId, env);
+  if (stored) {
+    return materializePipelineRun(stored, env, false);
+  }
+  if (resultJson) {
+    return materializePipelineRun(
+      summarizePipelineRun(resultJson, "historical_inferred", null, env, { historical: true }),
+      env,
+      true
+    );
+  }
+  return null;
+}
+
 async function recordArtifactAccess(
   env: Env,
   request: Request,
@@ -449,6 +568,8 @@ async function buildJobLinks(jobId: string, studyId: string, env: Env): Promise<
     annulus_plane_json: `/jobs/${jobId}/artifacts/annulus_plane_json`,
     aortic_root_model_json: `/jobs/${jobId}/artifacts/aortic_root_model_json`,
     leaflet_model_json: `/jobs/${jobId}/artifacts/leaflet_model_json`,
+    cpr_reference_json: `/jobs/${jobId}/artifacts/cpr_reference_json`,
+    cpr_straightened_nifti: `/jobs/${jobId}/artifacts/cpr_straightened_nifti`,
     job_api: `/jobs/${jobId}`,
   };
   const out: Record<string, string> = {};
@@ -470,19 +591,27 @@ export default {
       }
 
       if (request.method === "GET" && path === "/health") {
+        const legacyEnvBuildVersion = getLegacyEnvBuildVersion(env);
         return json({
           ok: true,
           service: "aortic-ai-api",
           mode: getInferenceMode(env),
           date: new Date().toISOString(),
-          build_version: getBuildVersion(env)
+          build_version: getBuildVersion(),
+          asset_hashes: getWorkstationAssetHashes(),
+          legacy_env_build_version: legacyEnvBuildVersion,
+          build_consistency_ok: !legacyEnvBuildVersion || legacyEnvBuildVersion === getBuildVersion(),
         });
       }
 
       if (request.method === "GET" && path === "/version") {
+        const legacyEnvBuildVersion = getLegacyEnvBuildVersion(env);
         return json({
           ok: true,
-          build_version: getBuildVersion(env)
+          build_version: getBuildVersion(),
+          asset_hashes: getWorkstationAssetHashes(),
+          legacy_env_build_version: legacyEnvBuildVersion,
+          build_consistency_ok: !legacyEnvBuildVersion || legacyEnvBuildVersion === getBuildVersion(),
         });
       }
 
@@ -493,20 +622,49 @@ export default {
         });
       }
 
-      if (request.method === "GET" && path === `/assets/style.${getBuildVersion(env)}.css`) {
+      if (request.method === "GET" && path === `/assets/style.${getBuildVersion()}.css`) {
         return textResponse(getDemoStyleCss(), "text/css; charset=utf-8");
       }
 
-      if (request.method === "GET" && path === `/assets/app.${getBuildVersion(env)}.js`) {
-        return textResponse(getDemoAppJs(getBuildVersion(env)), "text/javascript; charset=utf-8");
+      if (request.method === "GET" && path === `/assets/app.${getBuildVersion()}.js`) {
+        return textResponse(getDemoAppJs(getBuildVersion()), "text/javascript; charset=utf-8");
       }
 
-      if (request.method === "GET" && path === `/assets/dicom-zip-worker.${getBuildVersion(env)}.js`) {
+      if (request.method === "GET" && path === `/assets/dicom-zip-worker.${getBuildVersion()}.js`) {
         return textResponse(getDicomZipWorkerJs(), "text/javascript; charset=utf-8");
       }
 
       if (request.method === "GET" && path === "/demo") {
-        return html(renderDemoHtml(getBuildVersion(env)));
+        return html(renderDemoHtml(getBuildVersion()));
+      }
+
+      if (request.method === "GET" && path === "/api/cases/default_clinical_case/summary") {
+        return handleDefaultCaseSummary(defaultCaseStore, getBuildVersion());
+      }
+
+      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/artifacts/")) {
+        const name = path.split("/").pop() || "";
+        return handleDefaultCaseArtifact(defaultCaseStore, getBuildVersion(), name);
+      }
+
+      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/meshes/")) {
+        const name = path.split("/").pop() || "";
+        return handleDefaultCaseMesh(defaultCaseStore, name);
+      }
+
+      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/reports/")) {
+        const name = path.split("/").pop() || "report.pdf";
+        return handleDefaultCaseReport(defaultCaseStore, name);
+      }
+
+      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/imaging/")) {
+        const name = path.split("/").pop() || "ct_placeholder.nii.gz";
+        return handleDefaultCaseImaging(defaultCaseStore, name);
+      }
+
+      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/qa/")) {
+        const name = path.split("/").pop() || "";
+        return handleDefaultCaseQa(defaultCaseStore, name);
       }
 
       if (request.method === "GET" && path === "/demo/latest-case") {
@@ -810,7 +968,18 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
     .all();
 
   const links = await buildJobLinks(jobId, String(job.study_id), env);
-  const pipelineRun = await getPipelineRun(jobId, env);
+  const resultArtifact = (artifacts.results as Array<Record<string, unknown>>).find(
+    (a) => String(a.artifact_type || "") === "result_json"
+  );
+  const resultObjectKey = typeof resultArtifact?.object_key === "string" ? resultArtifact.object_key : null;
+  let resultPayload: Record<string, unknown> | null = null;
+  if (resultObjectKey) {
+    const resultObj = await env.R2_MASK.get(resultObjectKey);
+    if (resultObj) {
+      resultPayload = safeJsonObject(await resultObj.text());
+    }
+  }
+  const pipelineRun = await resolvePipelineRun(jobId, env, resultPayload);
 
   return json({
     ...job,
@@ -822,6 +991,11 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
 }
 
 async function getLatestDemoCase(env: Env): Promise<Response> {
+  void env;
+  return handleDefaultCaseSummary(defaultCaseStore, getBuildVersion());
+}
+
+async function getLatestDemoCaseLegacy(env: Env): Promise<Response> {
   const jobRows = await env.DB.prepare(
     `SELECT
        j.id,
@@ -953,7 +1127,7 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
   const clinicalTargets = buildClinicalTargets(labelKeys);
 
   const links = await buildJobLinks(jobId, rawStudyId, env);
-  const pipelineRun = await getPipelineRun(jobId, env);
+  const pipelineRun = await resolvePipelineRun(jobId, env, resultPayload);
 
   return json({
     ...job,
@@ -971,7 +1145,7 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
       source_dataset: preferredStudy?.source_dataset || null,
       phase: preferredStudy?.phase || null
     },
-    pipeline_run: pipelineRun || (resultPayload ? summarizePipelineRun(resultPayload, "historical", null, env) : null),
+    pipeline_run: pipelineRun,
     label_keys: labelKeys,
     clinical_targets: clinicalTargets
   });
@@ -979,6 +1153,9 @@ async function getLatestDemoCase(env: Env): Promise<Response> {
 
 async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
   if (!jobId) return json({ error: "missing_job_id" }, 400);
+  if (jobId === DEFAULT_CASE_ID) {
+    return handleDefaultCaseWorkstation(defaultCaseStore, getBuildVersion());
+  }
 
   const job = await env.DB.prepare(
     `SELECT id, study_id, job_type, status, model_tag, error_message, created_at, started_at, finished_at
@@ -1004,7 +1181,16 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
       .bind(String(study.id))
       .first<Record<string, unknown>>()
   );
-  const pipelineRun = await getPipelineRun(jobId, env);
+  const artifactRows = await safeAll(
+    env.DB.prepare(
+      `SELECT artifact_type FROM artifacts WHERE job_id = ?1 ORDER BY created_at ASC`
+    )
+      .bind(jobId)
+      .all()
+  );
+  const artifactTypes = new Set(
+    artifactRows.map((row) => String(row.artifact_type || "").trim()).filter(Boolean)
+  );
   const links = await buildJobLinks(jobId, String(study.id), env);
 
   const rawHead = await env.R2_RAW.head(String(study.image_key));
@@ -1015,6 +1201,7 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
   const centerlineJson = await readArtifactJson(env, jobId, "centerline_json");
   const leafletModelJson = await readArtifactJson(env, jobId, "leaflet_model_json");
 
+  const pipelineRun = await resolvePipelineRun(jobId, env, resultJson);
   const model = pickObject(modelJson) || {};
   const measurements = pickObject(measurementsJson) || pickObject(resultJson?.measurements) || pickObject(resultJson) || null;
   const measurementContract =
@@ -1052,18 +1239,71 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
   if (centerlineJson && !("points_world" in centerlineJson) && "points" in centerlineJson) {
     runtimeWarnings.push("legacy_centerline_payload");
   }
-  if (!pipelineRun && resultJson) {
+  if (pipelineRun?.inferred) {
     runtimeWarnings.push("historical_pipeline_run_inferred");
   }
+  const cprReferenceJson = artifactTypes.has("cpr_reference_json")
+    ? await readArtifactJson(env, jobId, "cpr_reference_json")
+    : null;
+  const hasCprNifti = artifactTypes.has("cpr_straightened_nifti");
+  const cprSources = (cprReferenceJson || hasCprNifti)
+    ? sanitizePublicValue({
+        source: hasCprNifti ? "artifact" : "reference_only",
+        inferred: false,
+        reference_json: cprReferenceJson,
+        straightened_nifti: hasCprNifti ? links.cpr_straightened_nifti : null,
+      })
+    : null;
+  const coronaryOstiaSummary = buildCoronaryOstiaSummary(model, measurementsJson);
+  const leafletGeometrySummary = buildLeafletGeometrySummary(model, leafletModelJson);
+  const pearsGeometryArtifact = pickObject(measurementsJson?.pears_geometry);
+  const pearsGeometryFallback = pearsGeometryArtifact ? null : derivePearsGeometryFromModel(model);
+  const capabilityState = {
+    cpr: {
+      available: Boolean(hasCprNifti),
+      inferred: false,
+      legacy: false,
+      source: hasCprNifti ? "artifact" : "unavailable",
+      reason: hasCprNifti ? null : "cpr_artifact_missing",
+    },
+    coronary_ostia: {
+      available: Boolean(coronaryOstiaSummary && coronaryOstiaSummary.source !== "unavailable"),
+      inferred: false,
+      legacy: false,
+      source: coronaryOstiaSummary?.source || "unavailable",
+      reason: coronaryOstiaSummary?.reason || null,
+    },
+    leaflet_geometry: {
+      available: Boolean(leafletGeometrySummary && !leafletGeometrySummary.legacy),
+      inferred: false,
+      legacy: Boolean(leafletGeometrySummary?.legacy),
+      source: leafletGeometrySummary?.source || "unavailable",
+      reason: leafletGeometrySummary?.reason || null,
+    },
+    pears_geometry: {
+      available: Boolean(pearsGeometryArtifact),
+      inferred: Boolean(!pearsGeometryArtifact && pearsGeometryFallback),
+      legacy: false,
+      source: pearsGeometryArtifact ? "measurements_artifact" : pearsGeometryFallback ? "model_fallback" : "unavailable",
+      reason: pearsGeometryArtifact ? null : pearsGeometryFallback ? "historical_model_fallback" : "pears_geometry_missing",
+    },
+  };
+  if (!capabilityState.cpr.available) runtimeWarnings.push("cpr_artifact_missing");
+  if (!capabilityState.coronary_ostia.available) runtimeWarnings.push("coronary_ostia_unavailable");
+  if (capabilityState.leaflet_geometry.legacy) runtimeWarnings.push("leaflet_geometry_legacy_summary_only");
+  if (capabilityState.pears_geometry.inferred) runtimeWarnings.push("pears_geometry_inferred_from_model");
   const qaFlags = {
     centerline_available: Array.isArray(centerline?.points_world) && centerline.points_world.length > 0,
     annulus_plane_available: Boolean(annulusPlane?.origin_world && annulusPlane?.normal_world),
     stj_plane_available: Boolean(stjPlane?.origin_world && stjPlane?.normal_world),
     leaflet_summary_available: Boolean(model.leaflet_meshes || leafletModelJson),
+    coronary_ostia_available: capabilityState.coronary_ostia.available,
+    cpr_available: capabilityState.cpr.available,
+    pears_geometry_available: capabilityState.pears_geometry.available,
   };
 
   const payload = {
-    build_version: getBuildVersion(env),
+    build_version: getBuildVersion(),
     job,
     study_meta: {
       id: study.id,
@@ -1082,8 +1322,9 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
           }
         : null,
     },
-    pipeline_run: pipelineRun || (resultJson ? summarizePipelineRun(resultJson, "historical", null, env) : null),
+    pipeline_run: pipelineRun,
     links,
+    cpr_sources: cprSources,
     volume_source: {
       source_kind: volumeSourceKind,
       loader_kind: volumeSourceKind === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
@@ -1108,20 +1349,272 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
         loader_kind: volumeSourceKind === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
         supports_mpr: Boolean(links.raw_ct),
         supports_aux_plane: Boolean(qaFlags.annulus_plane_available || qaFlags.stj_plane_available || qaFlags.centerline_available),
-        supports_cpr: false,
+        supports_cpr: capabilityState.cpr.available,
       },
       qa_flags: qaFlags,
       bootstrap_warnings: runtimeWarnings,
     },
     centerline,
     model_landmarks_summary: buildModelLandmarksSummary(model, leafletModelJson),
+    capabilities: capabilityState,
+    coronary_ostia_summary: sanitizePublicValue(coronaryOstiaSummary),
+    leaflet_geometry_summary: sanitizePublicValue(leafletGeometrySummary),
     measurement_contract: sanitizePublicValue(measurementContract),
     planning_evidence: sanitizePublicValue(planningEvidence),
     measurements: sanitizePublicValue(measurements),
     aortic_root_model: sanitizePublicValue(modelJson || null),
+    pears_geometry: sanitizePublicValue(
+      pearsGeometryArtifact
+      || pearsGeometryFallback
+      || null
+    ),
   };
 
   return json(payload);
+}
+
+/**
+ * Derive a PEARS geometry payload directly from the aortic_root_model
+ * when pears_planner_v3 output is not yet available in measurements.json.
+ * Cloudflare-side fallback — pure arithmetic from stored landmarks.
+ * Clinical basis: Treasure/Pepper criteria (Heart 2014), Conci 2025 (JTCVS Techniques)
+ */
+function derivePearsGeometryFromModel(model: Record<string, unknown>): Record<string, unknown> | null {
+  if (!model || Object.keys(model).length === 0) return null;
+
+  const annulusRing = pickObject(model.annulus_ring);
+  const stj = pickObject(model.sinotubular_junction);
+  const sinusPeaks = Array.isArray(model.sinus_peaks) ? model.sinus_peaks as Record<string, unknown>[] : [];
+  const coronaryOstia = pickObject(model.coronary_ostia);
+
+  // Annulus geometry (from hinge_curve PCA)
+  const annMaxDiam = typeof annulusRing?.max_diameter_mm === 'number' ? Math.round(annulusRing.max_diameter_mm * 10) / 10 : null;
+  const annMinDiam = typeof annulusRing?.min_diameter_mm === 'number' ? Math.round(annulusRing.min_diameter_mm * 10) / 10 : null;
+  const annArea    = typeof annulusRing?.area_mm2 === 'number' ? Math.round(annulusRing.area_mm2 * 10) / 10 : null;
+  const annEquivDiam = annArea ? Math.round(2 * Math.sqrt(annArea / Math.PI) * 10) / 10 : null;
+  const annConf    = typeof annulusRing?.confidence === 'number' ? annulusRing.confidence : 0.5;
+
+  // STJ geometry (from orthogonal section)
+  // Real data uses max_diameter_mm / equivalent_diameter_mm; fallback to diameter_mm for legacy compatibility
+  const stjMaxDiam = typeof stj?.max_diameter_mm === 'number' ? Math.round(stj.max_diameter_mm * 10) / 10 : null;
+  const stjEquivDiam = typeof stj?.equivalent_diameter_mm === 'number' ? Math.round(stj.equivalent_diameter_mm * 10) / 10 : null;
+  const stjDiam    = stjMaxDiam ?? (typeof stj?.diameter_mm === 'number' ? Math.round(stj.diameter_mm * 10) / 10 : null);
+  const stjConf    = typeof stj?.confidence === 'number' ? stj.confidence : 0.5;
+
+  // Sinus of Valsalva (from sinus_peaks radial profile)
+  const sinusRadii = sinusPeaks
+    .map((p) => typeof p.radius_mm === 'number' ? p.radius_mm : null)
+    .filter((r): r is number => r !== null);
+  const sinusMaxDiam = sinusRadii.length > 0 ? Math.round(Math.max(...sinusRadii) * 2 * 10) / 10 : null;
+  const sinusMeanDiam = sinusRadii.length > 0
+    ? Math.round(sinusRadii.reduce((a, b) => a + b, 0) / sinusRadii.length * 2 * 10) / 10
+    : null;
+  const sinusConf = sinusRadii.length >= 3 ? 0.75 : sinusRadii.length > 0 ? 0.5 : 0.2;
+
+  // Coronary heights (from coronary_ostia)
+  const lcaData = pickObject(coronaryOstia?.left_coronary ?? coronaryOstia?.left);
+  const rcaData = pickObject(coronaryOstia?.right_coronary ?? coronaryOstia?.right);
+  const lcaHeight = typeof lcaData?.height_above_annulus_mm === 'number' ? lcaData.height_above_annulus_mm
+    : typeof lcaData?.height_mm === 'number' ? lcaData.height_mm : null;
+  const rcaHeight = typeof rcaData?.height_above_annulus_mm === 'number' ? rcaData.height_above_annulus_mm
+    : typeof rcaData?.height_mm === 'number' ? rcaData.height_mm : null;
+  const lcaStatus = lcaHeight !== null ? 'measured' : 'estimated_statistical';
+  const rcaStatus = rcaHeight !== null ? 'measured' : 'estimated_statistical';
+  const lcaConf = lcaHeight !== null ? 0.75 : 0.3;
+  const rcaConf = rcaHeight !== null ? 0.75 : 0.3;
+
+  // Ascending aorta
+  const ascDiam = typeof model.ascending_aorta_diameter_mm === 'number' ? model.ascending_aorta_diameter_mm
+    : typeof pickObject(model.ascending_aorta)?.diameter_mm === 'number'
+    ? (pickObject(model.ascending_aorta) as Record<string, unknown>).diameter_mm as number
+    : null;
+
+  // Eligibility criteria (Treasure/Pepper + Conci 2025)
+  const criteria: Record<string, unknown>[] = [];
+  let eligible = true;
+  const riskFlags: string[] = [];
+
+  // 1. Sinus diameter 40-55mm (primary indication, Treasure/Pepper)
+  if (sinusMaxDiam !== null) {
+    const met = sinusMaxDiam >= 40 && sinusMaxDiam <= 55;
+    if (!met) eligible = false;
+    criteria.push({
+      id: 'sinus_diameter', label: 'Sinus diameter 40–55 mm',
+      met, value_mm: sinusMaxDiam,
+      severity: met ? 'ok' : (sinusMaxDiam < 40 ? 'not_indicated' : 'high_risk'),
+      icon: met ? '✓' : '✗',
+      message: met ? `${sinusMaxDiam} mm — within Treasure/Pepper range`
+        : sinusMaxDiam < 40 ? `${sinusMaxDiam} mm — below 40 mm threshold (not indicated)`
+        : `${sinusMaxDiam} mm — exceeds 55 mm (consider VSRR/Bentall)`,
+    });
+    if (sinusMaxDiam > 55) riskFlags.push('sinus_exceeds_55mm');
+  } else {
+    criteria.push({ id: 'sinus_diameter', label: 'Sinus diameter', met: null,
+      severity: 'data_missing', icon: '?', message: 'Sinus measurement unavailable' });
+  }
+
+  // 2. STJ anatomy check
+  if (stjDiam !== null && sinusMaxDiam !== null) {
+    const met = stjDiam < sinusMaxDiam;
+    criteria.push({
+      id: 'stj_reference', label: 'STJ < Sinus (anatomy check)',
+      met, value_mm: stjDiam,
+      severity: met ? 'ok' : 'caution',
+      icon: met ? '✓' : '⚠',
+      message: met ? `STJ ${stjDiam} mm < Sinus ${sinusMaxDiam} mm — normal anatomy`
+        : `STJ ${stjDiam} mm ≥ Sinus ${sinusMaxDiam} mm — verify anatomy`,
+    });
+  }
+
+  // 3. LCA height ≥ 10mm
+  if (lcaHeight !== null) {
+    const met = lcaHeight >= 10;
+    if (!met) { eligible = false; riskFlags.push('lca_low_origin'); }
+    criteria.push({
+      id: 'coronary_lca', label: 'LCA height ≥ 10 mm',
+      met, value_mm: lcaHeight,
+      severity: met ? 'ok' : 'high_risk',
+      icon: met ? '✓' : '✗',
+      message: met ? `LCA ${lcaHeight} mm — adequate clearance`
+        : `LCA ${lcaHeight} mm — high risk of coronary compression`,
+    });
+  } else {
+    criteria.push({ id: 'coronary_lca', label: 'LCA height ≥ 10 mm', met: null,
+      severity: 'data_missing', icon: '?', message: 'LCA ostium not detected — manual verification required' });
+  }
+
+  // 4. RCA height ≥ 10mm
+  if (rcaHeight !== null) {
+    const met = rcaHeight >= 10;
+    if (!met) { eligible = false; riskFlags.push('rca_low_origin'); }
+    criteria.push({
+      id: 'coronary_rca', label: 'RCA height ≥ 10 mm',
+      met, value_mm: rcaHeight,
+      severity: met ? 'ok' : 'high_risk',
+      icon: met ? '✓' : '✗',
+      message: met ? `RCA ${rcaHeight} mm — adequate clearance`
+        : `RCA ${rcaHeight} mm — high risk of coronary compression`,
+    });
+  } else {
+    criteria.push({ id: 'coronary_rca', label: 'RCA height ≥ 10 mm', met: null,
+      severity: 'data_missing', icon: '?', message: 'RCA ostium not detected — manual verification required' });
+  }
+
+  // 5. Ascending aorta < 55mm
+  if (ascDiam !== null) {
+    const met = (ascDiam as number) < 55;
+    if (!met) { eligible = false; riskFlags.push('ascending_exceeds_55mm'); }
+    criteria.push({
+      id: 'ascending_diameter', label: 'Ascending aorta < 55 mm',
+      met, value_mm: ascDiam,
+      severity: met ? 'ok' : 'high_risk',
+      icon: met ? '✓' : '✗',
+      message: met ? `Ascending ${ascDiam} mm — within range`
+        : `Ascending ${ascDiam} mm — consider total arch replacement`,
+    });
+  }
+
+  // 6. Annulus reference
+  if (annMaxDiam !== null) {
+    criteria.push({
+      id: 'annulus_reference', label: 'Annulus (reference only)',
+      met: true, value_mm: annMaxDiam,
+      severity: 'info', icon: 'ℹ',
+      message: `Annulus max ${annMaxDiam} mm — used for mesh sizing`,
+    });
+  }
+
+  // Verdict
+  const notIndicated = criteria.some((c) => c['severity'] === 'not_indicated');
+  const hasHighRisk = riskFlags.length > 0;
+  let status: string;
+  let verdict: string;
+  let riskLevel: string;
+
+  if (notIndicated) {
+    status = 'not_indicated'; verdict = 'NOT INDICATED'; eligible = false; riskLevel = 'none';
+  } else if (!eligible) {
+    status = 'not_indicated_risk'; verdict = 'NOT INDICATED — HIGH RISK'; riskLevel = 'high';
+  } else if (hasHighRisk) {
+    status = 'eligible_with_caution'; verdict = 'POTENTIALLY ELIGIBLE — CAUTION'; riskLevel = 'moderate';
+  } else if (sinusMaxDiam === null) {
+    status = 'data_insufficient'; verdict = 'DATA INSUFFICIENT'; riskLevel = 'unknown'; eligible = false;
+  } else {
+    status = 'potentially_eligible'; verdict = 'POTENTIALLY ELIGIBLE'; riskLevel = 'low';
+  }
+
+  // Mesh sizing (Conci 2025: 95% of measured inner diameter)
+  const meshSizing: Record<string, unknown> = {};
+  if (sinusMaxDiam !== null) {
+    meshSizing.sinus_reference_mm = sinusMaxDiam;
+    meshSizing.sinus_mesh_diameter_mm = Math.round(sinusMaxDiam * 0.95 * 10) / 10;
+  }
+  if (stjDiam !== null) {
+    meshSizing.stj_reference_mm = stjDiam;
+    meshSizing.stj_mesh_diameter_mm = Math.round(stjDiam * 0.95 * 10) / 10;
+  }
+  if (ascDiam !== null) {
+    meshSizing.ascending_reference_mm = ascDiam;
+    meshSizing.ascending_mesh_diameter_mm = Math.round((ascDiam as number) * 0.95 * 10) / 10;
+  }
+
+  // Support segment estimate
+  const supportSegment: Record<string, unknown> = {};
+  const sinusHeightObj = pickObject(model.sinus_height);
+  const sinusHeight = typeof sinusHeightObj?.height_mm === 'number' ? sinusHeightObj.height_mm : null;
+  if (sinusHeight !== null) {
+    supportSegment.root_segment_mm = Math.round(sinusHeight * 10) / 10;
+    if (ascDiam !== null) {
+      supportSegment.ascending_segment_mm = Math.round((ascDiam as number) * 1.5 * 10) / 10;
+      supportSegment.total_mm = Math.round((sinusHeight + (ascDiam as number) * 1.5) * 10) / 10;
+    } else {
+      supportSegment.total_mm = Math.round(sinusHeight * 10) / 10;
+    }
+    supportSegment.note = 'Estimate only — verify intraoperatively (Conci 2025)';
+  }
+
+  const summary = notIndicated
+    ? `Sinus ${sinusMaxDiam ?? '?'} mm — below 40 mm threshold. PEARS not indicated.`
+    : !eligible
+    ? `Anatomical risk factors preclude PEARS. Review criteria.`
+    : `Sinus ${sinusMaxDiam ?? '?'} mm — within Treasure/Pepper range (40–55 mm). Surgical planning required.`;
+
+  return {
+    module_version: 'pears_planner_v3.0-cf-fallback',
+    source: 'cloudflare_worker_fallback',
+    geometry: {
+      annulus: { max_diameter_mm: annMaxDiam, min_diameter_mm: annMinDiam,
+        equivalent_diameter_mm: annEquivDiam, area_mm2: annArea, confidence: annConf, method: 'hinge_curve_pca' },
+      stj: { diameter_mm: stjDiam, max_diameter_mm: stjMaxDiam ?? stjDiam, equivalent_diameter_mm: stjEquivDiam ?? stjDiam, confidence: stjConf, method: 'orthogonal_section' },
+      sinus: { max_diameter_mm: sinusMaxDiam, mean_diameter_mm: sinusMeanDiam,
+        confidence: sinusConf, method: 'sinus_peaks_radial' },
+      sinus_height: sinusHeight !== null ? { height_mm: sinusHeight } : null,
+      coronary_heights: {
+        left: { height_mm: lcaHeight, status: lcaStatus, confidence: lcaConf },
+        right: { height_mm: rcaHeight, status: rcaStatus, confidence: rcaConf },
+      },
+      ascending_max_diameter_mm: ascDiam,
+    },
+    eligibility: { eligible, status, verdict, risk_level: riskLevel, summary, criteria, risk_flags: riskFlags },
+    surgical_planning: {
+      mesh_sizing: Object.keys(meshSizing).length > 0 ? meshSizing : null,
+      support_segment: Object.keys(supportSegment).length > 0 ? supportSegment : null,
+      coronary_windows: {
+        lca: lcaHeight !== null ? { height_mm: lcaHeight, status: lcaStatus } : null,
+        rca: rcaHeight !== null ? { height_mm: rcaHeight, status: rcaStatus } : null,
+        note: 'Windows cut from ostial holes to longitudinal end of mesh (Conci 2025)',
+      },
+    },
+    data_quality: {
+      annulus_confidence: annConf, stj_confidence: stjConf, sinus_confidence: sinusConf,
+      lca_confidence: lcaConf, rca_confidence: rcaConf,
+    },
+    references: [
+      'Treasure T et al. Heart 2014;100:1582-1586 (Marfan PEARS, 30-case ITA)',
+      'Conci E et al. JTCVS Techniques 2025 (PEARS surgical technique)',
+      'Kougioumtzoglou A et al. JTCVS 2025 (Dutch PEARS experience)',
+    ],
+  };
 }
 
 async function readArtifactJson(env: Env, jobId: string, artifactType: string): Promise<Record<string, unknown> | null> {
@@ -1258,6 +1751,103 @@ function buildModelLandmarksSummary(
         }
       : null,
     leaflet_status: leaflets,
+  };
+}
+
+function buildCoronaryOstiaSummary(
+  model: Record<string, unknown>,
+  measurementsJson: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  const measurementsCoronary = pickObject(measurementsJson?.coronary_ostia);
+  const modelCoronary = pickObject(model.coronary_ostia);
+  const coronary = measurementsCoronary || modelCoronary;
+  if (!coronary) {
+    return {
+      source: "unavailable",
+      inferred: false,
+      reason: "coronary_ostia_missing",
+      left: null,
+      right: null,
+    };
+  }
+  return {
+    source: measurementsCoronary ? "measurements_artifact" : "model_artifact",
+    inferred: false,
+    reason: null,
+    left: normalizeCoronaryOstiumSummary(pickObject(coronary.left)),
+    right: normalizeCoronaryOstiumSummary(pickObject(coronary.right)),
+  };
+}
+
+function normalizeCoronaryOstiumSummary(input: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!input) return null;
+  return {
+    status: nullableString(input.status) || "unknown",
+    confidence: readFiniteNumber(input.confidence),
+    reason: nullableString(input.reason),
+    point_world: toPointArray(input.point_world) || toPointArray(input.origin_world),
+    height_mm: readFiniteNumber(input.height_mm),
+    method: nullableString(input.method),
+    source_fields: Array.isArray(input.source_fields) ? input.source_fields : null,
+  };
+}
+
+function buildLeafletGeometrySummary(
+  model: Record<string, unknown>,
+  leafletModelJson: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  const artifactLeaflets = Array.isArray(leafletModelJson?.leaflets)
+    ? (leafletModelJson.leaflets as Array<unknown>).map((entry) => normalizeLeafletSummaryRecord(pickObject(entry))).filter(Boolean)
+    : [];
+  if (artifactLeaflets.length) {
+    return {
+      source: "leaflet_model_artifact",
+      inferred: false,
+      legacy: false,
+      reason: null,
+      leaflets: artifactLeaflets,
+    };
+  }
+
+  const modelLeaflets = Array.isArray(model.leaflet_meshes)
+    ? (model.leaflet_meshes as Array<unknown>).map((entry) => normalizeLeafletSummaryRecord(pickObject(entry))).filter(Boolean)
+    : [];
+  if (modelLeaflets.length) {
+    return {
+      source: "legacy_model_summary",
+      inferred: false,
+      legacy: true,
+      reason: "leaflet_geometry_legacy_summary_only",
+      leaflets: modelLeaflets,
+    };
+  }
+
+  return {
+    source: "unavailable",
+    inferred: false,
+    legacy: false,
+    reason: "leaflet_geometry_missing",
+    leaflets: [],
+  };
+}
+
+function normalizeLeafletSummaryRecord(input: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!input) return null;
+  return {
+    leaflet_id: nullableString(input.leaflet_id),
+    cusp_label: nullableString(input.cusp_label) || nullableString(input.label) || nullableString(input.name) || "leaflet",
+    status: nullableString(input.status) || "unknown",
+    confidence: readFiniteNumber(input.confidence),
+    reason: nullableString(input.reason),
+    geometric_height_mm: readFiniteNumber(input.geometric_height_mm),
+    effective_height_mm: readFiniteNumber(input.effective_height_mm),
+    coaptation_height_mm: readFiniteNumber(input.coaptation_height_mm),
+    coaptation_surface_area_mm2: readFiniteNumber(input.coaptation_surface_area_mm2),
+    raw_geometric_height_mm: readFiniteNumber(input.raw_geometric_height_mm),
+    raw_effective_height_mm: readFiniteNumber(input.raw_effective_height_mm),
+    raw_coaptation_height_mm: readFiniteNumber(input.raw_coaptation_height_mm),
+    hinge_curve_world: Array.isArray(input.hinge_curve_world) ? input.hinge_curve_world : null,
+    free_edge_world: Array.isArray(input.free_edge_world) ? input.free_edge_world : null,
   };
 }
 
