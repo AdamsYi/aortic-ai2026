@@ -4,5 +4,5 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["frontend/workstation/src/**/*.ts"]
+  "include": ["apps/web/src/**/*.ts"]
 }
