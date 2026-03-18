@@ -1,6 +1,5 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
@@ -14,58 +13,66 @@ const appEntry = path.join(repoRoot, 'apps/web/src/main.ts');
 const workerEntry = path.join(repoRoot, 'apps/web/src/dicomZip.worker.ts');
 const cssPath = path.join(repoRoot, 'apps/web/src/styles.css');
 const outputPath = path.join(repoRoot, 'src/generated/workstationAssets.ts');
-const generatedIgnore = new Set([
-  'src/generated/workstationAssets.ts',
-  'src/generated/defaultCaseBundle.ts',
-]);
+const buildVersionInputPaths = [
+  'apps/web',
+  'cases/default_clinical_case',
+  'schemas',
+  'services/api',
+  'src/index.ts',
+  'scripts/build_workstation.mjs',
+  'scripts/build_default_case_bundle.mjs',
+  'package.json',
+  'package-lock.json',
+  'tsconfig.workstation.json',
+];
 
-function runGit(args) {
-  return execFileSync('git', args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  }).trim();
+async function collectFiles(targetPath, acc = []) {
+  const absPath = path.join(repoRoot, targetPath);
+  const entries = await readdir(absPath, { withFileTypes: true });
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const relPath = path.posix.join(targetPath, entry.name);
+    if (entry.isDirectory()) {
+      await collectFiles(relPath, acc);
+    } else if (entry.isFile()) {
+      acc.push(relPath);
+    }
+  }
+  return acc;
 }
 
-function runGitBuffer(args) {
-  return execFileSync('git', args, {
-    cwd: repoRoot,
-    encoding: 'buffer',
-  });
+async function listBuildVersionInputs() {
+  const files = [];
+  for (const inputPath of buildVersionInputPaths) {
+    const absPath = path.join(repoRoot, inputPath);
+    const info = await stat(absPath);
+    if (info.isDirectory()) {
+      await collectFiles(inputPath, files);
+    } else if (info.isFile()) {
+      files.push(inputPath);
+    }
+  }
+  return files.sort();
 }
 
-function listDirtyPaths() {
-  const tracked = runGitBuffer(['diff', '--name-only', '-z', 'HEAD', '--']).toString('utf8').split('\0').filter(Boolean);
-  const untracked = runGitBuffer(['ls-files', '--others', '--exclude-standard', '-z']).toString('utf8').split('\0').filter(Boolean);
-  return [...new Set([...tracked, ...untracked])]
-    .filter((candidate) => !generatedIgnore.has(candidate))
-    .sort();
-}
-
-async function computeDirtyFingerprint(paths) {
+async function computeContentFingerprint(paths) {
   const hash = createHash('sha256');
   for (const relPath of paths) {
     hash.update(relPath);
     hash.update('\0');
     const absPath = path.join(repoRoot, relPath);
-    try {
-      const contents = await readFile(absPath);
-      hash.update(contents);
-    } catch {
-      hash.update('DELETED');
-    }
+    const contents = await readFile(absPath);
+    hash.update(contents);
     hash.update('\0');
   }
-  return hash.digest('hex').slice(0, 8);
+  return hash.digest('hex').slice(0, 12);
 }
 
 async function computeBuildVersion() {
-  const head = runGit(['rev-parse', '--short', 'HEAD']);
-  if (!head) {
-    throw new Error('failed_to_compute_git_head');
+  const inputs = await listBuildVersionInputs();
+  if (!inputs.length) {
+    throw new Error('failed_to_collect_build_inputs');
   }
-  const dirtyPaths = listDirtyPaths();
-  if (!dirtyPaths.length) return head;
-  return computeDirtyFingerprint(dirtyPaths).then((fingerprint) => `${head}-dirty-${fingerprint}`);
+  return computeContentFingerprint(inputs);
 }
 
 function sha256Hex(input) {
