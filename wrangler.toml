@@ -57,3 +57,12 @@ bucket_name = "aortic-mask-out"
 binding = "DB"
 database_name = "aortic_meta"
 database_id = "db7d7c1c-43b3-4eec-a33c-335ca12ae944"
+
+[[env.production.queues.producers]]
+binding = "SEG_QUEUE"
+queue = "seg-jobs"
+
+[[env.production.queues.consumers]]
+queue = "seg-jobs"
+max_batch_size = 10
+max_batch_timeout = 30

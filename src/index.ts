@@ -54,6 +54,7 @@ interface SegQueuePayload {
   job_id: string;
   study_id: string;
   image_key: string;
+  patient_id?: string | null;
   requested_at: string;
 }
 
@@ -1246,6 +1247,10 @@ export default {
         return respond(await createUploadUrl(payload, env));
       }
 
+      if (request.method === "POST" && path === "/api/upload") {
+        return respond(await uploadCaseMultipart(request, env));
+      }
+
       if (request.method === "PUT" && path.startsWith("/upload/")) {
         const sessionId = path.split("/").pop();
         return respond(await consumeUploadSession(request, env, sessionId ?? ""));
@@ -1254,6 +1259,32 @@ export default {
       if (request.method === "POST" && path === "/jobs") {
         const payload = await readJson(request);
         return respond(await createJob(payload, env));
+      }
+
+      if (request.method === "GET" && /^\/api\/jobs\/[^/]+\/status$/.test(path)) {
+        const parts = path.split("/");
+        const jobId = decodeURIComponent(parts[3] || "");
+        return respond(await getJobStatus(jobId, env));
+      }
+
+      if (request.method === "POST" && /^\/api\/jobs\/[^/]+\/status$/.test(path)) {
+        const parts = path.split("/");
+        const jobId = decodeURIComponent(parts[3] || "");
+        const payload = await readJson(request);
+        return respond(await updateJobStatusFromProvider(request, jobId, payload, env));
+      }
+
+      if (request.method === "POST" && /^\/api\/jobs\/[^/]+\/callback$/.test(path)) {
+        const parts = path.split("/");
+        const jobId = decodeURIComponent(parts[3] || "");
+        const payload = await readJson(request);
+        return respond(await handleSimpleJobCallback(request, jobId, payload, env));
+      }
+
+      if (request.method === "GET" && /^\/api\/jobs\/[^/]+\/input$/.test(path)) {
+        const parts = path.split("/");
+        const jobId = decodeURIComponent(parts[3] || "");
+        return respond(await streamJobInputForProvider(request, jobId, env));
       }
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/raw")) {
@@ -1478,13 +1509,113 @@ async function consumeUploadSession(request: Request, env: Env, sessionId: strin
   });
 }
 
+async function uploadCaseMultipart(request: Request, env: Env): Promise<Response> {
+  const form = await request.formData();
+  const fileCandidate = form.get("file") ?? form.get("ct") ?? form.get("scan");
+  if (!(fileCandidate instanceof File)) {
+    return json({ error: "missing_file" }, 400);
+  }
+  const bytes = new Uint8Array(await fileCandidate.arrayBuffer());
+  if (!bytes.byteLength) return json({ error: "missing_body" }, 400);
+
+  const maxInputBytes = parsePositiveInt(env.INFERENCE_MAX_INPUT_BYTES, 100 * 1024 * 1024);
+  if (bytes.byteLength > maxInputBytes) {
+    return json({ error: "input_too_large", max_bytes: maxInputBytes }, 413);
+  }
+
+  const patientId = stringOr(form.get("patient_id"), "").trim() || null;
+  const studyId = stringOr(form.get("study_id"), "").trim() || crypto.randomUUID();
+  const filename = sanitizeFilename(fileCandidate.name || "upload.nii.gz");
+  const objectKey = `studies/${studyId}/raw/${Date.now()}-${filename}`;
+
+  await env.R2_RAW.put(objectKey, bytes, {
+    httpMetadata: {
+      contentType: fileCandidate.type || "application/octet-stream",
+    },
+  });
+
+  await env.DB.prepare(
+    `INSERT INTO studies (id, patient_code, source_dataset, image_key, image_format, modality, phase)
+     VALUES (?1, ?2, ?3, ?4, ?5, 'CTA', ?6)
+     ON CONFLICT(id) DO UPDATE SET
+       patient_code = COALESCE(excluded.patient_code, studies.patient_code),
+       source_dataset = COALESCE(excluded.source_dataset, studies.source_dataset),
+       image_key = excluded.image_key,
+       image_format = excluded.image_format,
+       phase = COALESCE(excluded.phase, studies.phase),
+       updated_at = CURRENT_TIMESTAMP`
+  )
+    .bind(
+      studyId,
+      patientId,
+      "web_upload",
+      objectKey,
+      "nifti",
+      nullableString(form.get("phase"))
+    )
+    .run();
+
+  await upsertStudyRepository(
+    env,
+    studyId,
+    {
+      upload_request: {
+        filename,
+        source_dataset: "web_upload",
+        phase: nullableString(form.get("phase")),
+        created_at: new Date().toISOString(),
+      },
+      upload_result: {
+        uploaded_at: new Date().toISOString(),
+        content_type: fileCandidate.type || "application/octet-stream",
+      },
+      repository: {
+        raw_object_key: objectKey,
+      },
+    },
+    {
+      rawFilename: filename,
+      ingestionFormat: "nifti",
+      imageBytes: bytes.byteLength,
+      imageSha256: await sha256HexFromBytes(bytes),
+    }
+  );
+
+  const jobId = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO jobs (id, study_id, job_type, status, model_tag)
+     VALUES (?1, ?2, 'segmentation_v1', 'queued', ?3)`
+  )
+    .bind(jobId, studyId, "submit_case_ui")
+    .run();
+
+  await tryUpdateJobExtendedFields(env, jobId, {
+    patient_id: patientId,
+    r2_key: objectKey,
+    progress: 0,
+    result_case_id: null,
+    updated_at: new Date().toISOString(),
+  });
+
+  const queuePayload: SegQueuePayload = {
+    job_id: jobId,
+    study_id: studyId,
+    image_key: objectKey,
+    patient_id: patientId,
+    requested_at: new Date().toISOString(),
+  };
+  await env.SEG_QUEUE.send(queuePayload);
+
+  return json({ job_id: jobId, upload_key: objectKey }, 201);
+}
+
 async function createJob(payload: any, env: Env): Promise<Response> {
   const studyId = stringOr(payload.study_id, "").trim();
   if (!studyId) return json({ error: "missing_study_id" }, 400);
 
-  const study = await env.DB.prepare(`SELECT id, image_key FROM studies WHERE id = ?1`)
+  const study = await env.DB.prepare(`SELECT id, image_key, patient_code FROM studies WHERE id = ?1`)
     .bind(studyId)
-    .first<{ id: string; image_key: string }>();
+    .first<{ id: string; image_key: string; patient_code?: string }>();
 
   if (!study) return json({ error: "study_not_found" }, 404);
 
@@ -1499,10 +1630,20 @@ async function createJob(payload: any, env: Env): Promise<Response> {
     .bind(jobId, studyId, jobType, modelTag)
     .run();
 
+  await tryUpdateJobExtendedFields(env, jobId, {
+    patient_id: nullableString(study.patient_code),
+    r2_key: study.image_key,
+    progress: 0,
+    stage: "queued",
+    result_case_id: null,
+    updated_at: new Date().toISOString(),
+  });
+
   const queuePayload: SegQueuePayload = {
     job_id: jobId,
     study_id: studyId,
     image_key: study.image_key,
+    patient_id: nullableString(study.patient_code),
     requested_at: new Date().toISOString()
   };
 
@@ -1558,6 +1699,141 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
     links,
     pipeline_run: pipelineRun
   });
+}
+
+async function tryUpdateJobExtendedFields(
+  env: Env,
+  jobId: string,
+  fields: {
+    patient_id?: string | null;
+    r2_key?: string | null;
+    progress?: number | null;
+    result_case_id?: string | null;
+    stage?: string | null;
+    updated_at?: string | null;
+  }
+): Promise<void> {
+  const nowIso = fields.updated_at || new Date().toISOString();
+  try {
+    await env.DB.prepare(
+      `UPDATE jobs
+       SET patient_id = COALESCE(?2, patient_id),
+           r2_key = COALESCE(?3, r2_key),
+           progress = COALESCE(?4, progress),
+           result_case_id = COALESCE(?5, result_case_id),
+           stage = COALESCE(?6, stage),
+           updated_at = ?7
+       WHERE id = ?1`
+    )
+      .bind(jobId, fields.patient_id ?? null, fields.r2_key ?? null, fields.progress ?? null, fields.result_case_id ?? null, fields.stage ?? null, nowIso)
+      .run();
+  } catch {
+    // Backward-compatible path for environments without Sprint 10 migration.
+    await env.DB.prepare(`UPDATE jobs SET status = status WHERE id = ?1`).bind(jobId).run();
+  }
+}
+
+async function getJobStatus(jobId: string, env: Env): Promise<Response> {
+  if (!jobId) return json({ error: "missing_job_id" }, 400);
+  const row = await env.DB.prepare(`SELECT * FROM jobs WHERE id = ?1`).bind(jobId).first<Record<string, unknown>>();
+  if (!row) return json({ error: "job_not_found" }, 404);
+  const status = String(row.status || "queued");
+  const progress = Number(row.progress ?? (status === "queued" ? 0 : status === "running" ? 45 : status === "succeeded" ? 100 : 100));
+  const resultCaseId = nullableString(row.result_case_id) || (status === "succeeded" ? String(row.id || "") : null);
+  const stage = nullableString(row.stage) || null;
+  return json({
+    job_id: String(row.id || jobId),
+    status,
+    progress: Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0,
+    result_case_id: resultCaseId,
+    stage,
+  });
+}
+
+async function updateJobStatusFromProvider(request: Request, jobId: string, payload: any, env: Env): Promise<Response> {
+  const expectedSecret = (env.PROVIDER_SECRET || "").trim();
+  if (expectedSecret) {
+    const provided = request.headers.get("x-callback-secret") || request.headers.get("x-provider-secret") || "";
+    if (provided !== expectedSecret) return json({ error: "unauthorized_provider" }, 401);
+  }
+  const statusRaw = stringOr(payload?.status, "").toLowerCase();
+  const stage = nullableString(payload?.stage);
+  const progressRaw = Number(payload?.progress);
+  const progress = Number.isFinite(progressRaw) ? Math.max(0, Math.min(100, Math.round(progressRaw))) : null;
+  const mappedStatus: JobStatus =
+    statusRaw === "failed"
+      ? "failed"
+      : statusRaw === "completed" || statusRaw === "succeeded"
+        ? "succeeded"
+        : "running";
+
+  await env.DB.prepare(
+    `UPDATE jobs
+     SET status = ?2, error_message = CASE WHEN ?2 = 'failed' THEN COALESCE(?3, error_message) ELSE NULL END
+     WHERE id = ?1`
+  )
+    .bind(jobId, mappedStatus, nullableString(payload?.detail) || nullableString(payload?.error_message))
+    .run();
+
+  await tryUpdateJobExtendedFields(env, jobId, {
+    progress,
+    stage,
+    result_case_id: nullableString(payload?.result_case_id),
+    updated_at: new Date().toISOString(),
+  });
+  return getJobStatus(jobId, env);
+}
+
+async function handleSimpleJobCallback(request: Request, jobId: string, payload: any, env: Env): Promise<Response> {
+  const expectedSecret = (env.PROVIDER_SECRET || "").trim();
+  if (expectedSecret) {
+    const provided = request.headers.get("x-callback-secret") || request.headers.get("x-provider-secret") || "";
+    if (provided !== expectedSecret) return json({ error: "unauthorized_callback" }, 401);
+  }
+  const statusRaw = stringOr(payload?.status, "").toLowerCase();
+  if (!statusRaw) return json({ error: "missing_status" }, 400);
+
+  if (statusRaw === "failed") {
+    await markJobFailed(env, jobId, stringOr(payload?.error_message, "provider_reported_failure"));
+    await tryUpdateJobExtendedFields(env, jobId, {
+      progress: 100,
+      stage: "failed",
+      result_case_id: nullableString(payload?.result_case_id),
+      updated_at: new Date().toISOString(),
+    });
+    return json({ ok: true, job_id: jobId, status: "failed" });
+  }
+
+  await env.DB.prepare(`UPDATE jobs SET status = 'succeeded', finished_at = ?2, error_message = NULL WHERE id = ?1`)
+    .bind(jobId, new Date().toISOString())
+    .run();
+  await tryUpdateJobExtendedFields(env, jobId, {
+    progress: 100,
+    stage: "completed",
+    result_case_id: nullableString(payload?.result_case_id) || jobId,
+    updated_at: new Date().toISOString(),
+  });
+  return json({ ok: true, job_id: jobId, status: "succeeded" });
+}
+
+async function streamJobInputForProvider(request: Request, jobId: string, env: Env): Promise<Response> {
+  const expectedSecret = (env.PROVIDER_SECRET || "").trim();
+  if (expectedSecret) {
+    const provided = request.headers.get("x-provider-secret") || request.headers.get("x-callback-secret") || "";
+    if (provided !== expectedSecret) return json({ error: "unauthorized_provider" }, 401);
+  }
+  const row = await env.DB.prepare(`SELECT study_id FROM jobs WHERE id = ?1`).bind(jobId).first<{ study_id: string }>();
+  if (!row?.study_id) return json({ error: "job_not_found" }, 404);
+  const study = await env.DB.prepare(`SELECT image_key FROM studies WHERE id = ?1`).bind(row.study_id).first<{ image_key: string }>();
+  if (!study?.image_key) return json({ error: "study_not_found" }, 404);
+  const obj = await env.R2_RAW.get(study.image_key);
+  if (!obj?.body) return json({ error: "raw_object_not_found" }, 404);
+
+  const headers = new Headers(jsonHeaders);
+  const contentType = obj.httpMetadata?.contentType || "application/octet-stream";
+  headers.set("content-type", contentType);
+  headers.set("content-disposition", `inline; filename=\"${sanitizeFilename(study.image_key.split("/").pop() || "input.nii.gz")}\"`);
+  return new Response(obj.body, { status: 200, headers });
 }
 
 async function getLatestDemoCase(env: Env, request: Request): Promise<Response> {
@@ -2732,14 +3008,24 @@ async function processSegmentationJob(payload: SegQueuePayload, env: Env): Promi
   if (changes === 0) {
     return;
   }
+  await tryUpdateJobExtendedFields(env, payload.job_id, {
+    progress: 5,
+    stage: "queued",
+    updated_at: new Date().toISOString(),
+  });
 
   try {
-    const src = await env.R2_RAW.get(payload.image_key);
-    if (!src) throw new Error("source_image_not_found");
+    const srcHead = await env.R2_RAW.head(payload.image_key);
+    if (!srcHead) throw new Error("source_image_not_found");
+    await tryUpdateJobExtendedFields(env, payload.job_id, {
+      progress: 15,
+      stage: "segmentation",
+      updated_at: new Date().toISOString(),
+    });
 
     const mode = getInferenceMode(env);
     if (mode === "webhook") {
-      await dispatchToInferenceWebhook(env, payload, src);
+      await dispatchToInferenceWebhook(env, payload);
       return;
     }
 
@@ -2751,32 +3037,33 @@ async function processSegmentationJob(payload: SegQueuePayload, env: Env): Promi
 
 async function dispatchToInferenceWebhook(
   env: Env,
-  payload: SegQueuePayload,
-  src: R2ObjectBody
+  payload: SegQueuePayload
 ): Promise<void> {
   const webhookUrl = (env.PROVIDER_URL || "").trim();
   if (!webhookUrl) {
     throw new Error("provider_url_missing");
   }
 
-  const maxInputBytes = parsePositiveInt(env.INFERENCE_MAX_INPUT_BYTES, 50 * 1024 * 1024);
   const timeoutMs = parsePositiveInt(env.INFERENCE_WEBHOOK_TIMEOUT_MS, 25000);
-
-  const inputBuffer = await src.arrayBuffer();
-  if (inputBuffer.byteLength > maxInputBytes) {
-    throw new Error(`input_too_large:${inputBuffer.byteLength}`);
-  }
 
   const callbackSecret = (env.PROVIDER_SECRET || "").trim();
   const callbackUrl = buildCallbackUrl(env);
+  const apiBase = (env.API_BASE_URL || "").trim();
+  const normalizedBase = apiBase ? apiBase.replace(/\/$/, "") : "";
+  const statusUrl = normalizedBase ? `${normalizedBase}/api/jobs/${encodeURIComponent(payload.job_id)}/status` : null;
+  const simpleCallbackUrl = normalizedBase ? `${normalizedBase}/api/jobs/${encodeURIComponent(payload.job_id)}/callback` : null;
+  const inputUrl = normalizedBase ? `${normalizedBase}/api/jobs/${encodeURIComponent(payload.job_id)}/input` : null;
 
   const reqBody = {
     job_id: payload.job_id,
     study_id: payload.study_id,
+    patient_id: payload.patient_id ?? null,
     image_key: payload.image_key,
+    r2_key: payload.image_key,
+    input_url: inputUrl,
     requested_at: payload.requested_at,
-    input_content_type: src.httpMetadata?.contentType || "application/octet-stream",
-    input_base64: arrayBufferToBase64(inputBuffer),
+    callback_url: simpleCallbackUrl,
+    status_url: statusUrl,
     callback: {
       url: callbackUrl,
       header: callbackSecret ? "x-callback-secret" : null,
@@ -2952,12 +3239,23 @@ async function applyInferenceOutputToJob(
   await env.DB.prepare(`UPDATE jobs SET status = 'succeeded', finished_at = ?2, error_message = NULL WHERE id = ?1`)
     .bind(jobId, new Date().toISOString())
     .run();
+  await tryUpdateJobExtendedFields(env, jobId, {
+    progress: 100,
+    stage: "completed",
+    result_case_id: jobId,
+    updated_at: new Date().toISOString(),
+  });
 }
 
 async function markJobFailed(env: Env, jobId: string, message: string): Promise<void> {
   await env.DB.prepare(`UPDATE jobs SET status = 'failed', error_message = ?2, finished_at = ?3 WHERE id = ?1`)
     .bind(jobId, message, new Date().toISOString())
     .run();
+  await tryUpdateJobExtendedFields(env, jobId, {
+    progress: 100,
+    stage: "failed",
+    updated_at: new Date().toISOString(),
+  });
 }
 
 async function writeJsonArtifact(

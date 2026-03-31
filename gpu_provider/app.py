@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 
@@ -21,11 +22,16 @@ class CallbackSpec(BaseModel):
 
 class InferenceRequest(BaseModel):
     job_id: str
-    study_id: str
-    image_key: str
+    study_id: Optional[str] = None
+    image_key: Optional[str] = None
+    r2_key: Optional[str] = None
+    patient_id: Optional[str] = None
     requested_at: Optional[str] = None
     input_content_type: str = "application/octet-stream"
-    input_base64: str
+    input_base64: Optional[str] = None
+    input_url: Optional[str] = None
+    callback_url: Optional[str] = None
+    status_url: Optional[str] = None
     callback: CallbackSpec = Field(default_factory=CallbackSpec)
 
 
@@ -110,6 +116,7 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
 
     model_device = env("MODEL_DEVICE", "gpu")
     quality = env("PIPELINE_QUALITY", "high")
+    safe_study_id = req.study_id or req.patient_id or "unknown-study"
     return (
         f'python "{pipeline_py}" '
         f'--input "{input_path}" '
@@ -118,7 +125,7 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
         f'--device "{model_device}" '
         f'--quality "{quality}" '
         f'--job-id "{req.job_id}" '
-        f'--study-id "{req.study_id}"'
+        f'--study-id "{safe_study_id}"'
     )
 
 
@@ -263,7 +270,8 @@ def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Option
 
 
 def post_callback(req: InferenceRequest, result: InferenceResponse) -> None:
-    if not req.callback.url:
+    callback_url = req.callback.url or req.callback_url
+    if not callback_url:
         return
 
     headers = {"content-type": "application/json"}
@@ -273,14 +281,57 @@ def post_callback(req: InferenceRequest, result: InferenceResponse) -> None:
     timeout = float(env("CALLBACK_TIMEOUT_SECONDS", "20"))
     payload = result.model_dump(exclude_none=True)
     try:
-        resp = requests.post(req.callback.url, headers=headers, json=payload, timeout=timeout)
+        resp = requests.post(callback_url, headers=headers, json=payload, timeout=timeout)
         resp.raise_for_status()
     except Exception as exc:
         print(f"[callback] failed for job={req.job_id}: {exc}")
 
 
+def post_stage_status(req: InferenceRequest, stage: str, progress: int, status: str = "running", detail: Optional[str] = None) -> None:
+    status_url = req.status_url
+    if not status_url:
+        return
+    headers = {"content-type": "application/json"}
+    if req.callback.header and req.callback.secret:
+        headers[req.callback.header] = req.callback.secret
+    payload: Dict[str, Any] = {
+        "job_id": req.job_id,
+        "status": status,
+        "stage": stage,
+        "progress": int(max(0, min(100, progress))),
+    }
+    if detail:
+        payload["detail"] = detail
+    try:
+        requests.post(status_url, headers=headers, json=payload, timeout=10).raise_for_status()
+    except Exception as exc:
+        print(f"[status] failed for job={req.job_id}, stage={stage}: {exc}")
+
+
+def post_simple_completion_callback(req: InferenceRequest, status: str, result_case_id: Optional[str] = None, error_message: Optional[str] = None) -> None:
+    callback_url = req.callback_url
+    if not callback_url:
+        return
+    headers = {"content-type": "application/json"}
+    if req.callback.header and req.callback.secret:
+        headers[req.callback.header] = req.callback.secret
+    payload: Dict[str, Any] = {
+        "job_id": req.job_id,
+        "status": status,
+    }
+    if result_case_id:
+        payload["result_case_id"] = result_case_id
+    if error_message:
+        payload["error_message"] = error_message
+    try:
+        requests.post(callback_url, headers=headers, json=payload, timeout=10).raise_for_status()
+    except Exception as exc:
+        print(f"[simple-callback] failed for job={req.job_id}: {exc}")
+
+
 def post_error_callback(req: InferenceRequest, provider_job_id: str, message: str) -> None:
-    if not req.callback.url:
+    callback_url = req.callback.url or req.callback_url
+    if not callback_url:
         return
     headers = {"content-type": "application/json"}
     if req.callback.header and req.callback.secret:
@@ -292,22 +343,32 @@ def post_error_callback(req: InferenceRequest, provider_job_id: str, message: st
         "error_message": message,
     }
     try:
-        requests.post(req.callback.url, headers=headers, json=payload, timeout=10).raise_for_status()
+        requests.post(callback_url, headers=headers, json=payload, timeout=10).raise_for_status()
     except Exception as exc:
         print(f"[callback] failed to post error for job={req.job_id}: {exc}")
 
 
 def run_model_and_callback(req: InferenceRequest, input_bytes: bytes, provider_job_id: str) -> None:
     try:
+        post_stage_status(req, stage="segmentation", progress=25, status="running")
         result = run_model(input_bytes, req, provider_job_id=provider_job_id)
+        post_stage_status(req, stage="centerline", progress=55, status="running")
+        post_stage_status(req, stage="measurements", progress=80, status="running")
         post_callback(req, result)
+        post_stage_status(req, stage="completed", progress=100, status="completed")
+        post_simple_completion_callback(req, status="completed", result_case_id=req.job_id)
     except Exception as exc:
+        post_stage_status(req, stage="failed", progress=100, status="failed", detail=public_error_message(exc))
         post_error_callback(req, provider_job_id, public_error_message(exc))
+        post_simple_completion_callback(req, status="failed", error_message=public_error_message(exc))
 
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    gpu_ok = bool(shutil.which("nvidia-smi"))
     return {
+        "status": "ok",
+        "gpu": gpu_ok,
         "ok": True,
         "service": "gpu-provider",
         "provider_response_mode": env("PROVIDER_RESPONSE_MODE", "inline"),
@@ -318,17 +379,57 @@ def health() -> Dict[str, Any]:
     }
 
 
+def load_input_bytes(req: InferenceRequest, x_provider_secret: Optional[str]) -> bytes:
+    if req.input_base64:
+        try:
+            return base64.b64decode(req.input_base64, validate=True)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"invalid_input_base64: {exc}")
+    if req.input_url:
+        headers: Dict[str, str] = {}
+        expected_secret = env("PROVIDER_SECRET", "aorticai-internal-2026").strip()
+        if expected_secret:
+            headers["x-provider-secret"] = x_provider_secret or expected_secret
+        try:
+            resp = requests.get(req.input_url, headers=headers, timeout=120)
+            resp.raise_for_status()
+            return resp.content
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"input_download_failed:{exc}")
+    raise HTTPException(status_code=400, detail="missing_input_payload")
+
+
 @app.post("/infer")
-def infer(req: InferenceRequest, x_provider_secret: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+async def infer(request: Request, x_provider_secret: Optional[str] = Header(default=None)) -> Dict[str, Any]:
     expected_secret = env("PROVIDER_SECRET", "aorticai-internal-2026").strip()
     provided_secret = (x_provider_secret or "").strip()
     if expected_secret and provided_secret != expected_secret:
         raise HTTPException(status_code=401, detail="provider_secret_mismatch")
 
-    try:
-        input_bytes = base64.b64decode(req.input_base64, validate=True)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid_input_base64: {exc}")
+    content_type = (request.headers.get("content-type") or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="missing_file")
+        input_bytes = await upload.read()  # type: ignore[attr-defined]
+        req = InferenceRequest(
+            job_id=str(form.get("job_id") or f"provider-manual-{int(time.time() * 1000)}"),
+            study_id=str(form.get("study_id") or "manual-study"),
+            image_key=str(getattr(upload, "filename", "upload.nii.gz")),
+            r2_key=str(form.get("r2_key") or ""),
+            patient_id=str(form.get("patient_id") or ""),
+            input_content_type=str(getattr(upload, "content_type", "application/octet-stream")),
+            callback=CallbackSpec(),
+            callback_url=str(form.get("callback_url") or ""),
+            status_url=str(form.get("status_url") or ""),
+        )
+    else:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="invalid_json_payload")
+        req = InferenceRequest(**payload)
+        input_bytes = load_input_bytes(req, x_provider_secret)
 
     max_input_bytes = int(env("MAX_INPUT_BYTES", str(900 * 1024 * 1024)))
     if len(input_bytes) > max_input_bytes:
@@ -336,7 +437,7 @@ def infer(req: InferenceRequest, x_provider_secret: Optional[str] = Header(defau
 
     mode = env("PROVIDER_RESPONSE_MODE", "inline").strip().lower()
     if mode == "callback":
-        if not req.callback.url:
+        if not (req.callback.url or req.callback_url):
             raise HTTPException(status_code=400, detail="callback_url_required_for_callback_mode")
         provider_job_id = f"provider-{int(time.time() * 1000)}"
         t = threading.Thread(target=run_model_and_callback, args=(req, input_bytes, provider_job_id), daemon=True)
@@ -345,10 +446,15 @@ def infer(req: InferenceRequest, x_provider_secret: Optional[str] = Header(defau
             "status": "accepted",
             "job_id": req.job_id,
             "provider_job_id": provider_job_id,
+            "r2_key": req.r2_key,
+            "patient_id": req.patient_id,
         }
 
     try:
+        post_stage_status(req, stage="segmentation", progress=25, status="running")
         result = run_model(input_bytes, req)
+        post_stage_status(req, stage="centerline", progress=55, status="running")
+        post_stage_status(req, stage="measurements", progress=80, status="running")
     except Exception as exc:
         provider_job_id = f"provider-failed-{int(time.time() * 1000)}"
         message = public_error_message(exc)
@@ -358,7 +464,11 @@ def infer(req: InferenceRequest, x_provider_secret: Optional[str] = Header(defau
             "provider_job_id": provider_job_id,
             "error_message": message,
         }
+        post_stage_status(req, stage="failed", progress=100, status="failed", detail=message)
         post_error_callback(req, provider_job_id, message)
+        post_simple_completion_callback(req, status="failed", error_message=message)
         return error_payload
 
+    post_stage_status(req, stage="completed", progress=100, status="completed")
+    post_simple_completion_callback(req, status="completed", result_case_id=req.job_id)
     return result.model_dump(exclude_none=True)

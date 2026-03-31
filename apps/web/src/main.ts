@@ -387,6 +387,8 @@ let coronaryReviewBannerAcknowledged = false;
 let currentPlanningTab: 'TAVI' | 'VSRR' | 'PEARS' = 'TAVI';
 let planningPanelCollapsed = false;
 let measurementsPanelCollapsed = false;
+let submitJobPollHandle: number | null = null;
+let activeSubmissionJobId: string | null = null;
 const activeLandmarkLayers: Record<string, boolean> = {
   annulus: true,
   commissures: true,
@@ -409,6 +411,18 @@ const DOM = {
   caseInfoLeft: null as HTMLDivElement | null,
   caseInfoCenter: null as HTMLDivElement | null,
   caseInfoRight: null as HTMLDivElement | null,
+  gpuStatusDot: null as HTMLSpanElement | null,
+  gpuStatusText: null as HTMLSpanElement | null,
+  submitCaseButton: null as HTMLButtonElement | null,
+  submitCaseModal: null as HTMLDivElement | null,
+  submitCaseClose: null as HTMLButtonElement | null,
+  submitCaseForm: null as HTMLFormElement | null,
+  submitCaseFile: null as HTMLInputElement | null,
+  submitCasePatientId: null as HTMLInputElement | null,
+  submitCaseSubmit: null as HTMLButtonElement | null,
+  jobProgressBanner: null as HTMLDivElement | null,
+  jobProgressFill: null as HTMLDivElement | null,
+  jobProgressLabel: null as HTMLSpanElement | null,
   bootOverlay: null as HTMLDivElement | null,
   bootOverlayTitle: null as HTMLHeadingElement | null,
   bootOverlayText: null as HTMLParagraphElement | null,
@@ -491,8 +505,13 @@ function renderShell(): void {
           <p data-i18n="app.subtitle">Cornerstone3D MPR + Three.js anatomy viewer</p>
         </div>
         <div class="header-actions">
+          <div class="gpu-status-chip" id="gpu-status-chip">
+            <span class="gpu-dot gpu-offline" id="gpu-status-dot"></span>
+            <span id="gpu-status-text">GPU offline</span>
+          </div>
           <button id="load-showcase" class="case-mode-button" data-i18n="action.open_showcase">Showcase</button>
           <button id="load-latest" class="case-mode-button" data-i18n="action.load_case">Latest Case</button>
+          <button id="submit-case" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
           <button id="run-annotation" class="primary-action-button" data-i18n="action.run_annotation">Run Auto Annotation</button>
           <button id="open-report" data-i18n="action.open_report">Report</button>
           <button id="focus-annulus" data-i18n="action.focus_annulus">Annulus</button>
@@ -510,6 +529,13 @@ function renderShell(): void {
       <div class="coronary-review-banner hidden" id="coronary-review-banner">
         <div class="coronary-review-banner-text" data-i18n="banner.coronary_review_required">⚠️ Coronary ostia detection requires clinician review before use in planning / 冠脉开口检测需要临床医生复核后方可用于规划</div>
         <button type="button" id="coronary-review-ack" data-i18n="action.acknowledged">Acknowledged</button>
+      </div>
+      <div class="job-progress-banner hidden" id="job-progress-banner">
+        <div class="job-progress-head">
+          <span data-i18n="label.processing_case">Processing case</span>
+          <span id="job-progress-label">Queued</span>
+        </div>
+        <div class="job-progress-track"><div id="job-progress-fill"></div></div>
       </div>
       <main class="workspace-grid">
         <section class="panel mpr-panel">
@@ -706,6 +732,21 @@ function renderShell(): void {
         <iframe id="report-frame" src="${defaultCaseReportUrl('report.pdf')}" title="AorticAI report"></iframe>
       </aside>
       <div class="shortcut-hint-bar">1 四格 | 2 全屏 | W/L 窗宽 | +/- 缩放 | R 重置 | P 规划 | M 测量 | ESC 关闭</div>
+      <div class="submit-case-modal hidden" id="submit-case-modal">
+        <div class="submit-case-modal-card">
+          <div class="submit-case-modal-head">
+            <h3 data-i18n="modal.submit_case_title">Submit Case</h3>
+            <button type="button" id="submit-case-close" data-i18n="action.close">Close</button>
+          </div>
+          <form id="submit-case-form" class="submit-case-form">
+            <label data-i18n="label.case_file">Case File (.nii/.nii.gz)</label>
+            <input type="file" id="submit-case-file" accept=".nii,.nii.gz,application/gzip,application/octet-stream" required />
+            <label data-i18n="label.patient_id">Patient ID</label>
+            <input type="text" id="submit-case-patient-id" placeholder="patient-001" />
+            <button type="submit" id="submit-case-submit" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
+          </form>
+        </div>
+      </div>
     </div>
   `;
 
@@ -716,6 +757,18 @@ function renderShell(): void {
   DOM.caseInfoLeft = document.getElementById('case-info-left') as HTMLDivElement;
   DOM.caseInfoCenter = document.getElementById('case-info-center') as HTMLDivElement;
   DOM.caseInfoRight = document.getElementById('case-info-right') as HTMLDivElement;
+  DOM.gpuStatusDot = document.getElementById('gpu-status-dot') as HTMLSpanElement;
+  DOM.gpuStatusText = document.getElementById('gpu-status-text') as HTMLSpanElement;
+  DOM.submitCaseButton = document.getElementById('submit-case') as HTMLButtonElement;
+  DOM.submitCaseModal = document.getElementById('submit-case-modal') as HTMLDivElement;
+  DOM.submitCaseClose = document.getElementById('submit-case-close') as HTMLButtonElement;
+  DOM.submitCaseForm = document.getElementById('submit-case-form') as HTMLFormElement;
+  DOM.submitCaseFile = document.getElementById('submit-case-file') as HTMLInputElement;
+  DOM.submitCasePatientId = document.getElementById('submit-case-patient-id') as HTMLInputElement;
+  DOM.submitCaseSubmit = document.getElementById('submit-case-submit') as HTMLButtonElement;
+  DOM.jobProgressBanner = document.getElementById('job-progress-banner') as HTMLDivElement;
+  DOM.jobProgressFill = document.getElementById('job-progress-fill') as HTMLDivElement;
+  DOM.jobProgressLabel = document.getElementById('job-progress-label') as HTMLSpanElement;
   DOM.bootOverlay = document.getElementById('boot-overlay') as HTMLDivElement;
   DOM.bootOverlayTitle = document.getElementById('boot-overlay-title') as HTMLHeadingElement;
   DOM.bootOverlayText = document.getElementById('boot-overlay-text') as HTMLParagraphElement;
@@ -788,6 +841,15 @@ function renderShell(): void {
 
   DOM.loadShowcaseButton?.addEventListener('click', () => void loadShowcaseCase({ updateUrl: true }));
   DOM.loadLatestButton?.addEventListener('click', () => void loadLatestCase({ updateUrl: true }));
+  DOM.submitCaseButton?.addEventListener('click', () => setSubmitCaseModalOpen(true));
+  DOM.submitCaseClose?.addEventListener('click', () => setSubmitCaseModalOpen(false));
+  DOM.submitCaseModal?.addEventListener('click', (event) => {
+    if (event.target === DOM.submitCaseModal) setSubmitCaseModalOpen(false);
+  });
+  DOM.submitCaseForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void submitCaseFromModal();
+  });
   DOM.layoutGridButton?.addEventListener('click', () => setLayoutMode('grid-2x2'));
   DOM.layoutSingleButton?.addEventListener('click', () => setLayoutMode('single'));
   DOM.retryLatestButton?.addEventListener('click', () => void retryLatestCase());
@@ -1001,6 +1063,7 @@ function applyLocale(): void {
   DOM.localeButtons.forEach((button) => {
     button.classList.toggle('active', button.dataset.localeSwitch === currentLocale);
   });
+  void refreshGpuStatusIndicator();
 }
 
 function bootStageLabel(stage: BootStage): string {
@@ -1108,6 +1171,10 @@ async function retryLatestCase(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   renderShell();
+  void refreshGpuStatusIndicator();
+  window.setInterval(() => {
+    void refreshGpuStatusIndicator();
+  }, 15000);
   window.addEventListener('resize', handleViewportResize);
   window.addEventListener('popstate', () => {
     void loadInitialCase();
@@ -3271,7 +3338,7 @@ function measurementPanelRow(fieldKey: string, value: unknown): string | null {
   return `
     <div class="metric-row tone-${tone} measurement-row ${reviewRequired ? 'review-required' : ''}">
       <div class="metric-label">
-        <span class="metric-label-text">${escapeHtml(humanize(fieldKey))}</span>
+        <span class="metric-label-text"><span class="confidence-dot tone-${tone}"></span>${escapeHtml(humanize(fieldKey))}</span>
         <span class="metric-meta">${escapeHtml(flag)} · conf ${escapeHtml(confidenceText)}</span>
       </div>
       <div class="metric-value">${escapeHtml(displayValue)}${unit ? ` ${escapeHtml(unit)}` : ''}</div>
@@ -4774,6 +4841,118 @@ function summarizeStructuredValue(value: unknown): string {
 
 function setStatus(text: string): void {
   if (DOM.headerStatus) DOM.headerStatus.textContent = text;
+}
+
+function setSubmitCaseModalOpen(open: boolean): void {
+  DOM.submitCaseModal?.classList.toggle('hidden', !open);
+}
+
+function stageLabel(stage: string | null | undefined): string {
+  const raw = String(stage || '').toLowerCase();
+  if (!raw) return t('status.queued');
+  if (raw === 'segmentation') return t('status.segmentation');
+  if (raw === 'centerline') return t('status.centerline');
+  if (raw === 'measurements') return t('status.measurements');
+  if (raw === 'completed' || raw === 'succeeded') return t('status.completed');
+  if (raw === 'failed') return t('status.failed');
+  if (raw === 'queued') return t('status.queued');
+  if (raw === 'running') return t('status.running');
+  return humanize(raw);
+}
+
+function updateJobProgressBanner(progress: number, stage: string | null | undefined): void {
+  if (!DOM.jobProgressBanner || !DOM.jobProgressFill || !DOM.jobProgressLabel) return;
+  DOM.jobProgressBanner.classList.remove('hidden');
+  const clamped = Math.max(0, Math.min(100, Math.round(progress)));
+  DOM.jobProgressFill.style.width = `${clamped}%`;
+  DOM.jobProgressLabel.textContent = `${stageLabel(stage)} · ${clamped}%`;
+}
+
+function clearJobProgressBanner(): void {
+  DOM.jobProgressBanner?.classList.add('hidden');
+  if (DOM.jobProgressFill) DOM.jobProgressFill.style.width = '0%';
+  if (DOM.jobProgressLabel) DOM.jobProgressLabel.textContent = t('status.queued');
+}
+
+async function pollSubmittedJob(jobId: string): Promise<void> {
+  if (submitJobPollHandle !== null) {
+    window.clearInterval(submitJobPollHandle);
+    submitJobPollHandle = null;
+  }
+  activeSubmissionJobId = jobId;
+  updateJobProgressBanner(0, 'queued');
+
+  const tick = async () => {
+    if (!activeSubmissionJobId) return;
+    try {
+      const payload = await fetchJson<Record<string, unknown>>(`/api/jobs/${encodeURIComponent(activeSubmissionJobId)}/status`);
+      const status = String(payload.status || 'queued').toLowerCase();
+      const progressRaw = Number(payload.progress);
+      const progress = Number.isFinite(progressRaw) ? progressRaw : (status === 'completed' || status === 'succeeded' ? 100 : status === 'running' ? 45 : 0);
+      updateJobProgressBanner(progress, String(payload.stage || status));
+      if (status === 'completed' || status === 'succeeded') {
+        if (submitJobPollHandle !== null) {
+          window.clearInterval(submitJobPollHandle);
+          submitJobPollHandle = null;
+        }
+        activeSubmissionJobId = null;
+        updateJobProgressBanner(100, 'completed');
+        window.setTimeout(() => clearJobProgressBanner(), 2000);
+        await loadLatestCase({ updateUrl: true });
+      } else if (status === 'failed') {
+        if (submitJobPollHandle !== null) {
+          window.clearInterval(submitJobPollHandle);
+          submitJobPollHandle = null;
+        }
+        activeSubmissionJobId = null;
+        updateJobProgressBanner(100, 'failed');
+      }
+    } catch {
+      // transient network failures ignored while polling
+    }
+  };
+  await tick();
+  submitJobPollHandle = window.setInterval(() => {
+    void tick();
+  }, 5000);
+}
+
+async function submitCaseFromModal(): Promise<void> {
+  const file = DOM.submitCaseFile?.files?.[0];
+  if (!file) return;
+  const patientId = (DOM.submitCasePatientId?.value || '').trim();
+  if (DOM.submitCaseSubmit) DOM.submitCaseSubmit.disabled = true;
+  try {
+    const form = new FormData();
+    form.set('file', file);
+    if (patientId) form.set('patient_id', patientId);
+    const payload = await fetchJson<Record<string, unknown>>('/api/upload', {
+      method: 'POST',
+      body: form,
+    });
+    const jobId = String(payload.job_id || '').trim();
+    if (!jobId) throw new Error('missing_job_id');
+    setSubmitCaseModalOpen(false);
+    if (DOM.submitCaseForm) DOM.submitCaseForm.reset();
+    await pollSubmittedJob(jobId);
+  } finally {
+    if (DOM.submitCaseSubmit) DOM.submitCaseSubmit.disabled = false;
+  }
+}
+
+async function refreshGpuStatusIndicator(): Promise<void> {
+  if (!DOM.gpuStatusDot || !DOM.gpuStatusText) return;
+  try {
+    const payload = await fetchJson<Record<string, unknown>>('/providers/inference-health');
+    const online = Boolean(payload.ok);
+    DOM.gpuStatusDot.classList.toggle('gpu-online', online);
+    DOM.gpuStatusDot.classList.toggle('gpu-offline', !online);
+    DOM.gpuStatusText.textContent = online ? t('status.gpu_online') : t('status.gpu_offline');
+  } catch {
+    DOM.gpuStatusDot.classList.add('gpu-offline');
+    DOM.gpuStatusDot.classList.remove('gpu-online');
+    DOM.gpuStatusText.textContent = t('status.gpu_offline');
+  }
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
