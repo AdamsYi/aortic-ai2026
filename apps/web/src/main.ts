@@ -494,6 +494,7 @@ const DOM = {
 };
 
 function renderShell(): void {
+  document.getElementById('pre-load')?.remove();
   APP_ROOT.innerHTML = `
     <div class="workstation">
       <div class="case-info-bar">

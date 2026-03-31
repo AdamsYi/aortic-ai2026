@@ -80,6 +80,16 @@ function renderDemoHtml(): string {
   <link rel="stylesheet" href="${cssHref}" />
 </head>
 <body>
+  <style>
+    body { background: #080c12; color: #f1f5f9; margin: 0; font-family: system-ui, sans-serif; }
+    #pre-load { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; }
+    .spin { width: 40px; height: 40px; border: 3px solid #1e2738; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <div id="pre-load">
+    <div class="spin"></div>
+    <div style="font-size:14px;color:#8b9fc5">AorticAI — Loading workstation...</div>
+  </div>
   <div id="app"></div>
   <script>window.__AORTIC_BUILD_VERSION__=${JSON.stringify(buildVersion)};</script>
   <script type="module" src="${jsSrc}"></script>
