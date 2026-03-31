@@ -29,7 +29,10 @@ class InferenceRequest(BaseModel):
     requested_at: Optional[str] = None
     input_content_type: str = "application/octet-stream"
     input_base64: Optional[str] = None
+    file_content_b64: Optional[str] = None
+    download_url: Optional[str] = None
     input_url: Optional[str] = None
+    skip_segmentation: bool = False
     callback_url: Optional[str] = None
     status_url: Optional[str] = None
     callback: CallbackSpec = Field(default_factory=CallbackSpec)
@@ -117,7 +120,7 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
     model_device = env("MODEL_DEVICE", "gpu")
     quality = env("PIPELINE_QUALITY", "high")
     safe_study_id = req.study_id or req.patient_id or "unknown-study"
-    return (
+    cmd = (
         f'python "{pipeline_py}" '
         f'--input "{input_path}" '
         f'--output-mask "{output_mask}" '
@@ -127,6 +130,9 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
         f'--job-id "{req.job_id}" '
         f'--study-id "{safe_study_id}"'
     )
+    if req.skip_segmentation:
+        cmd += " --skip-segmentation"
+    return cmd
 
 
 def sanitize_public_result_json(obj: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,14 +164,10 @@ def sanitize_public_result_json(obj: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def public_error_message(exc: Exception) -> str:
-    raw = str(exc)
-    if "invalid_input_base64" in raw:
-        return raw
-    if "input_too_large" in raw:
-        return raw
-    if "failed" in raw.lower():
-        return "inference_pipeline_failed"
-    return "provider_execution_error"
+    detail = str(exc).strip()
+    if not detail:
+        detail = "unknown_error"
+    return f"{exc.__class__.__name__}: {detail}"
 
 
 def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Optional[str] = None) -> InferenceResponse:
@@ -380,11 +382,23 @@ def health() -> Dict[str, Any]:
 
 
 def load_input_bytes(req: InferenceRequest, x_provider_secret: Optional[str]) -> bytes:
+    if req.file_content_b64:
+        try:
+            return base64.b64decode(req.file_content_b64, validate=True)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"invalid_file_content_b64: {exc}")
     if req.input_base64:
         try:
             return base64.b64decode(req.input_base64, validate=True)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"invalid_input_base64: {exc}")
+    if req.download_url:
+        try:
+            resp = requests.get(req.download_url, timeout=120)
+            resp.raise_for_status()
+            return resp.content
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"download_url_fetch_failed:{exc}")
     if req.input_url:
         headers: Dict[str, str] = {}
         expected_secret = env("PROVIDER_SECRET", "aorticai-internal-2026").strip()
@@ -420,6 +434,7 @@ async def infer(request: Request, x_provider_secret: Optional[str] = Header(defa
             r2_key=str(form.get("r2_key") or ""),
             patient_id=str(form.get("patient_id") or ""),
             input_content_type=str(getattr(upload, "content_type", "application/octet-stream")),
+            skip_segmentation=str(form.get("skip_segmentation") or "false").strip().lower() in {"1", "true", "yes", "on"},
             callback=CallbackSpec(),
             callback_url=str(form.get("callback_url") or ""),
             status_url=str(form.get("status_url") or ""),
@@ -429,7 +444,23 @@ async def infer(request: Request, x_provider_secret: Optional[str] = Header(defa
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="invalid_json_payload")
         req = InferenceRequest(**payload)
-        input_bytes = load_input_bytes(req, x_provider_secret)
+        try:
+            input_bytes = load_input_bytes(req, x_provider_secret)
+        except Exception as exc:
+            provider_job_id = f"provider-failed-{int(time.time() * 1000)}"
+            if isinstance(exc, HTTPException):
+                message = f"HTTPException: {exc.detail}"
+            else:
+                message = public_error_message(exc)
+            post_stage_status(req, stage="failed", progress=100, status="failed", detail=message)
+            post_error_callback(req, provider_job_id, message)
+            post_simple_completion_callback(req, status="failed", error_message=message)
+            return {
+                "status": "failed",
+                "job_id": req.job_id,
+                "provider_job_id": provider_job_id,
+                "error_message": message,
+            }
 
     max_input_bytes = int(env("MAX_INPUT_BYTES", str(900 * 1024 * 1024)))
     if len(input_bytes) > max_input_bytes:

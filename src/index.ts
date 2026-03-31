@@ -38,6 +38,7 @@ interface Env {
   INFERENCE_MODE?: string;
   INFERENCE_WEBHOOK_TIMEOUT_MS?: string;
   INFERENCE_MAX_INPUT_BYTES?: string;
+  INFERENCE_SKIP_SEGMENTATION?: string;
   PROVIDER_URL?: string;
   PROVIDER_HEALTH_URL?: string;
   PROVIDER_SECRET?: string;
@@ -1747,6 +1748,7 @@ async function getJobStatus(jobId: string, env: Env): Promise<Response> {
     progress: Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0,
     result_case_id: resultCaseId,
     stage,
+    error_message: nullableString(row.error_message),
   });
 }
 
@@ -3053,6 +3055,32 @@ async function dispatchToInferenceWebhook(
   const statusUrl = normalizedBase ? `${normalizedBase}/api/jobs/${encodeURIComponent(payload.job_id)}/status` : null;
   const simpleCallbackUrl = normalizedBase ? `${normalizedBase}/api/jobs/${encodeURIComponent(payload.job_id)}/callback` : null;
   const inputUrl = normalizedBase ? `${normalizedBase}/api/jobs/${encodeURIComponent(payload.job_id)}/input` : null;
+  const skipSegmentation = parseBooleanLike(env.INFERENCE_SKIP_SEGMENTATION);
+
+  let downloadUrl: string | null = null;
+  let fileContentB64: string | null = null;
+
+  const rawHead = await env.R2_RAW.head(payload.image_key);
+  const rawSize = Number(rawHead?.size ?? 0);
+  const base64ThresholdBytes = 50 * 1024 * 1024;
+
+  if (rawSize > 0 && rawSize <= base64ThresholdBytes) {
+    const srcObj = await env.R2_RAW.get(payload.image_key);
+    if (!srcObj) throw new Error("raw_object_missing_for_webhook_payload");
+    const srcBuf = await srcObj.arrayBuffer();
+    fileContentB64 = arrayBufferToBase64(srcBuf);
+  } else {
+    const bucketAny = env.R2_RAW as unknown as {
+      createPresignedUrl?: (method: "GET" | "PUT", key: string, options?: { expiresIn?: number }) => Promise<string>;
+    };
+    if (typeof bucketAny.createPresignedUrl === "function") {
+      try {
+        downloadUrl = await bucketAny.createPresignedUrl("GET", payload.image_key, { expiresIn: 3600 });
+      } catch {
+        downloadUrl = null;
+      }
+    }
+  }
 
   const reqBody = {
     job_id: payload.job_id,
@@ -3060,8 +3088,11 @@ async function dispatchToInferenceWebhook(
     patient_id: payload.patient_id ?? null,
     image_key: payload.image_key,
     r2_key: payload.image_key,
+    download_url: downloadUrl,
+    file_content_b64: fileContentB64,
     input_url: inputUrl,
     requested_at: payload.requested_at,
+    skip_segmentation: skipSegmentation,
     callback_url: simpleCallbackUrl,
     status_url: statusUrl,
     callback: {
@@ -3319,6 +3350,11 @@ function parsePositiveInt(v: string | undefined, fallback: number): number {
   const x = Number.parseInt(v, 10);
   if (!Number.isFinite(x) || x <= 0) return fallback;
   return x;
+}
+
+function parseBooleanLike(v: string | undefined): boolean {
+  const raw = String(v || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {

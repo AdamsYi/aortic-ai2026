@@ -622,6 +622,30 @@ def run_geometry_pipeline(
     return sanitize_for_json(payload), artifacts_manifest
 
 
+def build_synthetic_multiclass_for_skip(ct_shape: tuple[int, int, int]) -> np.ndarray:
+    sx, sy, sz = ct_shape
+    cx = sx / 2.0
+    cy = sy / 2.0
+    x, y = np.meshgrid(np.arange(sx, dtype=np.float32), np.arange(sy, dtype=np.float32), indexing="ij")
+
+    labels = np.zeros(ct_shape, dtype=np.uint8)
+    for z in range(sz):
+        z_ratio = z / max(1, sz - 1)
+        if z_ratio < 0.35:
+            r_x, r_y = 14.0, 13.0
+        elif z_ratio < 0.58:
+            r_x, r_y = 17.0, 16.0
+        else:
+            r_x, r_y = 15.0, 14.0
+        eq = ((x - cx) ** 2) / (r_x**2) + ((y - cy) ** 2) / (r_y**2)
+        lumen = eq <= 1.0
+        shell = (eq > 0.72) & (eq <= 0.92)
+        labels[:, :, z][lumen] = 1 if z < int(sz * 0.58) else 3
+        labels[:, :, z][shell & (z >= int(sz * 0.26)) & (z <= int(sz * 0.48))] = 2
+    labels[:, :, int(sz * 0.58) :] = np.where(labels[:, :, int(sz * 0.58) :] == 1, 3, labels[:, :, int(sz * 0.58) :])
+    return labels
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
@@ -631,6 +655,8 @@ def main() -> None:
     ap.add_argument("--quality", default="high", choices=["high", "fast"])
     ap.add_argument("--job-id", default="")
     ap.add_argument("--study-id", default="")
+    ap.add_argument("--skip-segmentation", action="store_true")
+    ap.add_argument("--input-mask", default="")
     args = ap.parse_args()
 
     in_path = Path(args.input).resolve()
@@ -640,33 +666,53 @@ def main() -> None:
     out_mask.parent.mkdir(parents=True, exist_ok=True)
     out_json.parent.mkdir(parents=True, exist_ok=True)
 
-    builder_py = Path(__file__).resolve().with_name("build_real_multiclass_mask.py")
-    if not builder_py.exists():
-        raise FileNotFoundError("build_real_multiclass_mask.py not found in gpu_provider/")
-
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="aortic-pipeline-") as td:
         work_dir = Path(td)
         nifti_input, prep_meta = prepare_nifti_input(in_path, work_dir)
+        builder_meta: dict[str, Any] = {}
 
-        builder_meta_path = work_dir / "builder_meta.json"
-        cmd = [
-            sys.executable,
-            str(builder_py),
-            "--input",
-            str(nifti_input),
-            "--output",
-            str(out_mask),
-            "--meta",
-            str(builder_meta_path),
-            "--device",
-            args.device,
-            "--quality",
-            args.quality,
-        ]
-        run_cmd(cmd)
-
-        builder_meta = parse_builder_meta(builder_meta_path)
+        if args.skip_segmentation:
+            input_mask_path = Path(args.input_mask).resolve() if args.input_mask else None
+            if input_mask_path and input_mask_path.exists():
+                shutil.copy2(input_mask_path, out_mask)
+                builder_meta = {
+                    "segmentation_mode": "skipped_external_mask",
+                    "input_mask": str(input_mask_path),
+                    "device": "cpu",
+                    "quality": "fast",
+                }
+            else:
+                ct_nii = nib.load(str(nifti_input))
+                labels = build_synthetic_multiclass_for_skip(tuple(int(v) for v in ct_nii.shape[:3]))
+                nib.save(nib.Nifti1Image(labels.astype(np.uint8), ct_nii.affine), str(out_mask))
+                builder_meta = {
+                    "segmentation_mode": "skipped_synthetic_mask",
+                    "reason": "skip_segmentation_without_input_mask",
+                    "device": "cpu",
+                    "quality": "fast",
+                }
+        else:
+            builder_py = Path(__file__).resolve().with_name("build_real_multiclass_mask.py")
+            if not builder_py.exists():
+                raise FileNotFoundError("build_real_multiclass_mask.py not found in gpu_provider/")
+            builder_meta_path = work_dir / "builder_meta.json"
+            cmd = [
+                sys.executable,
+                str(builder_py),
+                "--input",
+                str(nifti_input),
+                "--output",
+                str(out_mask),
+                "--meta",
+                str(builder_meta_path),
+                "--device",
+                args.device,
+                "--quality",
+                args.quality,
+            ]
+            run_cmd(cmd)
+            builder_meta = parse_builder_meta(builder_meta_path)
         builder_meta.setdefault("device", args.device)
         builder_meta.setdefault("quality", args.quality)
         result_payload, artifacts_meta = run_geometry_pipeline(
