@@ -19,6 +19,25 @@
         "clinician_review_required": false
       }
     },
+    "area_derived_valve_size": {
+      "value": {
+        "area_mm2": 507.0,
+        "derived_diameter_mm": 25.4,
+        "nearest_nominal_size_mm": 26
+      },
+      "unit": "mm",
+      "evidence": {
+        "method": "annulus_area_to_nominal_size_mapping",
+        "source_type": "device_ifu",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.89
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Area-derived size is an estimate from annulus area and should be confirmed in final planning review.",
+        "clinician_review_required": true
+      }
+    },
     "recommended_prosthesis": {
       "value": {
         "primary": {

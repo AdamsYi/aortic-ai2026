@@ -1,6 +1,7 @@
 const zhCN = {
-  'app.title': 'AorticAI 结构性心脏工作站',
-  'app.subtitle': '金标准展示病例 · 真实 CTA 工作站演示',
+  'app.title': 'AorticAI — Structural Heart Planning',
+  'app.brand': 'AorticAI',
+  'app.subtitle': 'Structural Heart Planning Platform',
   'action.open_showcase': '展示病例',
   'action.load_case': '最新病例',
   'action.focus_annulus': '瓣环',
@@ -104,6 +105,8 @@ const zhCN = {
   'section.coronary': '冠脉',
   'section.leaflet': '瓣叶',
   'qa.placeholder_case': '展示参考病例',
+  'footer.research_only': '仅供研究使用，不作为临床诊断依据',
+  'planning.recommendation_reason': '推荐理由',
 };
 
 export default zhCN;

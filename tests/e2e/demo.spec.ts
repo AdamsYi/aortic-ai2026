@@ -66,7 +66,7 @@ test("latest case stays stable through core viewing interactions", async ({ page
   await expect(page.locator("#viewport-footer-coronal")).not.toContainText("slice —");
   await page.locator("[data-tool-mode='windowLevel']").click();
   await page.locator("#window-preset").selectOption("calcium");
-  await page.locator("#viewport-axial").hover();
+  await page.locator("#viewport-axial").hover({ force: true });
   await page.mouse.wheel(0, 240);
   await page.locator("#focus-annulus").click();
   const coronaryButton = page.locator("#focus-coronary");

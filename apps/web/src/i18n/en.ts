@@ -1,6 +1,7 @@
 const en = {
-  'app.title': 'AorticAI Structural Heart Workstation',
-  'app.subtitle': 'Gold showcase case · real CTA workstation demo',
+  'app.title': 'AorticAI — Structural Heart Planning',
+  'app.brand': 'AorticAI',
+  'app.subtitle': 'Structural Heart Planning Platform',
   'action.open_showcase': 'Showcase',
   'action.load_case': 'Latest Case',
   'action.focus_annulus': 'Annulus',
@@ -104,6 +105,8 @@ const en = {
   'section.coronary': 'Coronary',
   'section.leaflet': 'Leaflet',
   'qa.placeholder_case': 'Showcase reference',
+  'footer.research_only': 'For research use only',
+  'planning.recommendation_reason': 'Recommendation rationale',
 };
 
 export default en;

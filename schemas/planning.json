@@ -22,6 +22,7 @@
       ],
       "properties": {
         "valve_size_suggestion": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "area_derived_valve_size": { "$ref": "common.json#/$defs/ScalarMeasurement" },
         "recommended_prosthesis": { "$ref": "common.json#/$defs/ScalarMeasurement" },
         "access_route": { "$ref": "common.json#/$defs/ScalarMeasurement" },
         "coronary_obstruction_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },

@@ -301,6 +301,14 @@
       }
     }
   },
+  "annulus": {
+    "equivalent_diameter_mm": 25.4
+  },
+  "coronary_detection": {
+    "clinician_review_required": true,
+    "status": "review_required",
+    "note": "Coronary detection is available but still requires clinician confirmation before planning decisions."
+  },
   "constraints": {
     "sinus_annulus_relation": {
       "status": "normal",

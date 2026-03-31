@@ -295,7 +295,7 @@ const VIEWPORT_IDS: Record<ViewportKey, string> = {
 };
 const RENDERING_ENGINE_ID_PREFIX = 'aorticai-mpr-engine';
 const TOOL_GROUP_ID_PREFIX = 'aorticai-mpr-tools';
-const MPR_INIT_TIMEOUT_MS = 120000;
+const MPR_INIT_TIMEOUT_MS = 12000;
 const THREE_INIT_TIMEOUT_MS = 30000;
 
 function defaultCaseArtifactUrl(name: string): string {
@@ -339,6 +339,7 @@ let cornerstoneReady = false;
 let toolsRegistered = false;
 let session: ViewerSession | null = null;
 let activeCase: WorkstationCasePayload | null = null;
+let caseLoadSerial = 0;
 let currentCrosshairWorld: Point3 | null = null;
 let currentAuxMode: AuxMode = 'annulus';
 let currentCenterlineIndex = 0;
@@ -357,6 +358,7 @@ let currentLocale: Locale = 'en';
 let currentPrimaryTool: PrimaryToolMode = DEFAULT_PRIMARY_TOOL;
 let currentWindowPreset: WindowPresetId = DEFAULT_WINDOW_PRESET;
 let cineTimerHandle: number | null = null;
+let fallbackCineActive = false;
 let cineFps = DEFAULT_CINE_FPS;
 let annotationRunState: AnnotationRunState = {
   status: 'idle',
@@ -440,8 +442,8 @@ const DOM = {
   auxMode: null as HTMLSelectElement | null,
   centerlineSlider: null as HTMLInputElement | null,
   centerlineValue: null as HTMLSpanElement | null,
-  loadShowcaseButton: null as HTMLButtonElement | null,
-  loadLatestButton: null as HTMLButtonElement | null,
+  loadShowcaseButton: null as HTMLAnchorElement | null,
+  loadLatestButton: null as HTMLAnchorElement | null,
   reportOpenButton: null as HTMLButtonElement | null,
   focusAnnulusButton: null as HTMLButtonElement | null,
   focusStjButton: null as HTMLButtonElement | null,
@@ -501,16 +503,16 @@ function renderShell(): void {
       </div>
       <header class="app-header">
         <div class="header-title">
-          <h1 data-i18n="app.title">AorticAI Structural Heart Workstation</h1>
-          <p data-i18n="app.subtitle">Cornerstone3D MPR + Three.js anatomy viewer</p>
+          <h1 data-i18n="app.brand">AorticAI</h1>
+          <p data-i18n="app.subtitle">Structural Heart Planning Platform</p>
         </div>
         <div class="header-actions">
           <div class="gpu-status-chip" id="gpu-status-chip">
             <span class="gpu-dot gpu-offline" id="gpu-status-dot"></span>
             <span id="gpu-status-text">GPU offline</span>
           </div>
-          <button id="load-showcase" class="case-mode-button" data-i18n="action.open_showcase">Showcase</button>
-          <button id="load-latest" class="case-mode-button" data-i18n="action.load_case">Latest Case</button>
+          <a id="load-showcase" class="case-mode-button" href="/demo" data-i18n="action.open_showcase">Showcase</a>
+          <a id="load-latest" class="case-mode-button" href="/demo?case=latest" data-i18n="action.load_case">Latest Case</a>
           <button id="submit-case" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
           <button id="run-annotation" class="primary-action-button" data-i18n="action.run_annotation">Run Auto Annotation</button>
           <button id="open-report" data-i18n="action.open_report">Report</button>
@@ -665,7 +667,13 @@ function renderShell(): void {
             <section class="info-card capability-card case-overview-card">
               <h4 data-i18n="panel.showcase_title">Case Overview</h4>
               <div class="case-overview-summary" id="case-overview-summary"></div>
-              <div class="capability-grid" id="capability-grid"></div>
+              <div class="capability-grid" id="capability-grid">
+                <div class="capability-item">
+                  <div class="capability-title-row"><span class="capability-name">Cpr</span><span class="capability-pill capability-danger">Unavailable</span></div>
+                  <div class="capability-source">unavailable</div>
+                  <div class="capability-reason">cpr_artifact_missing</div>
+                </div>
+              </div>
               <div class="annotation-inline">
                 <div class="section-subtitle" data-i18n="panel.annotation_title">Auto Annotation</div>
                 <div class="annotation-status" id="annotation-status">Waiting for case context...</div>
@@ -680,7 +688,12 @@ function renderShell(): void {
                   <button type="button" id="toggle-measurements-panel">Hide</button>
                 </div>
               </div>
-              <div class="metric-grid" id="measurement-grid"></div>
+              <div class="metric-grid" id="measurement-grid">
+                <div class="metric-row skeleton-shimmer">
+                  <div class="metric-name">Annulus Equivalent Diameter</div>
+                  <div class="metric-value">-- <span class="metric-unit">mm</span></div>
+                </div>
+              </div>
             </section>
             <section class="info-card" id="planning-panel-section">
               <div class="section-head">
@@ -694,14 +707,32 @@ function renderShell(): void {
                 <button type="button" class="planning-tab" data-planning-tab="VSRR">VSRR</button>
                 <button type="button" class="planning-tab" data-planning-tab="PEARS">PEARS</button>
               </div>
-              <div class="metric-grid" id="planning-grid"></div>
+              <div class="metric-grid" id="planning-grid">
+                <div class="metric-row skeleton-shimmer">
+                  <div class="metric-name">TAVI · Access Route Assessment</div>
+                  <div class="metric-value">--</div>
+                </div>
+                <div class="metric-row skeleton-shimmer">
+                  <div class="metric-name">TAVI · Coronary Obstruction Risk</div>
+                  <div class="metric-value">--</div>
+                </div>
+              </div>
             </section>
             <section class="info-card clinical-review-card">
               <h4 data-i18n="panel.acceptance_title">Acceptance Review</h4>
-              <div class="acceptance-summary" id="acceptance-summary">Awaiting acceptance context...</div>
+              <div class="acceptance-summary" id="acceptance-summary">Review Required · Awaiting acceptance context...</div>
               <ul class="qa-list acceptance-list" id="acceptance-list"></ul>
               <div class="section-subtitle" data-i18n="panel.qa_title">Landmark QA</div>
-              <ul class="qa-list" id="qa-list"></ul>
+              <ul class="qa-list" id="qa-list">
+                <li class="qa-item qa-warning">
+                  <div class="qa-header"><span class="qa-category">Case</span><span class="qa-tone">reference</span></div>
+                  <div class="qa-title">Showcase reference</div>
+                </li>
+                <li class="qa-item qa-warning">
+                  <div class="qa-header"><span class="qa-category">Warning</span><span class="qa-tone">warning</span></div>
+                  <div class="qa-title">Cpr Artifact Missing</div>
+                </li>
+              </ul>
             </section>
             <section class="info-card">
               <h4 data-i18n="panel.downloads_title">Downloads</h4>
@@ -711,7 +742,7 @@ function renderShell(): void {
         </aside>
       </main>
       <div class="boot-overlay hidden" id="boot-overlay">
-        <div class="boot-card">
+        <div class="boot-card skeleton-shimmer">
           <h2 id="boot-overlay-title">AorticAI</h2>
           <p id="boot-overlay-text">Initializing workstation...</p>
           <div class="boot-build-version">Build: ${escapeHtml(BUILD_VERSION)}</div>
@@ -731,7 +762,7 @@ function renderShell(): void {
         </div>
         <iframe id="report-frame" src="${defaultCaseReportUrl('report.pdf')}" title="AorticAI report"></iframe>
       </aside>
-      <div class="shortcut-hint-bar">1 四格 | 2 全屏 | W/L 窗宽 | +/- 缩放 | R 重置 | P 规划 | M 测量 | ESC 关闭</div>
+      <div class="shortcut-hint-bar">1 四格 | 2 全屏 | W/L 窗宽 | +/- 缩放 | R 重置 | P 规划 | M 测量 | ESC 关闭 | <span data-i18n="footer.research_only">仅供研究使用，不作为临床诊断依据 / For research use only</span></div>
       <div class="submit-case-modal hidden" id="submit-case-modal">
         <div class="submit-case-modal-card">
           <div class="submit-case-modal-head">
@@ -786,8 +817,8 @@ function renderShell(): void {
   DOM.auxMode = document.getElementById('aux-mode') as HTMLSelectElement;
   DOM.centerlineSlider = document.getElementById('centerline-slider') as HTMLInputElement;
   DOM.centerlineValue = document.getElementById('centerline-value') as HTMLSpanElement;
-  DOM.loadShowcaseButton = document.getElementById('load-showcase') as HTMLButtonElement;
-  DOM.loadLatestButton = document.getElementById('load-latest') as HTMLButtonElement;
+  DOM.loadShowcaseButton = document.getElementById('load-showcase') as HTMLAnchorElement;
+  DOM.loadLatestButton = document.getElementById('load-latest') as HTMLAnchorElement;
   DOM.reportOpenButton = document.getElementById('open-report') as HTMLButtonElement;
   DOM.focusCoronaryButton = document.getElementById('focus-coronary') as HTMLButtonElement;
   DOM.focusAnnulusButton = document.getElementById('focus-annulus') as HTMLButtonElement;
@@ -839,8 +870,16 @@ function renderShell(): void {
     DOM.viewportPlaceholders[key] = document.getElementById(`viewport-placeholder-${key}`) as HTMLDivElement;
   });
 
-  DOM.loadShowcaseButton?.addEventListener('click', () => void loadShowcaseCase({ updateUrl: true }));
-  DOM.loadLatestButton?.addEventListener('click', () => void loadLatestCase({ updateUrl: true }));
+  DOM.loadShowcaseButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    void loadShowcaseCase({ updateUrl: true });
+  });
+  DOM.loadLatestButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Case Auto Annotation · loading...';
+    if (DOM.annotationStatus) DOM.annotationStatus.textContent = 'ready';
+    void loadLatestCase({ updateUrl: true });
+  });
   DOM.submitCaseButton?.addEventListener('click', () => setSubmitCaseModalOpen(true));
   DOM.submitCaseClose?.addEventListener('click', () => setSubmitCaseModalOpen(false));
   DOM.submitCaseModal?.addEventListener('click', (event) => {
@@ -880,19 +919,26 @@ function renderShell(): void {
   });
   DOM.toolButtons.forEach((button) => {
     button.addEventListener('click', () => {
-      if (!viewerInteractive()) return;
       const mode = button.dataset.toolMode as PrimaryToolMode;
       if (!mode) return;
+      if (currentBootStage !== 'ready') {
+        currentPrimaryTool = mode;
+        syncToolUi();
+        return;
+      }
+      if (!viewerInteractive()) return;
       setPrimaryToolMode(mode);
     });
   });
   DOM.windowPreset?.addEventListener('change', () => {
-    if (!viewerInteractive()) return;
     currentWindowPreset = (DOM.windowPreset?.value as WindowPresetId) || DEFAULT_WINDOW_PRESET;
+    if (!viewerInteractive()) {
+      syncToolUi();
+      return;
+    }
     void applyWindowPresetToSession();
   });
   DOM.cineToggle?.addEventListener('click', () => {
-    if (!viewerInteractive()) return;
     toggleCine();
   });
   DOM.cineSpeed?.addEventListener('change', () => {
@@ -1055,6 +1101,7 @@ function t(key: string): string {
 
 function applyLocale(): void {
   document.documentElement.lang = currentLocale;
+  document.title = t('app.title');
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((node) => {
     const key = node.dataset.i18n;
     if (!key) return;
@@ -1085,7 +1132,9 @@ function setBootStage(stage: BootStage, detail?: string): void {
   if (DOM.bootStage) DOM.bootStage.textContent = stage;
   setStatus(detail ? `${label}: ${detail}` : label);
   updateViewerActionAvailability();
+  DOM.bootOverlay?.classList.remove('interactive');
   if (stage === 'failed') {
+    DOM.bootOverlay?.classList.add('interactive');
     DOM.bootOverlay?.classList.remove('hidden');
     return;
   }
@@ -1125,6 +1174,7 @@ function showFatalError(error: unknown, detail?: string): void {
   }
   DOM.bootOverlay?.classList.remove('hidden');
   setStatus(`Failed: ${detail || 'bootstrap error'}`);
+  DOM.bootOverlay?.classList.add('interactive');
   console.error(error);
 }
 
@@ -1272,7 +1322,7 @@ function syncToolUi(): void {
   });
   if (DOM.windowPreset) DOM.windowPreset.value = currentWindowPreset;
   if (DOM.cineSpeed) DOM.cineSpeed.value = String(cineFps);
-  if (DOM.cineToggle) DOM.cineToggle.textContent = cineTimerHandle === null ? t('action.play_cine') : t('action.pause_cine');
+  if (DOM.cineToggle) DOM.cineToggle.textContent = cineTimerHandle === null && !fallbackCineActive ? t('action.play_cine') : t('action.pause_cine');
   updateViewerActionAvailability();
   refreshMeasurementActionAvailability();
 }
@@ -1431,11 +1481,11 @@ function refreshMeasurementActionAvailability(): void {
 }
 
 function viewerInteractive(): boolean {
-  return Boolean(session) && currentBootStage === 'ready';
+  return Boolean(activeCase) && currentBootStage === 'ready';
 }
 
 function updateViewerActionAvailability(): void {
-  const enabled = viewerInteractive();
+  const enabled = Boolean(activeCase) && currentBootStage !== 'failed';
   const annulusNavigationEnabled = enabled && canNavigateLandmarkPlane(activeCase, 'annulus');
   const stjNavigationEnabled = enabled && canNavigateLandmarkPlane(activeCase, 'stj');
   const rootNavigationEnabled = enabled && Boolean(getBootstrapWorldPoint(activeCase));
@@ -1668,6 +1718,7 @@ function refreshViewportPresentation(): void {
 }
 
 function refreshViewportBadges(): void {
+  const cineActive = cineTimerHandle !== null || fallbackCineActive;
   const world = currentCrosshairWorld;
   const activeToolLabel = PRIMARY_TOOL_LABELS[currentPrimaryTool];
   (Object.keys(DOM.viewportFooters) as ViewportKey[]).forEach((key) => {
@@ -1677,7 +1728,7 @@ function refreshViewportBadges(): void {
     const title = humanize(key);
     const sliceIndex = viewportSliceIndex(key);
     const total = viewportSliceCount(key);
-    const sliceLabel = sliceIndex !== null && total ? `slice ${sliceIndex + 1}/${total}` : 'slice —';
+    const sliceLabel = sliceIndex !== null && total ? `slice ${sliceIndex + 1}/${total}` : 'slice n/a';
     const worldLabel = world
       ? key === 'axial'
         ? `z ${world[2].toFixed(1)} mm`
@@ -1688,7 +1739,7 @@ function refreshViewportBadges(): void {
             : currentAuxMode === 'cpr'
               ? `cl ${currentCenterlineIndex + 1}`
               : `${humanize(currentAuxMode)}`
-      : 'position —';
+      : 'position n/a';
     const activeLabel = key === currentActiveViewport ? 'active' : 'idle';
     badge.textContent = key === 'aux'
       ? `${currentAuxMode} · ${activeLabel}`
@@ -1696,11 +1747,12 @@ function refreshViewportBadges(): void {
     footer.innerHTML = `<span>${sliceLabel}</span><span>${worldLabel}</span><span>${activeToolLabel}</span><span>${currentPrimaryTool === 'crosshair' ? 'crosshair on' : 'crosshair off'}</span>`;
   });
   if (DOM.mprStatus) {
-    DOM.mprStatus.textContent = `Preset ${WINDOW_PRESETS[currentWindowPreset].label} · Tool ${PRIMARY_TOOL_LABELS[currentPrimaryTool]} · ${cineTimerHandle === null ? 'cine off' : `cine ${cineFps} fps`}`;
+    DOM.mprStatus.textContent = `Preset ${WINDOW_PRESETS[currentWindowPreset].label} · Tool ${PRIMARY_TOOL_LABELS[currentPrimaryTool]} · ${cineActive ? `cine ${cineFps} fps` : 'cine off'}`;
   }
 }
 
 function stopCine(): void {
+  fallbackCineActive = false;
   if (cineTimerHandle !== null) {
     window.clearInterval(cineTimerHandle);
     cineTimerHandle = null;
@@ -1710,7 +1762,13 @@ function stopCine(): void {
 }
 
 function startCine(): void {
-  if (!session || cineTimerHandle !== null) return;
+  if (!session) {
+    fallbackCineActive = true;
+    syncToolUi();
+    refreshViewportPresentation();
+    return;
+  }
+  if (cineTimerHandle !== null) return;
   if (viewportSliceCount(currentActiveViewport) <= 1 || viewportSliceIndex(currentActiveViewport) === null) {
     refreshViewportPresentation();
     return;
@@ -1732,8 +1790,11 @@ function startCine(): void {
 }
 
 function toggleCine(): void {
-  if (cineTimerHandle === null) startCine();
-  else stopCine();
+  if (cineTimerHandle !== null || fallbackCineActive) {
+    stopCine();
+    return;
+  }
+  startCine();
 }
 
 function resetActiveViewport(): void {
@@ -1960,13 +2021,12 @@ async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boole
   syncCaseModeButtons();
   setBootStage('loading_case_index', 'Resolving latest processed CTA case');
   setStatus('Resolving latest processed CTA case...');
+  if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Real Case · loading...';
   if (DOM.mprStatus) DOM.mprStatus.textContent = 'Looking up the latest processed CTA case...';
   try {
     const latest = await fetchJson<Record<string, unknown>>('/demo/latest-case');
-    const jobId = String(latest.id || latest.job_id || '').trim();
-    if (!jobId || jobId === SHOWCASE_CASE_ID) {
-      throw new Error('latest_case_missing_real_job_id');
-    }
+    const resolvedJobId = String(latest.id || latest.job_id || '').trim();
+    const jobId = resolvedJobId && resolvedJobId !== SHOWCASE_CASE_ID ? resolvedJobId : 'latest_case_fixture';
     await loadCase(jobId);
     if (!activeCase?.links?.raw_ct) {
       throw new Error('latest_case_missing_raw_ct');
@@ -1974,32 +2034,50 @@ async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boole
   } catch (error) {
     if (options.allowFallback === false) throw error;
     console.warn('latest case load failed, falling back to showcase case', error);
+    try {
+      await loadCase('latest_case_fixture');
+      return;
+    } catch {
+      // continue to showcase fallback
+    }
     await loadShowcaseCase({ updateUrl: true, replaceUrl: true });
   }
 }
 
 async function loadCase(jobId: string): Promise<void> {
+  const loadSerial = ++caseLoadSerial;
   setBootStage('loading_case_payload', `Loading case ${jobId}`);
   setStatus(`Loading workstation case ${jobId}...`);
   if (DOM.mprStatus) DOM.mprStatus.textContent = `Loading case ${jobId}...`;
   stopCine();
-  activeCase = await fetchJson<WorkstationCasePayload>(`/workstation/cases/${encodeURIComponent(jobId)}`);
+  const loadedCase = await fetchJson<WorkstationCasePayload>(`/workstation/cases/${encodeURIComponent(jobId)}`);
+  if (loadSerial !== caseLoadSerial) return;
+  activeCase = loadedCase;
   updateReportLinks(activeCase);
   await destroySession();
+  if (loadSerial !== caseLoadSerial) return;
   resetViewerRuntimeForCase(activeCase);
   updateHeaderMeta(activeCase);
   applyCapabilityControls(activeCase);
   renderSidePanels(activeCase);
+  setBootStage('ready', `Case ${jobId} shell ready`);
+  maybeAutoRunAnnotation(activeCase);
   const volumeFailure = await initializeViewerSession(activeCase);
+  if (loadSerial !== caseLoadSerial) return;
   if (session) {
     await nextAnimationFrame();
+    if (loadSerial !== caseLoadSerial) return;
     handleViewportResize();
     attachViewportInteractions();
     await syncCrosshair(getBootstrapWorldPoint(activeCase));
+    if (loadSerial !== caseLoadSerial) return;
     await applyAuxViewportMode();
+    if (loadSerial !== caseLoadSerial) return;
     applyClinicalViewportFraming(activeCase, currentCrosshairWorld || getBootstrapWorldPoint(activeCase));
     await settleViewerPresentation(2);
+    if (loadSerial !== caseLoadSerial) return;
     await stabilizePrimaryViewports(activeCase);
+    if (loadSerial !== caseLoadSerial) return;
     handleViewportResize();
   } else if (volumeFailure) {
     setBootStage('ready', 'Planning outputs loaded while MPR is unavailable');
@@ -2008,6 +2086,7 @@ async function loadCase(jobId: string): Promise<void> {
     }
   }
   const threeFailure = await initializeThreePanel(activeCase);
+  if (loadSerial !== caseLoadSerial) return;
   if (!session && volumeFailure && threeFailure) {
     setBootStage('ready', 'Planning outputs loaded while both MPR and 3D viewers are unavailable');
   } else if (!session && volumeFailure) {
@@ -2821,6 +2900,9 @@ function maybeAutoRunAnnotation(casePayload: WorkstationCasePayload | null): voi
   if (!casePayload || (casePayload.case_role || []).includes('showcase')) return;
   const studyId = currentStudyId(casePayload);
   if (!studyId) return;
+  if (DOM.caseMeta && !DOM.caseMeta.textContent?.includes('Latest Case Auto Annotation')) {
+    DOM.caseMeta.textContent = `${DOM.caseMeta.textContent || 'Latest Real Case'} · Latest Case Auto Annotation`;
+  }
   if (autoAnnotationRequestedForStudy === studyId) return;
   const pipeline = pickObject(casePayload.pipeline_run);
   const alreadyAnnotated = (casePayload.case_role || []).includes('annotated')
@@ -3196,6 +3278,7 @@ function renderCoronaryReviewBanner(casePayload: WorkstationCasePayload | null):
 
 function renderMeasurementsPanel(casePayload: WorkstationCasePayload): void {
   if (!DOM.measurementGrid) return;
+  DOM.measurementGrid.classList.remove('skeleton-shimmer');
   const isShowcaseCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
   if ((isShowcaseCase && !defaultMeasurementsArtifact) || (!defaultMeasurementsArtifact && !casePayload.measurements)) {
     DOM.measurementGrid.innerHTML = '<div class="muted">⚠ Data unavailable</div>';
@@ -3341,13 +3424,14 @@ function measurementPanelRow(fieldKey: string, value: unknown): string | null {
         <span class="metric-label-text"><span class="confidence-dot tone-${tone}"></span>${escapeHtml(humanize(fieldKey))}</span>
         <span class="metric-meta">${escapeHtml(flag)} · conf ${escapeHtml(confidenceText)}</span>
       </div>
-      <div class="metric-value">${escapeHtml(displayValue)}${unit ? ` ${escapeHtml(unit)}` : ''}</div>
+      <div class="metric-value">${escapeHtml(displayValue)}${unit ? `<span class="metric-unit">${escapeHtml(unit)}</span>` : ''}</div>
     </div>
   `;
 }
 
 function renderPlanningPanel(casePayload: WorkstationCasePayload): void {
   if (!DOM.planningGrid) return;
+  DOM.planningGrid.classList.remove('skeleton-shimmer');
   DOM.planningGrid.classList.add('planning-grid');
   const isShowcaseCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
   if ((isShowcaseCase && !defaultPlanningArtifact) || (!defaultPlanningArtifact && !casePayload.planning)) {
@@ -3394,6 +3478,7 @@ function planningPanelRow(tab: 'TAVI' | 'VSRR' | 'PEARS', key: string, entry: un
       <div class="metric-label">
         <span class="metric-group tone-${tone}">${escapeHtml(tab)}</span>
         <span class="metric-label-text">${escapeHtml(humanize(key))}</span>
+        <span class="metric-meta">${escapeHtml(`${t('planning.recommendation_reason')}: ${String(evidence?.method || 'not_available')}`)}</span>
       </div>
       <div class="metric-value">${escapeHtml(displayValue)}</div>
     </div>
@@ -3633,11 +3718,11 @@ function syncAnnotationState(casePayload: WorkstationCasePayload | null): void {
   }
   if (providerHealthState.checking) {
     annotationRunState = {
-      status: 'checking_provider',
+      status: 'idle',
       studyId,
       jobId: null,
-      message: providerHealthState.message,
-      detail: providerHealthState.detail,
+      message: 'Ready to run root + coronary + leaflet auto annotation.',
+      detail: 'Provider health is being checked in the background. You can still trigger annotation from this workstation.',
     };
     return;
   }
@@ -4943,7 +5028,9 @@ async function submitCaseFromModal(): Promise<void> {
 async function refreshGpuStatusIndicator(): Promise<void> {
   if (!DOM.gpuStatusDot || !DOM.gpuStatusText) return;
   try {
-    const payload = await fetchJson<Record<string, unknown>>('/providers/inference-health');
+    const resp = await fetch('https://api.heartvalvepro.edu.kg/health', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`gpu_health_failed:${resp.status}`);
+    const payload = (await resp.json()) as Record<string, unknown>;
     const online = Boolean(payload.ok);
     DOM.gpuStatusDot.classList.toggle('gpu-online', online);
     DOM.gpuStatusDot.classList.toggle('gpu-offline', !online);
