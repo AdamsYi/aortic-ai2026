@@ -64,6 +64,7 @@ class InferenceResponse(BaseModel):
 
 
 app = FastAPI(title="Aortic AI GPU Provider", version="1.0.0")
+PROVIDER_CONFIG_PATH = Path(__file__).resolve().with_name("provider_config.json")
 
 
 def env(name: str, default: str) -> str:
@@ -71,6 +72,17 @@ def env(name: str, default: str) -> str:
     if value is None:
         return default
     return value
+
+
+def load_provider_config() -> Dict[str, Any]:
+    try:
+        if PROVIDER_CONFIG_PATH.exists():
+            parsed = json.loads(PROVIDER_CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                return parsed
+    except Exception:
+        pass
+    return {}
 
 
 def run_cmd(cmd: str) -> tuple[int, str, str, float]:
@@ -367,6 +379,9 @@ def run_model_and_callback(req: InferenceRequest, input_bytes: bytes, provider_j
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    cfg = load_provider_config()
+    infer_cmd_from_env = bool(os.getenv("INFER_CMD", "").strip())
+    infer_cmd_from_cfg = bool(str(cfg.get("infer_cmd", "")).strip())
     gpu_ok = bool(shutil.which("nvidia-smi"))
     return {
         "status": "ok",
@@ -376,7 +391,7 @@ def health() -> Dict[str, Any]:
         "provider_response_mode": env("PROVIDER_RESPONSE_MODE", "inline"),
         "model_device": env("MODEL_DEVICE", "gpu"),
         "pipeline_quality": env("PIPELINE_QUALITY", "high"),
-        "infer_cmd_configured": bool(os.getenv("INFER_CMD", "").strip()),
+        "infer_cmd_configured": bool(infer_cmd_from_env or infer_cmd_from_cfg),
         "no_placeholder_mode": True,
     }
 

@@ -1,0 +1,5 @@
+{
+  "skip_segmentation_in_dev": true,
+  "totalsegmentator_available": true,
+  "infer_cmd": "totalsegmentator"
+}
