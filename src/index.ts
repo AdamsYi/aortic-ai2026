@@ -77,6 +77,7 @@ interface InferenceCallbackPayload {
   status: string;
   provider_job_id?: string;
   error_message?: string;
+  result_case_id?: string;
   result_json?: Record<string, unknown>;
   mask_base64?: string;
   mask_filename?: string;
@@ -1189,7 +1190,15 @@ export default {
       }
 
       if (request.method === "GET" && path === "/api/cases") {
-        return respond(await handleDefaultCaseList(getDefaultCaseStore(env, request), getBuildVersion()));
+        const defaultListResponse = await handleDefaultCaseList(getDefaultCaseStore(env, request), getBuildVersion());
+        const defaultListPayload = await defaultListResponse.clone().json() as { cases?: Array<Record<string, unknown>> };
+        const defaultCases = Array.isArray(defaultListPayload.cases) ? defaultListPayload.cases : [];
+        const extraCases = (await listCaseResultRows(env))
+          .filter((row) => row.case_id && row.case_id !== DEFAULT_CASE_ID)
+          .filter((row) => !defaultCases.some((entry) => String(entry.case_id || entry.id || "") === row.case_id))
+          .map((row) => buildCaseResultListEntry(row, getBuildVersion()));
+        const cases = [...defaultCases, ...extraCases];
+        return respond(json({ cases, total: cases.length }));
       }
 
       if (request.method === "GET" && /^\/api\/cases\/[^/]+\/summary$/.test(path)) {
@@ -1210,7 +1219,16 @@ export default {
         const parts = path.split("/");
         const caseId = decodeURIComponent(parts[3] || "");
         const rawName = parts[5] || "";
-        return respond(await handleCaseArtifactById(getDefaultCaseStore(env, request), getBuildVersion(), caseId, rawName));
+        const defaultArtifactResponse = await handleCaseArtifactById(
+          getDefaultCaseStore(env, request),
+          getBuildVersion(),
+          caseId,
+          rawName
+        );
+        if (defaultArtifactResponse.status !== 404) {
+          return respond(defaultArtifactResponse);
+        }
+        return respond(await handleCaseResultArtifact(caseId, rawName, env));
       }
 
       if (request.method === "GET" && /^\/api\/cases\/[^/]+\/meshes\/[^/]+$/.test(path)) {
@@ -1989,13 +2007,42 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     return handleDefaultCaseWorkstation(getDefaultCaseStore(env, request), getBuildVersion());
   }
 
-  const job = await env.DB.prepare(
-    `SELECT id, study_id, job_type, status, model_tag, error_message, created_at, started_at, finished_at
+  let resolvedCaseId = jobId;
+  let caseResultRow = await getCaseResultRow(env, jobId);
+  let job = await env.DB.prepare(
+    `SELECT id, study_id, job_type, status, model_tag, error_message, result_case_id, created_at, started_at, finished_at, updated_at
      FROM jobs WHERE id = ?1`
   )
     .bind(jobId)
     .first<Record<string, unknown>>();
+  if (!job && caseResultRow?.job_id) {
+    job = await env.DB.prepare(
+      `SELECT id, study_id, job_type, status, model_tag, error_message, result_case_id, created_at, started_at, finished_at, updated_at
+       FROM jobs WHERE id = ?1`
+    )
+      .bind(caseResultRow.job_id)
+      .first<Record<string, unknown>>();
+  }
+  if (!job && caseResultRow?.case_id) {
+    job = await env.DB.prepare(
+      `SELECT id, study_id, job_type, status, model_tag, error_message, result_case_id, created_at, started_at, finished_at, updated_at
+       FROM jobs WHERE result_case_id = ?1
+       ORDER BY COALESCE(updated_at, created_at) DESC
+       LIMIT 1`
+    )
+      .bind(caseResultRow.case_id)
+      .first<Record<string, unknown>>();
+  }
   if (!job) return json({ error: "job_not_found" }, 404);
+  if (!caseResultRow) {
+    const rowCaseId = nullableString(job.result_case_id);
+    if (rowCaseId) {
+      caseResultRow = await getCaseResultRow(env, rowCaseId);
+      if (caseResultRow?.case_id) resolvedCaseId = caseResultRow.case_id;
+    }
+  } else {
+    resolvedCaseId = caseResultRow.case_id;
+  }
 
   const study = await env.DB.prepare(
     `SELECT id, patient_code, source_dataset, image_key, image_format, modality, phase, created_at, updated_at
@@ -2017,32 +2064,34 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     env.DB.prepare(
       `SELECT artifact_type FROM artifacts WHERE job_id = ?1 ORDER BY created_at ASC`
     )
-      .bind(jobId)
+      .bind(String(job.id))
       .all()
   );
   const artifactTypes = new Set(
     artifactRows.map((row) => String(row.artifact_type || "").trim()).filter(Boolean)
   );
-  const links = await buildJobLinks(jobId, String(study.id), env);
-
+  const links = await buildJobLinks(String(job.id), String(study.id), env);
+  const caseResultMeasurements = parseJsonColumn(caseResultRow?.measurements_json);
+  const caseResultPlanning = parseJsonColumn(caseResultRow?.planning_json);
   const rawHead = await env.R2_RAW.head(String(study.image_key));
-  const resultJson = await readArtifactJson(env, jobId, "result_json");
-  const measurementsJson = await readArtifactJson(env, jobId, "measurements_json");
-  const modelJson = await readArtifactJson(env, jobId, "aortic_root_model_json");
-  const annulusPlaneJson = await readArtifactJson(env, jobId, "annulus_plane_json");
-  const centerlineJson = await readArtifactJson(env, jobId, "centerline_json");
-  const leafletModelJson = await readArtifactJson(env, jobId, "leaflet_model_json");
+  const resultJson = await readArtifactJson(env, String(job.id), "result_json");
+  const measurementsJson = await readArtifactJson(env, String(job.id), "measurements_json");
+  const modelJson = await readArtifactJson(env, String(job.id), "aortic_root_model_json");
+  const annulusPlaneJson = await readArtifactJson(env, String(job.id), "annulus_plane_json");
+  const centerlineJson = await readArtifactJson(env, String(job.id), "centerline_json");
+  const leafletModelJson = await readArtifactJson(env, String(job.id), "leaflet_model_json");
+  const effectiveMeasurementsJson = measurementsJson || caseResultMeasurements;
 
-  const pipelineRun = await resolvePipelineRun(jobId, env, resultJson);
+  const pipelineRun = await resolvePipelineRun(String(job.id), env, resultJson);
   const model = pickObject(modelJson) || {};
-  const measurements = pickObject(measurementsJson) || pickObject(resultJson?.measurements) || pickObject(resultJson) || null;
+  const measurements = pickObject(effectiveMeasurementsJson) || pickObject(resultJson?.measurements) || pickObject(resultJson) || null;
   const measurementContract =
-    pickObject(measurementsJson?.measurement_contract)
+    pickObject(effectiveMeasurementsJson?.measurement_contract)
     || pickObject(resultJson?.measurement_contract)
     || pickObject(resultJson?.planning_evidence)
     || null;
   const planningEvidence =
-    pickObject(measurementsJson?.planning_evidence)
+    pickObject(effectiveMeasurementsJson?.planning_evidence)
     || pickObject(resultJson?.planning_evidence)
     || null;
 
@@ -2075,7 +2124,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     runtimeWarnings.push("historical_pipeline_run_inferred");
   }
   const cprReferenceJson = artifactTypes.has("cpr_reference_json")
-    ? await readArtifactJson(env, jobId, "cpr_reference_json")
+    ? await readArtifactJson(env, String(job.id), "cpr_reference_json")
     : null;
   const hasCprNifti = artifactTypes.has("cpr_straightened_nifti");
   const cprSources = (cprReferenceJson || hasCprNifti)
@@ -2086,16 +2135,17 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
         straightened_nifti: hasCprNifti ? links.cpr_straightened_nifti : null,
       })
     : null;
-  const coronaryOstiaSummary = buildCoronaryOstiaSummary(model, measurementsJson);
+  const coronaryOstiaSummary = buildCoronaryOstiaSummary(model, effectiveMeasurementsJson);
   const leafletGeometrySummary = buildLeafletGeometrySummary(model, leafletModelJson);
-  const pearsGeometryArtifact = pickObject(measurementsJson?.pears_geometry);
+  const pearsGeometryArtifact = pickObject(effectiveMeasurementsJson?.pears_geometry);
   const pearsGeometryFallback = pearsGeometryArtifact ? null : derivePearsGeometryFromModel(model);
   const planningPayload =
-    pickObject(measurementsJson?.planning)
-    || deriveLegacyPlanningPayload(measurementsJson, coronaryOstiaSummary, leafletGeometrySummary, pearsGeometryArtifact || pearsGeometryFallback);
+    pickObject(caseResultPlanning)
+    || pickObject(effectiveMeasurementsJson?.planning)
+    || deriveLegacyPlanningPayload(effectiveMeasurementsJson, coronaryOstiaSummary, leafletGeometrySummary, pearsGeometryArtifact || pearsGeometryFallback);
   const qualityGates =
-    pickObject(measurementsJson?.quality_gates)
-    || deriveLegacyQualityGates(measurementsJson);
+    pickObject(effectiveMeasurementsJson?.quality_gates)
+    || deriveLegacyQualityGates(effectiveMeasurementsJson);
   const planningSummary = {
     tavi_status: summarizePlanningSection(pickObject(planningPayload?.tavi)),
     vsrr_status: summarizePlanningSection(pickObject(planningPayload?.vsrr)),
@@ -2146,6 +2196,12 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     pears_geometry_available: capabilityState.pears_geometry.available,
   };
   const downloads = buildLegacyDownloads(links, artifactTypes);
+  const caseLinks = caseResultRow ? buildCaseResultLinks(resolvedCaseId) : null;
+  const downloadJsonLinks = [
+    ...(Array.isArray(downloads.json) ? downloads.json : []),
+    ...(caseResultMeasurements ? [{ label: "Measurements JSON", href: `/api/cases/${encodeURIComponent(resolvedCaseId)}/artifacts/measurements` }] : []),
+    ...(caseResultPlanning ? [{ label: "Planning JSON", href: `/api/cases/${encodeURIComponent(resolvedCaseId)}/artifacts/planning` }] : []),
+  ];
   const acceptanceReview = buildAcceptanceReview({
     pipeline_run: pipelineRun,
     viewer_bootstrap: {
@@ -2170,7 +2226,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
 
   const payload = {
     build_version: getBuildVersion(),
-    case_id: jobId,
+    case_id: resolvedCaseId,
     display_name: {
       "zh-CN": "最新真实病例",
       en: "Latest Real Case",
@@ -2197,8 +2253,15 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
         : null,
     },
     pipeline_run: pipelineRun,
-    links,
-    downloads,
+    links: {
+      ...links,
+      ...(caseLinks || {}),
+      workstation: `/workstation/cases/${encodeURIComponent(resolvedCaseId)}`,
+    },
+    downloads: {
+      ...downloads,
+      json: downloadJsonLinks,
+    },
     cpr_sources: cprSources,
     volume_source: {
       source_kind: volumeSourceKind,
@@ -2511,6 +2574,144 @@ async function readArtifactJson(env: Env, jobId: string, artifactType: string): 
   const obj = await env.R2_MASK.get(artifact.object_key);
   if (!obj) return null;
   return safeJsonObject(await obj.text());
+}
+
+type CaseResultRow = {
+  case_id: string;
+  job_id: string | null;
+  measurements_json: string | null;
+  planning_json: string | null;
+  created_at: number | null;
+};
+
+function stringifyJsonColumn(value: unknown): string | null {
+  if (value == null) return null;
+  return JSON.stringify(value);
+}
+
+function parseJsonColumn(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return safeJsonObject(value);
+}
+
+async function getCaseResultRow(env: Env, caseId: string): Promise<CaseResultRow | null> {
+  if (!caseId) return null;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT case_id, job_id, measurements_json, planning_json, created_at
+       FROM case_results WHERE case_id = ?1`
+    )
+      .bind(caseId)
+      .first<CaseResultRow>();
+    return row || null;
+  } catch {
+    return null;
+  }
+}
+
+async function listCaseResultRows(env: Env): Promise<CaseResultRow[]> {
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT case_id, job_id, measurements_json, planning_json, created_at
+       FROM case_results
+       ORDER BY created_at DESC`
+    ).all<CaseResultRow>();
+    return Array.isArray(rows.results) ? rows.results : [];
+  } catch {
+    return [];
+  }
+}
+
+async function upsertCaseResult(
+  env: Env,
+  input: {
+    case_id: string;
+    job_id: string | null;
+    measurements: unknown;
+    planning: unknown;
+  }
+): Promise<void> {
+  if (!input.case_id) return;
+  await ensureCaseResultsTable(env);
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO case_results (
+       case_id, job_id, measurements_json, planning_json, created_at
+     )
+     VALUES (?1, ?2, ?3, ?4, ?5)
+`
+  )
+    .bind(
+      input.case_id,
+      input.job_id,
+      stringifyJsonColumn(input.measurements),
+      stringifyJsonColumn(input.planning),
+      Date.now()
+    )
+    .run();
+}
+
+async function ensureCaseResultsTable(env: Env): Promise<void> {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS case_results (
+       case_id TEXT PRIMARY KEY,
+       job_id TEXT,
+       measurements_json TEXT,
+       planning_json TEXT,
+       created_at INTEGER
+     )`
+  ).run();
+}
+
+async function handleCaseResultArtifact(caseId: string, rawName: string, env: Env): Promise<Response> {
+  const normalized = decodeURIComponent(rawName || "").trim().toLowerCase();
+  if (
+    normalized !== "measurements"
+    && normalized !== "measurements.json"
+    && normalized !== "planning"
+    && normalized !== "planning.json"
+  ) {
+    return json({ error: "artifact_not_found" }, 404);
+  }
+
+  const row = await getCaseResultRow(env, caseId);
+  if (!row) return json({ error: "case_not_found" }, 404);
+  if (normalized === "measurements" || normalized === "measurements.json") {
+    return json(parseJsonColumn(row.measurements_json) || {});
+  }
+  return json(parseJsonColumn(row.planning_json) || {});
+}
+function buildCaseResultLinks(caseId: string): Record<string, string> {
+  return {
+    measurements: `/api/cases/${encodeURIComponent(caseId)}/artifacts/measurements`,
+    planning: `/api/cases/${encodeURIComponent(caseId)}/artifacts/planning`,
+    workstation: `/workstation/cases/${encodeURIComponent(caseId)}`,
+  };
+}
+
+function buildCaseResultListEntry(row: CaseResultRow, buildVersion: string): Record<string, unknown> {
+  return {
+    id: row.case_id,
+    job_id: row.job_id,
+    case_id: row.case_id,
+    display_name: {
+      "zh-CN": `结果病例 ${row.case_id}`,
+      en: `Result Case ${row.case_id}`,
+    },
+    case_role: ["latest", "derived_result"],
+    placeholder: false,
+    not_real_cta: false,
+    status: "completed",
+    scan_date: null,
+    pipeline_version: null,
+    build_version: buildVersion,
+    has_planning: Boolean(row.planning_json),
+    has_measurements: Boolean(row.measurements_json),
+    has_meshes: false,
+    capabilities: {},
+    planning_summary: {},
+    quality_gates_summary: {},
+    links: buildCaseResultLinks(row.case_id),
+  };
 }
 
 function inferVolumeSourceKind(study: Record<string, unknown>, repository: Record<string, unknown> | null): "nifti" | "dicom_zip" {
@@ -2984,7 +3185,7 @@ async function handleInferenceCallback(
   }
 
   const status = stringOr(payload.status, "").toLowerCase();
-  if (status !== "succeeded" && status !== "failed") {
+  if (status !== "succeeded" && status !== "completed" && status !== "failed") {
     return json({ error: "invalid_callback_status" }, 400);
   }
 
@@ -3176,6 +3377,7 @@ async function applyInferenceOutputToJob(
 ): Promise<void> {
   const hasResultJson = payload.result_json && typeof payload.result_json === "object";
   let safeResultJson: Record<string, unknown> | null = null;
+  const resultCaseId = nullableString(payload.result_case_id) || jobId;
 
   if (hasResultJson) {
     safeResultJson = sanitizePublicResultJson(payload.result_json as Record<string, unknown>) || {};
@@ -3254,6 +3456,15 @@ async function applyInferenceOutputToJob(
     });
   }
 
+  if (safeResultJson) {
+    await upsertCaseResult(env, {
+      case_id: resultCaseId,
+      job_id: jobId,
+      measurements: safeResultJson.measurements ?? null,
+      planning: safeResultJson.planning ?? null,
+    });
+  }
+
   if (Array.isArray(payload.metrics)) {
     for (const metric of payload.metrics) {
       if (!metric || typeof metric.name !== "string") continue;
@@ -3273,7 +3484,7 @@ async function applyInferenceOutputToJob(
   await tryUpdateJobExtendedFields(env, jobId, {
     progress: 100,
     stage: "completed",
-    result_case_id: jobId,
+    result_case_id: resultCaseId,
     updated_at: new Date().toISOString(),
   });
 }

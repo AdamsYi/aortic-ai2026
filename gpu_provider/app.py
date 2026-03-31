@@ -182,6 +182,26 @@ def public_error_message(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: {detail}"
 
 
+def ensure_callback_result_json(result_json: Dict[str, Any], fallback_case_id: str) -> Dict[str, Any]:
+    payload = dict(result_json or {})
+    payload["result_case_id"] = str(payload.get("result_case_id") or fallback_case_id)
+    if not isinstance(payload.get("measurements"), dict):
+        candidate = payload.get("measurements_structured")
+        if isinstance(candidate, dict):
+            payload["measurements"] = candidate
+    if not isinstance(payload.get("planning"), dict):
+        candidate = payload.get("planning_metrics")
+        if isinstance(candidate, dict):
+            payload["planning"] = candidate
+    if not isinstance(payload.get("coronary_detection"), dict):
+        candidate = payload.get("coronary_ostia")
+        if isinstance(candidate, dict):
+            payload["coronary_detection"] = candidate
+    if not isinstance(payload.get("risk_flags"), list):
+        payload["risk_flags"] = []
+    return payload
+
+
 def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Optional[str] = None) -> InferenceResponse:
     started = time.time()
     if not provider_job_id:
@@ -268,6 +288,7 @@ def run_model(input_bytes: bytes, req: InferenceRequest, provider_job_id: Option
 
         result_json.setdefault("runtime", {})
         result_json["runtime"]["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        result_json = ensure_callback_result_json(result_json, req.job_id)
         result_json = sanitize_public_result_json(result_json)
 
         return InferenceResponse(
@@ -294,6 +315,12 @@ def post_callback(req: InferenceRequest, result: InferenceResponse) -> None:
 
     timeout = float(env("CALLBACK_TIMEOUT_SECONDS", "20"))
     payload = result.model_dump(exclude_none=True)
+    payload["status"] = "completed"
+    payload["result_case_id"] = str(
+        payload.get("result_case_id")
+        or payload.get("result_json", {}).get("result_case_id")
+        or req.job_id
+    )
     try:
         resp = requests.post(callback_url, headers=headers, json=payload, timeout=timeout)
         resp.raise_for_status()
@@ -370,7 +397,11 @@ def run_model_and_callback(req: InferenceRequest, input_bytes: bytes, provider_j
         post_stage_status(req, stage="measurements", progress=80, status="running")
         post_callback(req, result)
         post_stage_status(req, stage="completed", progress=100, status="completed")
-        post_simple_completion_callback(req, status="completed", result_case_id=req.job_id)
+        post_simple_completion_callback(
+            req,
+            status="completed",
+            result_case_id=str(result.result_json.get("result_case_id") or req.job_id),
+        )
     except Exception as exc:
         post_stage_status(req, stage="failed", progress=100, status="failed", detail=public_error_message(exc))
         post_error_callback(req, provider_job_id, public_error_message(exc))

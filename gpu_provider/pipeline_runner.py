@@ -509,6 +509,7 @@ def run_geometry_pipeline(
     }
 
     payload = {
+        "result_case_id": args.job_id or args.study_id or ct_path.stem,
         "labels": labels,
         "spacing_mm": {"dx": spacing[0], "dy": spacing[1], "dz": spacing[2]},
         "volume_reconstruction": {
@@ -567,8 +568,10 @@ def run_geometry_pipeline(
         "measurements_structured_raw": measurements_json_payload.get("measurements_raw", {}),
         "measurements_structured_regularized": measurements_json_payload.get("measurements_regularized", measurements_structured),
         "measurement_contract": measurements_json_payload.get("measurement_contract", {}),
+        "planning": measurements_json_payload.get("planning", planning_metrics),
         "volumes_ml": volumes_ml,
         "risk_flags": risk_flags,
+        "coronary_detection": measurements_json_payload.get("coronary_detection", root_model.coronary_ostia),
         "sanity_checks": measurements_json_payload.get("sanity_checks", {}),
         "planning_metrics": planning_metrics,
         "planning_evidence": measurements_json_payload.get("planning_evidence", {}),

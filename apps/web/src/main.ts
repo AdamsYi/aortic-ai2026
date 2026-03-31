@@ -4974,6 +4974,7 @@ async function pollSubmittedJob(jobId: string): Promise<void> {
       const status = String(payload.status || 'queued').toLowerCase();
       const progressRaw = Number(payload.progress);
       const progress = Number.isFinite(progressRaw) ? progressRaw : (status === 'completed' || status === 'succeeded' ? 100 : status === 'running' ? 45 : 0);
+      const resultCaseId = String(payload.result_case_id || '').trim();
       updateJobProgressBanner(progress, String(payload.stage || status));
       if (status === 'completed' || status === 'succeeded') {
         if (submitJobPollHandle !== null) {
@@ -4982,8 +4983,18 @@ async function pollSubmittedJob(jobId: string): Promise<void> {
         }
         activeSubmissionJobId = null;
         updateJobProgressBanner(100, 'completed');
-        window.setTimeout(() => clearJobProgressBanner(), 2000);
-        await loadLatestCase({ updateUrl: true });
+        if (DOM.jobProgressLabel) DOM.jobProgressLabel.textContent = '✅ 处理完成，正在加载结果...';
+        try {
+          if (resultCaseId) {
+            await loadCase(resultCaseId);
+          } else {
+            await loadLatestCase({ updateUrl: true });
+          }
+        } catch {
+          await loadLatestCase({ updateUrl: true });
+        } finally {
+          window.setTimeout(() => clearJobProgressBanner(), 2000);
+        }
       } else if (status === 'failed') {
         if (submitJobPollHandle !== null) {
           window.clearInterval(submitJobPollHandle);
