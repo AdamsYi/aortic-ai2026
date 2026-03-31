@@ -59,7 +59,7 @@ if errorlevel 1 (
   echo [AorticAI] cloudflared not found in PATH. Provider started without tunnel.
 ) else (
   echo [AorticAI] starting Cloudflare tunnel %AORTICAI_TUNNEL_NAME%...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath 'cloudflared' -ArgumentList 'tunnel run %AORTICAI_TUNNEL_NAME%' -WorkingDirectory '%CD%' -WindowStyle Minimized -PassThru; Set-Content -Path 'cloudflared.pid' -Value $p.Id"
+  START "AorticAI Tunnel" /MIN cmd /k "set HTTPS_PROXY=http://127.0.0.1:7890 && cloudflared tunnel run --protocol http2"
 )
 
 set HEALTH_OK=0
