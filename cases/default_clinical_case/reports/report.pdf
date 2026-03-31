@@ -1,11 +1,57 @@
 %PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
-4 0 obj << /Length 77 >> stream
-BT /F1 18 Tf 72 720 Td (AorticAI Default Showcase Case Placeholder PDF) Tj ET
-endstream endobj
-5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [3 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 829 >>
+stream
+BT
+/F1 10 Tf
+40 800 Td
+13 TL
+(Aortic Geometry Planning Report) Tj
+T*
+() Tj
+T*
+(Study ID: CTACardio.nii.gz) Tj
+T*
+(Centerline method: distance_core_fallback+minimum_cost_skeleton_path) Tj
+T*
+(Annulus short/long diameter: 19.179662826809004 / 23.37046836185562 mm) Tj
+T*
+(Annulus area/perimeter: 345.15270314367876 mm2 / 66.99977733713698 mm) Tj
+T*
+(Sinus max diameter: 32.609036124329066 mm) Tj
+T*
+(STJ diameter: 26.483272242264796 mm) Tj
+T*
+(Ascending aorta diameter: 29.357486771943783 mm) Tj
+T*
+(LVOT diameter: 21.76842677883545 mm) Tj
+T*
+(Coronary height left/right: None / None mm) Tj
+T*
+(Calcium burden \(HU>130\): 13.198168705437261 mL) Tj
+T*
+(Leaflet coaptation height estimate: 1.0145372692243557 mm) Tj
+T*
+() Tj
+T*
+(Risk flags:) Tj
+T*
+(- heavy_valve_calcification: Valve/root calcium burden is elevated \(HU>130\)) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
 xref
 0 6
 0000000000 65535 f 
@@ -13,8 +59,9 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000241 00000 n 
-0000000368 00000 n 
-trailer << /Size 6 /Root 1 0 R >>
+0000001121 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
 startxref
-438
+1191
 %%EOF

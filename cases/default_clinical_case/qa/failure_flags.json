@@ -1,32 +1,32 @@
 {
   "items": [
     {
-      "field": "coronary_height_right_mm",
+      "field": "coronary_height_left_mm",
       "status": "failed",
-      "reason": "intentional_showcase_failure_example",
+      "reason": "left_coronary_not_detected",
       "uncertainty": {
         "flag": "DETECTION_FAILED",
-        "message": "Right coronary height is intentionally null in the showcase case.",
+        "message": "Left coronary height is unavailable in the showcase case.",
+        "clinician_review_required": true
+      }
+    },
+    {
+      "field": "coronary_height_right_mm",
+      "status": "failed",
+      "reason": "right_coronary_not_detected",
+      "uncertainty": {
+        "flag": "DETECTION_FAILED",
+        "message": "Right coronary height is unavailable in the showcase case.",
         "clinician_review_required": true
       }
     },
     {
       "field": "access_route_assessment",
       "status": "failed",
-      "reason": "missing_access_route_input_in_placeholder_case",
+      "reason": "root_roi_only_missing_access_route_volume",
       "uncertainty": {
         "flag": "MISSING_INPUT",
-        "message": "No access-route volume is bundled with the placeholder showcase case.",
-        "clinician_review_required": true
-      }
-    },
-    {
-      "field": "leaflet_geometry_status",
-      "status": "legacy_only",
-      "reason": "legacy_only_leaflet_geometry",
-      "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "Full cusp-wise leaflet geometry is not available in the default showcase case.",
+        "message": "Access-route assessment is not available because the showcase case only includes the root ROI volume.",
         "clinician_review_required": true
       }
     }

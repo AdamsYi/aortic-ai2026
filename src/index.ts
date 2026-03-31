@@ -1,19 +1,22 @@
 import {
-  WORKSTATION_APP_JS,
+  WORKSTATION_APP_PATH,
   WORKSTATION_APP_SHA256,
   WORKSTATION_ASSET_DIGEST,
   WORKSTATION_BUILD_VERSION,
-  WORKSTATION_DICOM_WORKER_JS,
+  WORKSTATION_DICOM_WORKER_PATH,
   WORKSTATION_DICOM_WORKER_SHA256,
-  WORKSTATION_STYLE_CSS,
+  WORKSTATION_STYLE_PATH,
   WORKSTATION_STYLE_SHA256,
 } from "./generated/workstationAssets";
 import {
-  DEFAULT_CASE_BUNDLE,
   DEFAULT_CASE_DIGEST,
+  DEFAULT_CASE_FILE_DIGESTS,
 } from "./generated/defaultCaseBundle";
 import {
-  createDefaultCaseStoreFromBundle,
+  createDefaultCaseStoreFromAssets,
+  handleCaseArtifactById,
+  handleCaseMeshById,
+  handleDefaultCaseList,
   handleDefaultCaseArtifact,
   handleDefaultCaseImaging,
   handleDefaultCaseMesh,
@@ -22,18 +25,22 @@ import {
   handleDefaultCaseSummary,
   handleDefaultCaseWorkstation,
 } from "../services/api/defaultCaseHandlers";
+import { buildAcceptanceReview } from "../services/api/acceptance";
 
 interface Env {
+  ASSETS: Fetcher;
   DB: D1Database;
   R2_RAW: R2Bucket;
   R2_MASK: R2Bucket;
   SEG_QUEUE: Queue;
+  ENVIRONMENT?: string;
   UPLOAD_URL_TTL_SECONDS: string;
   INFERENCE_MODE?: string;
-  INFERENCE_WEBHOOK_URL?: string;
   INFERENCE_WEBHOOK_TIMEOUT_MS?: string;
   INFERENCE_MAX_INPUT_BYTES?: string;
-  INFERENCE_CALLBACK_SECRET?: string;
+  PROVIDER_URL?: string;
+  PROVIDER_HEALTH_URL?: string;
+  PROVIDER_SECRET?: string;
   API_BASE_URL?: string;
   ARTIFACT_LINK_SECRET?: string;
   ARTIFACT_LINK_TTL_SECONDS?: string;
@@ -84,15 +91,11 @@ const jsonHeaders = {
   "cdn-cache-control": "no-store",
   "cloudflare-cdn-cache-control": "no-store",
   "surrogate-control": "no-store",
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
-  "access-control-allow-headers": "content-type,authorization,x-callback-secret"
 };
 
 const FALLBACK_BUILD_VERSION = "dev-unset";
 const DEFAULT_SIGNED_LINK_TTL_SECONDS = 3600;
 const DEFAULT_CASE_ID = "default_clinical_case";
-const defaultCaseStore = createDefaultCaseStoreFromBundle(DEFAULT_CASE_BUNDLE);
 
 function getBuildVersion(): string {
   const raw = String(WORKSTATION_BUILD_VERSION || "").trim();
@@ -114,12 +117,117 @@ function getWorkstationAssetHashes(): Record<string, string> {
   };
 }
 
+function getDefaultCaseStore(env: Env, request: Request) {
+  const assetOrigin = new URL(request.url).origin;
+  return createDefaultCaseStoreFromAssets(
+    {
+      fetch(input, init) {
+        const target = input instanceof Request ? new URL(input.url, assetOrigin) : new URL(String(input), assetOrigin);
+        return env.ASSETS.fetch(new Request(target.toString(), init));
+      },
+    },
+    DEFAULT_CASE_FILE_DIGESTS
+  );
+}
+
 function getArtifactLinkSecret(env?: Env): string {
   return String(env?.ARTIFACT_LINK_SECRET || "").trim();
 }
 
 function getArtifactLinkTtlSeconds(env?: Env): number {
   return parsePositiveInt(env?.ARTIFACT_LINK_TTL_SECONDS, DEFAULT_SIGNED_LINK_TTL_SECONDS);
+}
+
+function getInferenceHealthUrl(env?: Env): string | null {
+  const explicitHealth = String(env?.PROVIDER_HEALTH_URL || "").trim();
+  if (explicitHealth) return explicitHealth;
+  const raw = String(env?.PROVIDER_URL || "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.pathname.endsWith("/infer")) {
+      url.pathname = url.pathname.replace(/\/infer$/, "/health");
+    } else if (!url.pathname.endsWith("/health")) {
+      url.pathname = `${url.pathname.replace(/\/$/, "")}/health`;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function getInferenceProviderHealth(env: Env): Promise<Response> {
+  const providerUrl = String(env.PROVIDER_URL || "").trim() || null;
+  const healthUrl = getInferenceHealthUrl(env);
+  if (!healthUrl) {
+    return json({
+      ok: false,
+      reachable: false,
+      provider_url: providerUrl,
+      health_url: null,
+      status: null,
+      code: "provider_url_missing",
+      message: "Inference provider URL is not configured.",
+    });
+  }
+  try {
+    const resp = await fetch(healthUrl, {
+      method: "GET",
+      headers: { accept: "application/json,text/plain,*/*" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const message = (await resp.text().catch(() => "")).trim();
+    return json({
+      ok: resp.ok,
+      reachable: resp.ok,
+      provider_url: providerUrl,
+      health_url: healthUrl,
+      status: resp.status,
+      code: resp.ok ? "ok" : `provider_http_${resp.status}`,
+      message: message || (resp.ok ? "Provider is reachable." : "Provider returned a non-success response."),
+    });
+  } catch (error) {
+    return json({
+      ok: false,
+      reachable: false,
+      provider_url: providerUrl,
+      health_url: healthUrl,
+      status: null,
+      code: "provider_unreachable",
+      message: asError(error).message,
+    });
+  }
+}
+
+function getEnvironment(env?: Env): "development" | "production" {
+  return String(env?.ENVIRONMENT || "production").trim().toLowerCase() === "development" ? "development" : "production";
+}
+
+function resolveCorsOrigin(request: Request, env?: Env): string {
+  const requestOrigin = (request.headers.get("origin") || "").trim();
+  const environment = getEnvironment(env);
+  if (environment === "development") {
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(requestOrigin)) return requestOrigin;
+    return "http://localhost:5173";
+  }
+  if (requestOrigin === "https://heartvalvepro.edu.kg") return requestOrigin;
+  return "https://heartvalvepro.edu.kg";
+}
+
+function corsHeadersForRequest(request: Request, env?: Env): Record<string, string> {
+  return {
+    "access-control-allow-origin": resolveCorsOrigin(request, env),
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "Content-Type, X-Provider-Secret",
+    "vary": "Origin",
+  };
+}
+
+function withCors(response: Response, request: Request, env?: Env): Response {
+  const headers = new Headers(response.headers);
+  const cors = corsHeadersForRequest(request, env);
+  for (const [key, value] of Object.entries(cors)) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function textResponse(body: string, contentType: string): Response {
@@ -355,7 +463,7 @@ function summarizePipelineRun(
   const inferenceMode = historical ? "historical_inferred" : (source === "mock" ? "mock" : getInferenceMode(env));
   const providerTarget = historical
     ? nullableString(runtime.provider_target)
-    : nullableString(runtime.provider_target) || (inferenceMode === "webhook" ? nullableString(env.INFERENCE_WEBHOOK_URL) : null);
+    : nullableString(runtime.provider_target) || (inferenceMode === "webhook" ? nullableString(env.PROVIDER_URL) : null);
   const providerRuntime = nullableString(runtime.provider_runtime);
   const buildVersion = historical
     ? stringOr(pipelineVersion.build_version, stringOr(runtime.build_version, "historical_inferred"))
@@ -480,7 +588,7 @@ function materializePipelineRun(record: Record<string, unknown>, env: Env, infer
   const providerTarget = nullableString(record.provider_target)
     || nullableString(runSummary.provider_target)
     || readNestedString(runSummary, ["runtime", "provider_target"])
-    || (!inferred && inferenceMode === "webhook" ? nullableString(env.INFERENCE_WEBHOOK_URL) : null);
+    || (!inferred && inferenceMode === "webhook" ? nullableString(env.PROVIDER_URL) : null);
   const providerRuntime = nullableString(record.provider_runtime)
     || nullableString(runSummary.provider_runtime)
     || readNestedString(runSummary, ["runtime", "provider_runtime"]);
@@ -577,158 +685,620 @@ async function buildJobLinks(jobId: string, studyId: string, env: Env): Promise<
   return out;
 }
 
+function buildLegacyDownloads(
+  links: Record<string, string>,
+  artifactTypes: Set<string>
+): {
+  raw: { label: string; href: string } | null;
+  json: Array<{ label: string; href: string }>;
+  stl: Array<{ label: string; href: string }>;
+  pdf: { label: string; href: string } | null;
+} {
+  const json: Array<{ label: string; href: string }> = [];
+  const stl: Array<{ label: string; href: string }> = [];
+
+  if (artifactTypes.has("measurements_json") && links.measurements_json) {
+    json.push({ label: "Measurements JSON", href: links.measurements_json });
+  }
+  if (artifactTypes.has("centerline_json") && links.centerline_json) {
+    json.push({ label: "Centerline JSON", href: links.centerline_json });
+  }
+  if (artifactTypes.has("aortic_root_model_json") && links.aortic_root_model_json) {
+    json.push({ label: "Digital Twin JSON", href: links.aortic_root_model_json });
+  }
+  if (artifactTypes.has("leaflet_model_json") && links.leaflet_model_json) {
+    json.push({ label: "Leaflet Model JSON", href: links.leaflet_model_json });
+  }
+  if (artifactTypes.has("result_json") && links.result_json) {
+    json.push({ label: "Segmentation Result JSON", href: links.result_json });
+  }
+
+  if (artifactTypes.has("aortic_root_stl") && links.aortic_root_stl) {
+    stl.push({ label: "Aortic Root STL", href: links.aortic_root_stl });
+  }
+  if (artifactTypes.has("ascending_aorta_stl") && links.ascending_aorta_stl) {
+    stl.push({ label: "Ascending Aorta STL", href: links.ascending_aorta_stl });
+  }
+  if (artifactTypes.has("leaflets_stl") && links.leaflets_stl) {
+    stl.push({ label: "Leaflets STL", href: links.leaflets_stl });
+  }
+
+  return {
+    raw: links.raw_ct ? { label: "Raw CT", href: links.raw_ct } : null,
+    json,
+    stl,
+    pdf: artifactTypes.has("planning_report_pdf") && links.planning_report_pdf
+      ? { label: "Planning Report PDF", href: links.planning_report_pdf }
+      : null,
+  };
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildLegacyEvidence(
+  method: string,
+  sourceType: "guideline" | "literature" | "algorithm" | "device_ifu" | "manual" | "other",
+  sourceRef: string,
+  confidence: number
+): Record<string, unknown> {
+  return {
+    method,
+    source_type: sourceType,
+    source_ref: sourceRef,
+    confidence,
+  };
+}
+
+function buildLegacyUncertainty(
+  flag: "NONE" | "MISSING_INPUT" | "DETECTION_FAILED" | "LOW_CONFIDENCE" | "ANATOMY_CONSTRAINT_VIOLATION" | "OUT_OF_RANGE" | "IMAGE_QUALITY_LIMITATION" | "MODEL_INCONSISTENCY" | "PLACEHOLDER_ONLY" | "NOT_AVAILABLE",
+  message: string,
+  clinicianReviewRequired = false
+): Record<string, unknown> {
+  return {
+    flag,
+    message,
+    clinician_review_required: clinicianReviewRequired,
+  };
+}
+
+function buildLegacyEnvelope(
+  value: unknown,
+  unit: string,
+  method: string,
+  sourceType: "guideline" | "literature" | "algorithm" | "device_ifu" | "manual" | "other",
+  sourceRef: string,
+  confidence: number,
+  uncertainty?: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    value,
+    unit,
+    evidence: buildLegacyEvidence(method, sourceType, sourceRef, confidence),
+    uncertainty: uncertainty || buildLegacyUncertainty("NONE", "Legacy planning metric accepted.", false),
+  };
+}
+
+function buildLegacyUnavailableEnvelope(section: string, key: string, message?: string): Record<string, unknown> {
+  return buildLegacyEnvelope(
+    null,
+    "status",
+    "legacy_case_absent",
+    "other",
+    "LEGACY_CASE_NO_PLANNING",
+    0,
+    buildLegacyUncertainty(
+      "NOT_AVAILABLE",
+      message || `Legacy case does not provide ${section} ${key}.`,
+      true
+    )
+  );
+}
+
+function deriveLegacyPlanningPayload(
+  measurementsJson: Record<string, unknown> | null,
+  coronaryOstiaSummary: Record<string, unknown> | null,
+  leafletGeometrySummary: Record<string, unknown> | null,
+  pearsGeometry: Record<string, unknown> | null
+): Record<string, unknown> {
+  const planningMetrics = pickObject(measurementsJson?.planning_metrics);
+  const taviMetrics = pickObject(planningMetrics?.tavi);
+  const vsrrMetrics = pickObject(planningMetrics?.vsrr);
+  const pearsMetrics = pickObject(planningMetrics?.pears);
+  const coronaryDetection = pickObject(measurementsJson?.coronary_detection);
+  const leftCoronary = pickObject(coronaryDetection?.left);
+  const rightCoronary = pickObject(coronaryDetection?.right);
+  const leafletCount = Array.isArray(leafletGeometrySummary?.leaflets) ? leafletGeometrySummary.leaflets.length : 0;
+
+  const tavi: Record<string, unknown> = {
+    valve_size_suggestion: taviMetrics?.area_derived_valve_size
+      ? buildLegacyEnvelope(
+          sanitizePublicValue(taviMetrics.area_derived_valve_size),
+          "status",
+          "legacy_tavi_area_projection",
+          "algorithm",
+          "GE_TAVI_ANALYSIS",
+          0.74
+        )
+      : buildLegacyUnavailableEnvelope("TAVI", "valve_size_suggestion"),
+    coronary_obstruction_risk: taviMetrics && "coronary_risk_flag" in taviMetrics
+      ? buildLegacyEnvelope(
+          sanitizePublicValue({
+            coronary_risk_flag: Boolean(taviMetrics.coronary_risk_flag),
+            left_height_mm: finiteNumberOrNull(leftCoronary?.height_mm),
+            right_height_mm: finiteNumberOrNull(rightCoronary?.height_mm),
+            left_status: leftCoronary?.status || "unknown",
+            right_status: rightCoronary?.status || "unknown",
+          }),
+          "status",
+          "legacy_coronary_risk_projection",
+          "guideline",
+          "SCCT_TAVI_CT_CONSENSUS",
+          finiteNumberOrNull(leftCoronary?.height_mm) !== null || finiteNumberOrNull(rightCoronary?.height_mm) !== null ? 0.62 : 0.28,
+          (finiteNumberOrNull(leftCoronary?.height_mm) === null && finiteNumberOrNull(rightCoronary?.height_mm) === null)
+            ? buildLegacyUncertainty("NOT_AVAILABLE", "Coronary heights are not reliably available in this historical case.", true)
+            : buildLegacyUncertainty("LOW_CONFIDENCE", "Historical coronary risk projection should be reviewed with the original study.", true)
+        )
+      : buildLegacyUnavailableEnvelope("TAVI", "coronary_obstruction_risk"),
+    optimal_projection_angle: buildLegacyUnavailableEnvelope("TAVI", "optimal_projection_angle", "Legacy case does not provide a standardized coplanar projection artifact."),
+    access_route_assessment: buildLegacyUnavailableEnvelope("TAVI", "access_route_assessment", "Legacy case does not include a dedicated access route assessment artifact."),
+  };
+
+  const vsrr: Record<string, unknown> = {
+    commissural_geometry_status: buildLegacyUnavailableEnvelope("VSRR", "commissural_geometry_status", "Legacy case does not expose a structured commissural symmetry artifact."),
+    leaflet_geometry_status: leafletCount || vsrrMetrics
+      ? buildLegacyEnvelope(
+          sanitizePublicValue({
+            leaflet_count: leafletCount || null,
+            effective_height_mean_mm: finiteNumberOrNull(vsrrMetrics?.effective_height_mean_mm),
+            coaptation_height_mm: finiteNumberOrNull(vsrrMetrics?.coaptation_height_mm),
+            coaptation_reserve_mm: finiteNumberOrNull(vsrrMetrics?.coaptation_reserve_mm),
+          }),
+          "status",
+          "legacy_vsrr_leaflet_projection",
+          "literature",
+          "VSRR_EFFECTIVE_HEIGHT_LIT",
+          0.58,
+          buildLegacyUncertainty("LOW_CONFIDENCE", "Historical leaflet geometry is reconstructed from legacy metrics and should be reviewed.", true)
+        )
+      : buildLegacyUnavailableEnvelope("VSRR", "leaflet_geometry_status"),
+    graft_sizing: vsrrMetrics && finiteNumberOrNull(vsrrMetrics.recommended_graft_size_mm) !== null
+      ? buildLegacyEnvelope(
+          sanitizePublicValue({
+            recommended_graft_size_mm: finiteNumberOrNull(vsrrMetrics.recommended_graft_size_mm),
+            annulus_stj_mismatch_mm: finiteNumberOrNull(vsrrMetrics.annulus_stj_mismatch_mm),
+          }),
+          "mm",
+          "legacy_vsrr_graft_sizing_projection",
+          "literature",
+          "VSRR_EFFECTIVE_HEIGHT_LIT",
+          0.71,
+          buildLegacyUncertainty("LOW_CONFIDENCE", "Historical VSRR sizing should be reviewed against the original root geometry.", true)
+        )
+      : buildLegacyUnavailableEnvelope("VSRR", "graft_sizing"),
+  };
+
+  const pears: Record<string, unknown> = {
+    external_root_geometry_status: pearsMetrics?.root_external_geometry || pearsGeometry
+      ? buildLegacyEnvelope(
+          sanitizePublicValue(pearsMetrics?.root_external_geometry || pearsGeometry?.geometry || pearsGeometry),
+          "status",
+          "legacy_pears_root_geometry_projection",
+          "algorithm",
+          "PEARS_EXOVASC_LIT",
+          0.69,
+          buildLegacyUncertainty("LOW_CONFIDENCE", "Historical PEARS geometry is reconstructed from stored model outputs.", true)
+        )
+      : buildLegacyUnavailableEnvelope("PEARS", "external_root_geometry_status"),
+    support_region_status: finiteNumberOrNull(pearsMetrics?.support_segment_length_mm) !== null || pickObject(pearsGeometry?.surgical_planning?.support_segment)
+      ? buildLegacyEnvelope(
+          sanitizePublicValue({
+            support_segment_length_mm: finiteNumberOrNull(pearsMetrics?.support_segment_length_mm),
+            support_segment: pickObject(pearsGeometry?.surgical_planning?.support_segment) || null,
+          }),
+          "mm",
+          "legacy_pears_support_region_projection",
+          "algorithm",
+          "PEARS_EXOVASC_LIT",
+          0.64,
+          buildLegacyUncertainty("LOW_CONFIDENCE", "Historical PEARS support region should be reviewed before surgical use.", true)
+        )
+      : buildLegacyUnavailableEnvelope("PEARS", "support_region_status"),
+  };
+
+  return { tavi, vsrr, pears };
+}
+
+function summarizePlanningSection(section: Record<string, unknown> | null): string {
+  if (!section) return "unavailable";
+  const entries = Object.values(section).map((value) => pickObject(value));
+  if (!entries.length) return "unavailable";
+  let hasValue = false;
+  let requiresReview = false;
+  for (const envelope of entries) {
+    if (!envelope) continue;
+    if (envelope.value !== null && envelope.value !== undefined) hasValue = true;
+    const uncertainty = pickObject(envelope.uncertainty);
+    if (uncertainty?.clinician_review_required) requiresReview = true;
+    const flag = String(uncertainty?.flag || "NONE").toUpperCase();
+    if (flag !== "NONE" && flag !== "PLACEHOLDER_ONLY") requiresReview = true;
+  }
+  if (!hasValue) return "unavailable";
+  return requiresReview ? "review_required" : "available";
+}
+
+function deriveLegacyQualityGates(measurementsJson: Record<string, unknown> | null): Record<string, unknown> {
+  const planningMetrics = pickObject(measurementsJson?.planning_metrics);
+  const taviMetrics = pickObject(planningMetrics?.tavi);
+  const vsrrMetrics = pickObject(planningMetrics?.vsrr);
+  const coronaryDetection = pickObject(measurementsJson?.coronary_detection);
+  const leftCoronary = pickObject(coronaryDetection?.left);
+  const rightCoronary = pickObject(coronaryDetection?.right);
+  const annulus = finiteNumberOrNull(taviMetrics?.annulus_diameter_long_mm) ?? finiteNumberOrNull(vsrrMetrics?.annulus_diameter_mm);
+  const sinus = finiteNumberOrNull(taviMetrics?.sinus_width_mm) ?? finiteNumberOrNull(vsrrMetrics?.sinus_diameter_mm);
+  const stj = finiteNumberOrNull(taviMetrics?.stj_diameter_mm) ?? finiteNumberOrNull(vsrrMetrics?.stj_diameter_mm);
+  const leftHeight = finiteNumberOrNull(leftCoronary?.height_mm);
+  const rightHeight = finiteNumberOrNull(rightCoronary?.height_mm);
+
+  const sinusAnnulusStatus =
+    annulus === null || sinus === null ? "not_assessable"
+    : sinus >= annulus ? "normal"
+    : sinus >= annulus - 2 ? "review_required"
+    : "failed";
+  const stjSinusStatus =
+    stj === null || sinus === null ? "not_assessable"
+    : stj <= sinus ? "normal"
+    : stj <= sinus + 2 ? "review_required"
+    : "failed";
+
+  return {
+    sinus_annulus_relation: {
+      status: sinusAnnulusStatus,
+      summary: annulus === null || sinus === null
+        ? "Historical case does not expose enough data to assess sinus versus annulus geometry."
+        : sinus >= annulus
+          ? "Sinus reference remains larger than annulus in this historical case."
+          : "Sinus and annulus relationship needs clinical review in this historical case.",
+      clinician_review_required: sinusAnnulusStatus !== "normal",
+      evidence: buildLegacyEvidence("legacy_geometry_reasonableness_check", "guideline", "SCCT_TAVI_CT_CONSENSUS", annulus !== null && sinus !== null ? 0.67 : 0),
+      observed_value: { annulus_diameter_mm: annulus, sinus_diameter_mm: sinus },
+      expected_context: "Sinus-to-annulus relationships are judged clinically and are not treated as a rigid pass/fail threshold without context.",
+      impact: ["tavi.valve_size_suggestion", "vsrr.graft_sizing", "pears.external_root_geometry_status"],
+      reason_codes: annulus === null || sinus === null ? ["legacy_geometry_missing"] : sinus >= annulus ? ["clinically_consistent_root_profile"] : ["root_geometry_requires_review"],
+    },
+    stj_sinus_relation: {
+      status: stjSinusStatus,
+      summary: stj === null || sinus === null
+        ? "Historical case does not expose enough data to assess STJ versus sinus geometry."
+        : stj <= sinus
+          ? "STJ reference remains narrower than sinus diameter in this historical case."
+          : "STJ and sinus relationship needs review before planning use.",
+      clinician_review_required: stjSinusStatus !== "normal",
+      evidence: buildLegacyEvidence("legacy_geometry_reasonableness_check", "guideline", "SCCT_TAVI_CT_CONSENSUS", stj !== null && sinus !== null ? 0.66 : 0),
+      observed_value: { stj_diameter_mm: stj, sinus_diameter_mm: sinus },
+      expected_context: "STJ morphology is reviewed in context and only fails when the relationship is clearly not credible.",
+      impact: ["vsrr.graft_sizing", "pears.support_region_status"],
+      reason_codes: stj === null || sinus === null ? ["legacy_geometry_missing"] : stj <= sinus ? ["stj_consistent_with_sinus"] : ["stj_requires_review"],
+    },
+    commissure_symmetry: {
+      status: "not_assessable",
+      summary: "Historical latest-case payload does not expose a structured commissure symmetry artifact.",
+      clinician_review_required: true,
+      evidence: buildLegacyEvidence("legacy_commissure_review", "other", "LEGACY_CASE_NO_PLANNING", 0),
+      observed_value: null,
+      expected_context: "Commissure symmetry should be judged from explicit landmark geometry rather than inferred from incomplete historical payloads.",
+      impact: ["vsrr.commissural_geometry_status"],
+      reason_codes: ["commissure_artifact_missing"],
+    },
+    coronary_height_assessment: {
+      status: leftHeight === null && rightHeight === null ? "not_assessable" : "review_required",
+      summary: leftHeight === null && rightHeight === null
+        ? "Coronary ostia were not detected reliably in this historical case."
+        : "Coronary heights are partially available and should be reviewed before relying on obstruction risk.",
+      clinician_review_required: true,
+      evidence: buildLegacyEvidence("legacy_coronary_height_review", "guideline", "SCCT_TAVI_CT_CONSENSUS", leftHeight === null && rightHeight === null ? 0 : 0.44),
+      observed_value: {
+        left_height_mm: leftHeight,
+        right_height_mm: rightHeight,
+        left_status: leftCoronary?.status || "unknown",
+        right_status: rightCoronary?.status || "unknown",
+      },
+      expected_context: "Coronary height is only fully accepted when ostia are confidently localized on a suitable acquisition.",
+      impact: ["tavi.coronary_obstruction_risk"],
+      reason_codes: leftHeight === null && rightHeight === null ? ["coronary_ostia_not_detected"] : ["coronary_height_requires_review"],
+    },
+  };
+}
+
+function deriveLegacyUncertaintySummary(
+  planning: Record<string, unknown> | null,
+  qualityGates: Record<string, unknown> | null
+): Record<string, unknown> {
+  const counts = {
+    review_required: 0,
+    unavailable: 0,
+    failed: 0,
+  };
+  if (planning) {
+    Object.values(planning).forEach((section) => {
+      const record = pickObject(section);
+      if (!record) return;
+      Object.values(record).forEach((entry) => {
+        const envelope = pickObject(entry);
+        const uncertainty = pickObject(envelope?.uncertainty);
+        const flag = String(uncertainty?.flag || "NONE").toUpperCase();
+        if (flag === "NOT_AVAILABLE" || flag === "MISSING_INPUT") counts.unavailable += 1;
+        else if (flag !== "NONE" && flag !== "PLACEHOLDER_ONLY") counts.review_required += 1;
+      });
+    });
+  }
+  if (qualityGates) {
+    Object.values(qualityGates).forEach((entry) => {
+      const gate = pickObject(entry);
+      const status = String(gate?.status || "").toLowerCase();
+      if (status === "failed") counts.failed += 1;
+      else if (status === "review_required" || status === "not_assessable" || status === "borderline") counts.review_required += 1;
+    });
+  }
+  const overall_status = counts.failed ? "failed" : counts.review_required ? "review_required" : counts.unavailable ? "partial" : "normal";
+  return {
+    overall_status,
+    review_required_count: counts.review_required,
+    unavailable_count: counts.unavailable,
+    failed_count: counts.failed,
+  };
+}
+
+function buildLatestCaseSummaryFromWorkstationPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const job = pickObject(payload.job);
+  const jobId = String(job?.id || payload.case_id || "");
+  const studyMeta = pickObject(payload.study_meta);
+  const planning = pickObject(payload.planning);
+  const qualityGates = pickObject(payload.quality_gates_summary) || pickObject(payload.quality_gates);
+  const uncertaintySummary = pickObject(payload.uncertainty_summary)
+    || deriveLegacyUncertaintySummary(planning, qualityGates);
+  return {
+    id: jobId,
+    job_id: jobId,
+    case_id: jobId,
+    case_role: ["latest", "legacy"],
+    display_name: payload.display_name || {
+      "zh-CN": "最新真实病例",
+      en: "Latest Real Case",
+    },
+    build_version: payload.build_version || getBuildVersion(),
+    summary_source: "latest_case_workstation",
+    links: payload.links || null,
+    downloads: payload.downloads || null,
+    capabilities: payload.capabilities || null,
+    planning_summary: payload.planning_summary || {
+      tavi_status: summarizePlanningSection(pickObject(planning?.tavi)),
+      vsrr_status: summarizePlanningSection(pickObject(planning?.vsrr)),
+      pears_status: summarizePlanningSection(pickObject(planning?.pears)),
+    },
+    quality_gates_summary: qualityGates || null,
+    uncertainty_summary: uncertaintySummary,
+    acceptance_review: payload.acceptance_review || buildAcceptanceReview({
+      pipeline_run: payload.pipeline_run,
+      viewer_bootstrap: payload.viewer_bootstrap,
+      capabilities: payload.capabilities,
+      downloads: payload.downloads,
+      planning,
+      quality_gates: payload.quality_gates,
+      quality_gates_summary: qualityGates,
+      coronary_ostia_summary: payload.coronary_ostia_summary,
+      leaflet_geometry_summary: payload.leaflet_geometry_summary,
+    }),
+    clinical_review: payload.clinical_review || payload.acceptance_review || buildAcceptanceReview({
+      pipeline_run: payload.pipeline_run,
+      viewer_bootstrap: payload.viewer_bootstrap,
+      capabilities: payload.capabilities,
+      downloads: payload.downloads,
+      planning,
+      quality_gates: payload.quality_gates,
+      quality_gates_summary: qualityGates,
+      coronary_ostia_summary: payload.coronary_ostia_summary,
+      leaflet_geometry_summary: payload.leaflet_geometry_summary,
+    }),
+    pipeline_run: payload.pipeline_run || null,
+    volume_source: payload.volume_source || null,
+    study_meta: studyMeta ? {
+      id: studyMeta.id || null,
+      source_dataset: studyMeta.source_dataset || null,
+      phase: studyMeta.phase || null,
+    } : null,
+  };
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
+    const respond = (response: Response): Response => withCors(response, request, env);
     try {
       const url = new URL(request.url);
       const path = url.pathname;
 
       if (request.method === "OPTIONS") {
-        return new Response(null, {
+        return respond(new Response(null, {
           status: 204,
-          headers: jsonHeaders
-        });
+          headers: corsHeadersForRequest(request, env),
+        }));
       }
 
       if (request.method === "GET" && path === "/health") {
-        const legacyEnvBuildVersion = getLegacyEnvBuildVersion(env);
-        return json({
+        return respond(json({
           ok: true,
-          service: "aortic-ai-api",
-          mode: getInferenceMode(env),
-          date: new Date().toISOString(),
-          build_version: getBuildVersion(),
-          asset_hashes: getWorkstationAssetHashes(),
-          legacy_env_build_version: legacyEnvBuildVersion,
-          build_consistency_ok: !legacyEnvBuildVersion || legacyEnvBuildVersion === getBuildVersion(),
-        });
+          version: getBuildVersion(),
+          timestamp: new Date().toISOString(),
+          default_case: "loaded",
+          provider_url: env.PROVIDER_URL ?? "not_configured",
+        }));
       }
 
       if (request.method === "GET" && path === "/version") {
         const legacyEnvBuildVersion = getLegacyEnvBuildVersion(env);
-        return json({
+        return respond(json({
           ok: true,
           build_version: getBuildVersion(),
           asset_hashes: getWorkstationAssetHashes(),
           legacy_env_build_version: legacyEnvBuildVersion,
           build_consistency_ok: !legacyEnvBuildVersion || legacyEnvBuildVersion === getBuildVersion(),
-        });
+        }));
       }
 
       if (request.method === "GET" && path === "/favicon.ico") {
-        return new Response(null, {
+        return respond(new Response(null, {
           status: 204,
           headers: jsonHeaders
-        });
+        }));
       }
 
-      if (request.method === "GET" && path === `/assets/style.${getBuildVersion()}.css`) {
-        return textResponse(getDemoStyleCss(), "text/css; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && path === WORKSTATION_STYLE_PATH) {
+        return env.ASSETS.fetch(request);
       }
 
-      if (request.method === "GET" && path === `/assets/app.${getBuildVersion()}.js`) {
-        return textResponse(getDemoAppJs(getBuildVersion()), "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && path === WORKSTATION_APP_PATH) {
+        return env.ASSETS.fetch(request);
       }
 
-      if (request.method === "GET" && path === `/assets/dicom-zip-worker.${getBuildVersion()}.js`) {
-        return textResponse(getDicomZipWorkerJs(), "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && path === WORKSTATION_DICOM_WORKER_PATH) {
+        return env.ASSETS.fetch(request);
       }
 
-      if (request.method === "GET" && path === "/demo") {
-        return html(renderDemoHtml(getBuildVersion()));
+      if ((request.method === "GET" || request.method === "HEAD") && path.startsWith("/default-case/")) {
+        return env.ASSETS.fetch(request);
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/") {
+        return respond(html(renderDemoHtml(getBuildVersion())));
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/demo") {
+        return respond(html(renderDemoHtml(getBuildVersion())));
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/demo/showcase") {
+        return respond(html(renderDemoHtml(getBuildVersion())));
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/demo/legacy") {
+        return respond(html(renderLegacyDemoHtml(getBuildVersion())));
+      }
+
+      if (request.method === "GET" && path === "/api/cases") {
+        return respond(await handleDefaultCaseList(getDefaultCaseStore(env, request), getBuildVersion()));
+      }
+
+      if (request.method === "GET" && /^\/api\/cases\/[^/]+\/summary$/.test(path)) {
+        const parts = path.split("/");
+        const caseId = decodeURIComponent(parts[3] || "");
+        if (caseId !== DEFAULT_CASE_ID) {
+          return respond(json({ error: "case_not_found" }, 404));
+        }
+        const manifest = await getDefaultCaseStore(env, request).getCaseManifest();
+        return respond(json(manifest));
       }
 
       if (request.method === "GET" && path === "/api/cases/default_clinical_case/summary") {
-        return handleDefaultCaseSummary(defaultCaseStore, getBuildVersion());
+        return respond(await handleDefaultCaseSummary(getDefaultCaseStore(env, request), getBuildVersion()));
       }
 
-      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/artifacts/")) {
-        const name = path.split("/").pop() || "";
-        return handleDefaultCaseArtifact(defaultCaseStore, getBuildVersion(), name);
+      if (request.method === "GET" && /^\/api\/cases\/[^/]+\/artifacts\/[^/]+$/.test(path)) {
+        const parts = path.split("/");
+        const caseId = decodeURIComponent(parts[3] || "");
+        const rawName = parts[5] || "";
+        return respond(await handleCaseArtifactById(getDefaultCaseStore(env, request), getBuildVersion(), caseId, rawName));
       }
 
-      if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/meshes/")) {
-        const name = path.split("/").pop() || "";
-        return handleDefaultCaseMesh(defaultCaseStore, name);
+      if (request.method === "GET" && /^\/api\/cases\/[^/]+\/meshes\/[^/]+$/.test(path)) {
+        const parts = path.split("/");
+        const caseId = decodeURIComponent(parts[3] || "");
+        const rawName = parts[5] || "";
+        return respond(await handleCaseMeshById(getDefaultCaseStore(env, request), caseId, rawName));
       }
 
       if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/reports/")) {
         const name = path.split("/").pop() || "report.pdf";
-        return handleDefaultCaseReport(defaultCaseStore, name);
+        return respond(await handleDefaultCaseReport(getDefaultCaseStore(env, request), name));
       }
 
       if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/imaging/")) {
-        const name = path.split("/").pop() || "ct_placeholder.nii.gz";
-        return handleDefaultCaseImaging(defaultCaseStore, name);
+        const name = path.split("/").pop() || "ct_showcase_root_roi.nii.gz";
+        return respond(await handleDefaultCaseImaging(getDefaultCaseStore(env, request), name));
       }
 
       if (request.method === "GET" && path.startsWith("/api/cases/default_clinical_case/qa/")) {
         const name = path.split("/").pop() || "";
-        return handleDefaultCaseQa(defaultCaseStore, name);
+        return respond(await handleDefaultCaseQa(getDefaultCaseStore(env, request), name));
       }
 
       if (request.method === "GET" && path === "/demo/latest-case") {
-        return getLatestDemoCase(env);
+        return respond(await getLatestDemoCase(env, request));
+      }
+
+      if (request.method === "GET" && path === "/providers/inference-health") {
+        return respond(await getInferenceProviderHealth(env));
       }
 
       if (request.method === "POST" && path === "/upload-url") {
         const payload = await readJson(request);
-        return createUploadUrl(payload, env);
+        return respond(await createUploadUrl(payload, env));
       }
 
       if (request.method === "PUT" && path.startsWith("/upload/")) {
         const sessionId = path.split("/").pop();
-        return consumeUploadSession(request, env, sessionId ?? "");
+        return respond(await consumeUploadSession(request, env, sessionId ?? ""));
       }
 
       if (request.method === "POST" && path === "/jobs") {
         const payload = await readJson(request);
-        return createJob(payload, env);
+        return respond(await createJob(payload, env));
       }
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/raw")) {
         const parts = path.split("/");
-        return streamStudyRaw(request, parts[2] ?? "", env);
+        return respond(await streamStudyRaw(request, parts[2] ?? "", env));
       }
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/meta")) {
         const parts = path.split("/");
-        return getStudyMeta(parts[2] ?? "", env);
+        return respond(await getStudyMeta(parts[2] ?? "", env));
       }
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/repository")) {
         const parts = path.split("/");
-        return getStudyRepository(parts[2] ?? "", env);
+        return respond(await getStudyRepository(parts[2] ?? "", env));
       }
 
       if (request.method === "GET" && path.startsWith("/workstation/cases/")) {
         const parts = path.split("/");
-        return getWorkstationCase(parts[3] ?? "", env);
+        return respond(await getWorkstationCase(parts[3] ?? "", env, request));
       }
 
       if (request.method === "GET" && path.startsWith("/jobs/") && path.includes("/artifacts/")) {
         const parts = path.split("/");
-        return streamJobArtifact(request, parts[2] ?? "", parts[4] ?? "", env);
+        return respond(await streamJobArtifact(request, parts[2] ?? "", parts[4] ?? "", env));
       }
 
       if (request.method === "GET" && path.startsWith("/jobs/")) {
         const jobId = path.split("/").pop();
-        return getJob(jobId ?? "", env);
+        return respond(await getJob(jobId ?? "", env));
       }
 
       if (request.method === "POST" && path === "/callbacks/inference") {
         const payload = (await readJson(request)) as InferenceCallbackPayload;
-        return handleInferenceCallback(request, payload, env);
+        return respond(await handleInferenceCallback(request, payload, env));
       }
 
       if (request.method === "POST" && path === "/providers/mock-inference") {
         const payload = await readJson(request);
-        return handleMockInferenceProvider(payload);
+        return respond(await handleMockInferenceProvider(payload));
       }
 
-      return json({ error: "not_found" }, 404);
+      return respond(json({ error: "not_found" }, 404));
     } catch (error) {
-      return json({ error: "internal_error", message: asError(error).message }, 500);
+      return respond(json({ error: "internal_error", message: asError(error).message }, 500));
     }
   },
 
@@ -990,12 +1560,17 @@ async function getJob(jobId: string, env: Env): Promise<Response> {
   });
 }
 
-async function getLatestDemoCase(env: Env): Promise<Response> {
-  void env;
-  return handleDefaultCaseSummary(defaultCaseStore, getBuildVersion());
+async function getLatestDemoCase(env: Env, request: Request): Promise<Response> {
+  try {
+    const legacy = await getLatestDemoCaseLegacy(env, request);
+    if (legacy.ok) return legacy;
+  } catch {
+    // Fall back to bundled showcase case if legacy lookup fails.
+  }
+  return handleDefaultCaseSummary(getDefaultCaseStore(env, request), getBuildVersion());
 }
 
-async function getLatestDemoCaseLegacy(env: Env): Promise<Response> {
+async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Response> {
   const jobRows = await env.DB.prepare(
     `SELECT
        j.id,
@@ -1120,41 +1695,20 @@ async function getLatestDemoCaseLegacy(env: Env): Promise<Response> {
     }
   }
 
-  const queueWaitSeconds = secondsBetween(job.created_at, job.started_at);
-  const processSeconds = secondsBetween(job.started_at, job.finished_at);
-  const totalSeconds = secondsBetween(job.created_at, job.finished_at);
-  const labelKeys = extractLabelKeys(resultPayload);
-  const clinicalTargets = buildClinicalTargets(labelKeys);
-
-  const links = await buildJobLinks(jobId, rawStudyId, env);
-  const pipelineRun = await resolvePipelineRun(jobId, env, resultPayload);
-
-  return json({
-    ...job,
-    artifacts: (artifacts.results as Array<Record<string, unknown>>).map((row) => toPublicArtifactRecord(row)),
-    metrics: metrics.results,
-    scalars: {
-      image_bytes: imageBytes,
-      queue_wait_seconds: queueWaitSeconds,
-      process_seconds: processSeconds,
-      total_seconds: totalSeconds
-    },
-    links,
-    study_meta: {
-      raw_study_id: rawStudyId,
-      source_dataset: preferredStudy?.source_dataset || null,
-      phase: preferredStudy?.phase || null
-    },
-    pipeline_run: pipelineRun,
-    label_keys: labelKeys,
-    clinical_targets: clinicalTargets
-  });
+  void metrics;
+  void imageBytes;
+  void rawStudyId;
+  void preferredStudy;
+  const workstationResponse = await getWorkstationCase(jobId, env, request);
+  if (!workstationResponse.ok) return workstationResponse;
+  const workstationPayload = await workstationResponse.clone().json() as Record<string, unknown>;
+  return json(buildLatestCaseSummaryFromWorkstationPayload(workstationPayload));
 }
 
-async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
+async function getWorkstationCase(jobId: string, env: Env, request: Request): Promise<Response> {
   if (!jobId) return json({ error: "missing_job_id" }, 400);
   if (jobId === DEFAULT_CASE_ID) {
-    return handleDefaultCaseWorkstation(defaultCaseStore, getBuildVersion());
+    return handleDefaultCaseWorkstation(getDefaultCaseStore(env, request), getBuildVersion());
   }
 
   const job = await env.DB.prepare(
@@ -1258,6 +1812,18 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
   const leafletGeometrySummary = buildLeafletGeometrySummary(model, leafletModelJson);
   const pearsGeometryArtifact = pickObject(measurementsJson?.pears_geometry);
   const pearsGeometryFallback = pearsGeometryArtifact ? null : derivePearsGeometryFromModel(model);
+  const planningPayload =
+    pickObject(measurementsJson?.planning)
+    || deriveLegacyPlanningPayload(measurementsJson, coronaryOstiaSummary, leafletGeometrySummary, pearsGeometryArtifact || pearsGeometryFallback);
+  const qualityGates =
+    pickObject(measurementsJson?.quality_gates)
+    || deriveLegacyQualityGates(measurementsJson);
+  const planningSummary = {
+    tavi_status: summarizePlanningSection(pickObject(planningPayload?.tavi)),
+    vsrr_status: summarizePlanningSection(pickObject(planningPayload?.vsrr)),
+    pears_status: summarizePlanningSection(pickObject(planningPayload?.pears)),
+  };
+  const uncertaintySummary = deriveLegacyUncertaintySummary(planningPayload, qualityGates);
   const capabilityState = {
     cpr: {
       available: Boolean(hasCprNifti),
@@ -1301,9 +1867,39 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
     cpr_available: capabilityState.cpr.available,
     pears_geometry_available: capabilityState.pears_geometry.available,
   };
+  const downloads = buildLegacyDownloads(links, artifactTypes);
+  const acceptanceReview = buildAcceptanceReview({
+    pipeline_run: pipelineRun,
+    viewer_bootstrap: {
+      runtime_requirements: {
+        source_kind: volumeSourceKind,
+        loader_kind: volumeSourceKind === "dicom_zip" ? "cornerstone-dicom-zip" : "cornerstone-nifti",
+        supports_mpr: Boolean(links.raw_ct),
+        supports_aux_plane: Boolean(qaFlags.annulus_plane_available || qaFlags.stj_plane_available || qaFlags.centerline_available),
+        supports_cpr: capabilityState.cpr.available,
+      },
+      qa_flags: qaFlags,
+      bootstrap_warnings: runtimeWarnings,
+    },
+    capabilities: capabilityState,
+    downloads,
+    planning: planningPayload,
+    quality_gates: qualityGates,
+    quality_gates_summary: qualityGates,
+    coronary_ostia_summary: sanitizePublicValue(coronaryOstiaSummary),
+    leaflet_geometry_summary: sanitizePublicValue(leafletGeometrySummary),
+  });
 
   const payload = {
     build_version: getBuildVersion(),
+    case_id: jobId,
+    display_name: {
+      "zh-CN": "最新真实病例",
+      en: "Latest Real Case",
+    },
+    case_role: ["latest", "legacy"],
+    placeholder: false,
+    not_real_cta: false,
     job,
     study_meta: {
       id: study.id,
@@ -1324,6 +1920,7 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
     },
     pipeline_run: pipelineRun,
     links,
+    downloads,
     cpr_sources: cprSources,
     volume_source: {
       source_kind: volumeSourceKind,
@@ -1362,12 +1959,19 @@ async function getWorkstationCase(jobId: string, env: Env): Promise<Response> {
     measurement_contract: sanitizePublicValue(measurementContract),
     planning_evidence: sanitizePublicValue(planningEvidence),
     measurements: sanitizePublicValue(measurements),
+    planning: sanitizePublicValue(planningPayload),
     aortic_root_model: sanitizePublicValue(modelJson || null),
     pears_geometry: sanitizePublicValue(
       pearsGeometryArtifact
       || pearsGeometryFallback
       || null
     ),
+    quality_gates: sanitizePublicValue(qualityGates),
+    quality_gates_summary: sanitizePublicValue(qualityGates),
+    planning_summary: sanitizePublicValue(planningSummary),
+    uncertainty_summary: sanitizePublicValue(uncertaintySummary),
+    acceptance_review: acceptanceReview,
+    clinical_review: acceptanceReview,
   };
 
   return json(payload);
@@ -2081,7 +2685,7 @@ async function handleInferenceCallback(
   payload: InferenceCallbackPayload,
   env: Env
 ): Promise<Response> {
-  const expectedSecret = (env.INFERENCE_CALLBACK_SECRET || "").trim();
+  const expectedSecret = (env.PROVIDER_SECRET || "").trim();
   if (expectedSecret) {
     const provided = request.headers.get("x-callback-secret") || "";
     if (provided !== expectedSecret) {
@@ -2150,9 +2754,9 @@ async function dispatchToInferenceWebhook(
   payload: SegQueuePayload,
   src: R2ObjectBody
 ): Promise<void> {
-  const webhookUrl = (env.INFERENCE_WEBHOOK_URL || "").trim();
+  const webhookUrl = (env.PROVIDER_URL || "").trim();
   if (!webhookUrl) {
-    throw new Error("inference_webhook_url_missing");
+    throw new Error("provider_url_missing");
   }
 
   const maxInputBytes = parsePositiveInt(env.INFERENCE_MAX_INPUT_BYTES, 50 * 1024 * 1024);
@@ -2163,7 +2767,7 @@ async function dispatchToInferenceWebhook(
     throw new Error(`input_too_large:${inputBuffer.byteLength}`);
   }
 
-  const callbackSecret = (env.INFERENCE_CALLBACK_SECRET || "").trim();
+  const callbackSecret = (env.PROVIDER_SECRET || "").trim();
   const callbackUrl = buildCallbackUrl(env);
 
   const reqBody = {
@@ -2182,7 +2786,10 @@ async function dispatchToInferenceWebhook(
 
   const response = await fetch(webhookUrl, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-provider-secret": callbackSecret,
+    },
     body: JSON.stringify(reqBody),
     signal: AbortSignal.timeout(timeoutMs)
   });
@@ -3838,8 +4445,8 @@ const DEMO_HTML = `<!doctype html>
         $('langModal').classList.add('hidden');
         return;
       }
-      applyLocale('zh', false);
-      $('langModal').classList.remove('hidden');
+      applyLocale('zh', true);
+      $('langModal').classList.add('hidden');
     }
 
     function chooseLanguage(lang) {
@@ -6209,49 +6816,10 @@ const DEMO_HTML = `<!doctype html>
 </body>
 </html>`;
 
-function getDemoStyleCss(): string {
-  if (WORKSTATION_STYLE_CSS && WORKSTATION_STYLE_CSS.trim()) return WORKSTATION_STYLE_CSS;
-  const match = DEMO_HTML.match(/<style>([\s\S]*?)<\/style>/);
-  return match?.[1]?.trim() || "";
-}
-
-function getDemoAppJs(buildVersion: string): string {
-  if (WORKSTATION_APP_JS && WORKSTATION_APP_JS.trim()) return WORKSTATION_APP_JS;
-  const match = DEMO_HTML.match(/<script type="module">([\s\S]*?)<\/script>/);
-  const body = match?.[1]?.trim() || "";
-  const bootstrap = `
-const AORTIC_BUILD_VERSION = ${JSON.stringify(buildVersion)};
-async function ensureFreshBuild() {
-  try {
-    const resp = await fetch('/version', { cache: 'no-store' });
-    if (!resp.ok) return;
-    const info = await resp.json();
-    const remote = String(info?.build_version || '');
-    if (!remote || remote === AORTIC_BUILD_VERSION) return;
-    const key = 'aortic-build-refresh';
-    const last = sessionStorage.getItem(key) || '';
-    if (last === remote) return;
-    sessionStorage.setItem(key, remote);
-    const next = new URL(window.location.href);
-    next.searchParams.set('v', remote);
-    window.location.replace(next.toString());
-    await new Promise(() => {});
-  } catch {}
-}
-await ensureFreshBuild();
-`;
-  return `${bootstrap}\n${body}\n`;
-}
-
-function getDicomZipWorkerJs(): string {
-  return WORKSTATION_DICOM_WORKER_JS || "";
-}
-
 function renderDemoHtml(buildVersion: string): string {
-  if (WORKSTATION_APP_JS && WORKSTATION_STYLE_CSS) {
-    const cssHref = `/assets/style.${buildVersion}.css?v=${buildVersion}`;
-    const jsSrc = `/assets/app.${buildVersion}.js?v=${buildVersion}`;
-    return `<!doctype html>
+  const cssHref = `${WORKSTATION_STYLE_PATH}?v=${buildVersion}`;
+  const jsSrc = `${WORKSTATION_APP_PATH}?v=${buildVersion}`;
+  return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -6266,16 +6834,11 @@ function renderDemoHtml(buildVersion: string): string {
   <script type="module" src="${jsSrc}"></script>
 </body>
 </html>`;
-  }
-  const cssHref = `/assets/style.${buildVersion}.css?v=${buildVersion}`;
-  const jsSrc = `/assets/app.${buildVersion}.js?v=${buildVersion}`;
-  return DEMO_HTML
-    .replace(
-      /<style>[\s\S]*?<\/style>/,
-      `<meta name="aortic-build-version" content="${buildVersion}" />\n  <link rel="stylesheet" href="${cssHref}" />`
-    )
-    .replace(
-      /<script type="module">[\s\S]*?<\/script>/,
-      `<script>window.__AORTIC_BUILD_VERSION__=${JSON.stringify(buildVersion)};</script>\n  <script type="module" src="${jsSrc}"></script>`
-    );
+}
+
+function renderLegacyDemoHtml(buildVersion: string): string {
+  return DEMO_HTML.replace(
+    /<head>/,
+    `<head>\n  <meta name="aortic-build-version" content="${buildVersion}" />`
+  );
 }

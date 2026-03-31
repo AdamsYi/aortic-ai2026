@@ -8,11 +8,18 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     headless: true,
+    launchOptions: {
+      args: [
+        "--ignore-gpu-blocklist",
+        "--enable-webgl",
+        "--use-angle=swiftshader",
+      ],
+    },
   },
   webServer: {
-    command: `node --import tsx tests/support/demoServer.ts`,
+    command: `npm run build:web && node --import tsx tests/support/demoServer.ts`,
     port,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
 });

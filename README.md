@@ -15,11 +15,12 @@ The primary delivery in this branch is:
 - showcase case
 - reference implementation case
 
-It is a placeholder-only bundle:
-- no real CTA data
-- renderable NIfTI / STL / PDF assets
+It is now a committed real CTA showcase bundle:
+- real CTA root ROI NIfTI committed in-repo for demo and validation
+- renderable STL / PDF assets
 - full measurements / planning / QA / download flow
 - explicit success + failure coexistence
+- `Showcase` is the default `/demo` entry and `Latest Case` is a secondary in-UI switch
 
 ## Runtime Model
 
@@ -66,6 +67,8 @@ npm run dev
 Open:
 
 - `/demo`
+- `/demo/showcase`
+- `/demo?case=latest`
 - `/api/cases/default_clinical_case/summary`
 - `/workstation/cases/default_clinical_case`
 

@@ -17,6 +17,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -28,7 +29,7 @@ import nibabel as nib
 import numpy as np
 
 try:
-    from .geometry.centerline import compute_centerline
+    from .geometry.centerline import compute_centerline, compute_centerline_quality
     from .geometry.common import sanitize_for_json, voxel_volume_mm3
     from .geometry.digital_twin import build_digital_twin_simulation
     from .geometry.landmarks import detect_landmarks_from_profile, pick_section_bundle
@@ -44,7 +45,7 @@ try:
     from .geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
     from .geometry.root_model import attach_digital_twin_simulation, attach_leaflet_geometry, build_aortic_root_model
 except ImportError:
-    from geometry.centerline import compute_centerline
+    from geometry.centerline import compute_centerline, compute_centerline_quality
     from geometry.common import sanitize_for_json, voxel_volume_mm3
     from geometry.digital_twin import build_digital_twin_simulation
     from geometry.landmarks import detect_landmarks_from_profile, pick_section_bundle
@@ -343,6 +344,7 @@ def run_geometry_pipeline(
 
     t0 = time.time()
     centerline = compute_centerline(lumen_mask, affine, spacing, sample_step_mm=1.25)
+    centerline_quality = compute_centerline_quality(centerline, lumen_mask, spacing)
     timers["centerline_seconds"] = round(time.time() - t0, 4)
 
     t0 = time.time()
@@ -405,6 +407,13 @@ def run_geometry_pipeline(
         centerline_result=centerline,
     )
     timers["measurement_seconds"] = round(time.time() - t0, 4)
+    measurements_json_payload["centerline_quality"] = centerline_quality
+    if centerline_quality.get("quality_flag") == "poor":
+        risk_flags.append({
+            "id": "centerline_quality_poor",
+            "severity": "high",
+            "message": "Centerline quality is poor — all derived measurements may be unreliable",
+        })
     root_model.phase_metadata = {
         "input_kind": str((input_meta or {}).get("input_kind") or "nifti"),
         "conversion": str((input_meta or {}).get("conversion") or "none"),
@@ -445,6 +454,7 @@ def run_geometry_pipeline(
         "orthogonal_profile": profile,
         "annulus_plane": annulus_plane_payload,
         "stj_plane": landmarks.stj_plane,
+        "centerline_quality": centerline_quality,
     }
     centerline_json_path = output_dir / "centerline.json"
     centerline_json_path.write_text(json.dumps(sanitize_for_json(centerline_payload), separators=(",", ":")), encoding="utf-8")
@@ -520,6 +530,7 @@ def run_geometry_pipeline(
             "sinus_peak_index": int(landmarks.sinus_peak_index),
             "ascending_reference_index": int(landmarks.ascending_reference_index),
             "skeletonization": "distance_transform",
+            "quality": centerline_quality,
         },
         "landmarks": {
             "annulus_plane": annulus_plane_payload,
@@ -640,7 +651,7 @@ def main() -> None:
 
         builder_meta_path = work_dir / "builder_meta.json"
         cmd = [
-            "python",
+            sys.executable,
             str(builder_py),
             "--input",
             str(nifti_input),

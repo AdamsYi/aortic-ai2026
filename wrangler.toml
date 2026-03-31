@@ -3,14 +3,21 @@ main = "src/index.ts"
 compatibility_date = "2026-03-10"
 workers_dev = true
 
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
 [vars]
+ENVIRONMENT = "production"
 UPLOAD_URL_TTL_SECONDS = "900"
 INFERENCE_MODE = "webhook"
 INFERENCE_WEBHOOK_TIMEOUT_MS = "600000"
 INFERENCE_MAX_INPUT_BYTES = "104857600"
 API_BASE_URL = "https://aortic-ai-api.we085197.workers.dev"
-INFERENCE_WEBHOOK_URL = "https://gpu-api.8686668.xyz/infer"
-BUILD_VERSION = "b898fe5"
+PROVIDER_URL = "https://api.heartvalvepro.edu.kg/infer"
+PROVIDER_HEALTH_URL = "https://api.heartvalvepro.edu.kg/health"
+PROVIDER_SECRET = "aorticai-internal-2026"
+BUILD_VERSION = "67285900a4ac"
 
 [[r2_buckets]]
 binding = "R2_RAW"
@@ -33,3 +40,20 @@ queue = "seg-jobs"
 queue = "seg-jobs"
 max_batch_size = 10
 max_batch_timeout = 30
+
+[env.production]
+vars = { ENVIRONMENT = "production", UPLOAD_URL_TTL_SECONDS = "900", INFERENCE_MODE = "webhook", INFERENCE_WEBHOOK_TIMEOUT_MS = "600000", INFERENCE_MAX_INPUT_BYTES = "104857600", API_BASE_URL = "https://aortic-ai-api.we085197.workers.dev", PROVIDER_URL = "https://api.heartvalvepro.edu.kg/infer", PROVIDER_HEALTH_URL = "https://api.heartvalvepro.edu.kg/health", PROVIDER_SECRET = "aorticai-internal-2026", BUILD_VERSION = "67285900a4ac" }
+routes = [{ pattern = "heartvalvepro.edu.kg", custom_domain = true }, { pattern = "heartvalvepro.edu.kg/*", custom_domain = true }]
+
+[[env.production.r2_buckets]]
+binding = "R2_RAW"
+bucket_name = "aortic-ct-raw"
+
+[[env.production.r2_buckets]]
+binding = "R2_MASK"
+bucket_name = "aortic-mask-out"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "aortic_meta"
+database_id = "db7d7c1c-43b3-4eec-a33c-335ca12ae944"

@@ -1,6 +1,6 @@
 # AorticAI 执行摘要
 
-`default_clinical_case` 同时承担默认病例、showcase case、reference case。它是一个纯占位、可渲染、可校验的数字孪生展示包，不包含任何真实 CTA 数据。
+`default_clinical_case` 同时承担默认病例、showcase case、reference case。它现在是一个真实 CTA 金标准展示病例，随仓库一起交付，用于默认首屏、产品演示、接口契约和自动化测试基线。
 
 系统固定为：
 - Worker 是唯一公网入口
@@ -14,7 +14,7 @@
 
 ## English summary
 
-`default_clinical_case` serves as the default case, showcase case, and reference case. It is a placeholder-only, renderable, schema-valid digital-twin bundle with no real CTA data.
+`default_clinical_case` serves as the default case, showcase case, and reference case. It is now a committed real-CTA gold showcase bundle used for the default first screen, product demonstration, interface baselines, and automated tests.
 
 System invariants:
 - Worker is the only public entrypoint

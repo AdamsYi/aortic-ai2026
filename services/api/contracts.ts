@@ -46,6 +46,44 @@ export interface CapabilityState {
   reason: string | null;
 }
 
+export type ClinicalGateStatus = "normal" | "borderline" | "review_required" | "not_assessable" | "failed";
+
+export interface ClinicalGate {
+  status: ClinicalGateStatus;
+  summary: string;
+  clinician_review_required: boolean;
+  evidence: Evidence;
+  observed_value?: unknown;
+  expected_context?: string | null;
+  impact: string[];
+  reason_codes: string[];
+}
+
+export type CoronaryOstiumStatus =
+  | "not_evaluated"
+  | "not_found"
+  | "detection_failed"
+  | "uncertain"
+  | "detected";
+
+export interface CoronaryOstiumSummary {
+  status: CoronaryOstiumStatus;
+  height_mm: number | null;
+  confidence: number;
+  clinician_review_required: boolean;
+  ostium_world?: number[] | null;
+  ostium_voxel?: number[] | null;
+}
+
+export interface CoronaryOstiaSummary {
+  left: CoronaryOstiumSummary;
+  right: CoronaryOstiumSummary;
+  detected?: unknown[];
+  method?: string;
+  expected_height_mm?: number;
+  clinician_review_required?: boolean;
+}
+
 export interface PipelineRun {
   source_mode: "stored" | "inferred" | "legacy";
   inference_mode: string;
@@ -56,6 +94,27 @@ export interface PipelineRun {
   build_version: string | null;
   provider_job_id?: string | null;
   status?: string | null;
+}
+
+export type AcceptanceStatus = "pass" | "needs_review" | "blocked";
+
+export interface AcceptanceDomain {
+  status: AcceptanceStatus;
+  summary: string;
+  blockers: string[];
+  review_flags: string[];
+}
+
+export interface AcceptanceReview {
+  overall_status: AcceptanceStatus;
+  summary: string;
+  human_review_required: boolean;
+  domains: {
+    viewing: AcceptanceDomain;
+    clinical: AcceptanceDomain;
+    planning: AcceptanceDomain;
+  };
+  next_actions: string[];
 }
 
 export interface DefaultCaseBundle {

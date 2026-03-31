@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 
@@ -319,7 +319,12 @@ def health() -> Dict[str, Any]:
 
 
 @app.post("/infer")
-def infer(req: InferenceRequest) -> Dict[str, Any]:
+def infer(req: InferenceRequest, x_provider_secret: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    expected_secret = env("PROVIDER_SECRET", "aorticai-internal-2026").strip()
+    provided_secret = (x_provider_secret or "").strip()
+    if expected_secret and provided_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="provider_secret_mismatch")
+
     try:
         input_bytes = base64.b64decode(req.input_base64, validate=True)
     except Exception as exc:

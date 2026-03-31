@@ -2,203 +2,206 @@
   "leaflets": [
     {
       "cusp_label": "L",
-      "status": "legacy_summary",
-      "confidence": 0.28,
+      "status": "detected",
+      "confidence": 0.73,
       "hinge_curve_world": [],
       "free_edge_world": [],
       "geometric_height_mm": {
-        "value": 17.0,
+        "value": 5.84,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_placeholder_value",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.28
+          "confidence": 0.7
         },
         "uncertainty": {
-          "flag": "PLACEHOLDER_ONLY",
-          "message": "Legacy leaflet summary only.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Geometric height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "effective_height_mm": {
-        "value": null,
+        "value": 3.37,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_leaflet_summary_only",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.18
+          "confidence": 0.66
         },
         "uncertainty": {
-          "flag": "NOT_AVAILABLE",
-          "message": "Effective height is not available for showcase default case.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Effective height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "coaptation_height_mm": {
-        "value": null,
+        "value": 1.01,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_leaflet_summary_only",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.18
+          "confidence": 0.66
         },
         "uncertainty": {
-          "flag": "NOT_AVAILABLE",
-          "message": "Coaptation height is not available for showcase default case.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Coaptation height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "evidence": {
-        "method": "legacy_placeholder_leaflet",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.28
+        "method": "leaflet_proxy_segmentation",
+        "source_type": "algorithm",
+        "source_ref": "NNUNET_FRAMEWORK",
+        "confidence": 0.73
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "Leaflet model is intentionally legacy-only in the showcase case.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Leaflet geometry is derived from CTA leaflet proxy geometry.",
         "clinician_review_required": true
       }
     },
     {
       "cusp_label": "N",
-      "status": "legacy_summary",
-      "confidence": 0.28,
+      "status": "detected",
+      "confidence": 0.73,
       "hinge_curve_world": [],
       "free_edge_world": [],
       "geometric_height_mm": {
-        "value": 17.2,
+        "value": 2.31,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_placeholder_value",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.28
+          "confidence": 0.7
         },
         "uncertainty": {
-          "flag": "PLACEHOLDER_ONLY",
-          "message": "Legacy leaflet summary only.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Geometric height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "effective_height_mm": {
-        "value": null,
+        "value": 1.63,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_leaflet_summary_only",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.18
+          "confidence": 0.66
         },
         "uncertainty": {
-          "flag": "NOT_AVAILABLE",
-          "message": "Effective height is not available for showcase default case.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Effective height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "coaptation_height_mm": {
-        "value": null,
+        "value": 1.01,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_leaflet_summary_only",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.18
+          "confidence": 0.66
         },
         "uncertainty": {
-          "flag": "NOT_AVAILABLE",
-          "message": "Coaptation height is not available for showcase default case.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Coaptation height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "evidence": {
-        "method": "legacy_placeholder_leaflet",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.28
+        "method": "leaflet_proxy_segmentation",
+        "source_type": "algorithm",
+        "source_ref": "NNUNET_FRAMEWORK",
+        "confidence": 0.73
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "Leaflet model is intentionally legacy-only in the showcase case.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Leaflet geometry is derived from CTA leaflet proxy geometry.",
         "clinician_review_required": true
       }
     },
     {
       "cusp_label": "R",
-      "status": "legacy_summary",
-      "confidence": 0.28,
+      "status": "detected",
+      "confidence": 0.73,
       "hinge_curve_world": [],
       "free_edge_world": [],
       "geometric_height_mm": {
-        "value": 16.8,
+        "value": 3.97,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_placeholder_value",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.28
+          "confidence": 0.7
         },
         "uncertainty": {
-          "flag": "PLACEHOLDER_ONLY",
-          "message": "Legacy leaflet summary only.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Geometric height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "effective_height_mm": {
-        "value": null,
+        "value": 2.25,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_leaflet_summary_only",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.18
+          "confidence": 0.66
         },
         "uncertainty": {
-          "flag": "NOT_AVAILABLE",
-          "message": "Effective height is not available for showcase default case.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Effective height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "coaptation_height_mm": {
-        "value": null,
+        "value": 1.01,
         "unit": "mm",
         "evidence": {
-          "method": "legacy_leaflet_summary_only",
+          "method": "cta_leaflet_proxy_geometry",
           "source_type": "literature",
           "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-          "confidence": 0.18
+          "confidence": 0.66
         },
         "uncertainty": {
-          "flag": "NOT_AVAILABLE",
-          "message": "Coaptation height is not available for showcase default case.",
+          "flag": "LOW_CONFIDENCE",
+          "message": "Coaptation height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
         }
       },
       "evidence": {
-        "method": "legacy_placeholder_leaflet",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.28
+        "method": "leaflet_proxy_segmentation",
+        "source_type": "algorithm",
+        "source_ref": "NNUNET_FRAMEWORK",
+        "confidence": 0.73
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "Leaflet model is intentionally legacy-only in the showcase case.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Leaflet geometry is derived from CTA leaflet proxy geometry.",
         "clinician_review_required": true
       }
     }
   ],
   "evidence": {
-    "method": "showcase_legacy_leaflet_model",
-    "source_type": "literature",
-    "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-    "confidence": 0.28
+    "method": "cta_leaflet_proxy_geometry",
+    "source_type": "algorithm",
+    "source_ref": "NNUNET_FRAMEWORK",
+    "confidence": 0.73
   },
   "uncertainty": {
-    "flag": "NOT_AVAILABLE",
-    "message": "Leaflet model is intentionally partial to demonstrate honest fallback behavior.",
+    "flag": "LOW_CONFIDENCE",
+    "message": "Leaflet geometry is available, but it remains CTA-derived proxy geometry.",
     "clinician_review_required": true
-  }
+  },
+  "status": "detected",
+  "effective_height_mean_mm": 2.42,
+  "coaptation_height_mm": 1.01
 }

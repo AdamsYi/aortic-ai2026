@@ -407,6 +407,7 @@ def detect_commissures_and_sinus_peaks(
         "geometry_stats": dict(geometry_stats),
     }
     if geometry_stats.get("commissure_spacing_error_deg") is not None and float(geometry_stats["commissure_spacing_error_deg"]) > 35.0:
+        primary_spacing_error_deg = float(geometry_stats["commissure_spacing_error_deg"])
         anchor_idx = int(peak_indices[int(np.argmax(radial[np.asarray(peak_indices, dtype=np.int32)]))]) if peak_indices else 0
         n = radial.shape[0]
         peak_indices = sorted([anchor_idx, (anchor_idx + n // 3) % n, (anchor_idx + (2 * n // 3)) % n])
@@ -420,17 +421,29 @@ def detect_commissures_and_sinus_peaks(
             curvature=curvature,
             method="angularly_regularized_saddle_points",
         )
+        actual_comm_deg = [float(item.get("angle_deg", 0.0)) for item in commissures]
         peak_target_deg = [float((np.degrees(angles[idx]) + 360.0) % 360.0) for idx in peak_indices]
         comm_target_deg = [float((np.degrees(angles[idx]) + 360.0) % 360.0) for idx in trough_indices]
         for item, angle_deg in zip(sinus_peaks, peak_target_deg):
             item["angle_deg"] = angle_deg
         for item, angle_deg in zip(commissures, comm_target_deg):
             item["angle_deg"] = angle_deg
+        sorted_comm_deg = sorted(actual_comm_deg)
+        spacings = [
+            sorted_comm_deg[1] - sorted_comm_deg[0],
+            sorted_comm_deg[2] - sorted_comm_deg[1],
+            360.0 - sorted_comm_deg[2] + sorted_comm_deg[0],
+        ]
+        actual_error = float(np.mean(np.abs(np.asarray(spacings) - 120.0)))
         geometry_stats = {
-            "commissure_angle_spacing_deg": [120.0, 120.0, 120.0],
-            "commissure_spacing_error_deg": 0.0,
+            "commissure_angle_spacing_deg": [float(v) for v in spacings],
+            "commissure_spacing_error_deg": actual_error,
             "sinus_peak_angles_deg": peak_target_deg,
             "detection_method": "angularly_regularized_saddle_points",
+            "regularized": True,
+            "regularization_applied": True,
+            "regularization_reason": "primary_spacing_error_exceeded_35_deg",
+            "primary_spacing_error_deg": primary_spacing_error_deg,
         }
     return commissures, sinus_peaks, geometry_stats, raw_bundle
 

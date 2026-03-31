@@ -73,6 +73,38 @@
         "reason": { "type": ["string", "null"] }
       },
       "additionalProperties": false
+    },
+    "ClinicalGateStatus": {
+      "type": "string",
+      "enum": ["normal", "borderline", "review_required", "not_assessable", "failed"]
+    },
+    "ClinicalGate": {
+      "type": "object",
+      "required": [
+        "status",
+        "summary",
+        "clinician_review_required",
+        "evidence",
+        "impact",
+        "reason_codes"
+      ],
+      "properties": {
+        "status": { "$ref": "common.json#/$defs/ClinicalGateStatus" },
+        "summary": { "type": "string" },
+        "clinician_review_required": { "type": "boolean" },
+        "evidence": { "$ref": "common.json#/$defs/Evidence" },
+        "observed_value": { "type": ["number", "string", "boolean", "object", "array", "null"] },
+        "expected_context": { "type": ["string", "null"] },
+        "impact": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

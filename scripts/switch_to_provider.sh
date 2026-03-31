@@ -21,15 +21,15 @@ if [[ -z "$CALLBACK_SECRET" ]]; then
   CALLBACK_SECRET="cb-$(date +%s)-$RANDOM"
 fi
 
-# INFERENCE_WEBHOOK_URL is defined in wrangler.toml [vars].
+# PROVIDER_URL is defined in wrangler.toml [vars].
 # Keep it as an env var binding (do not store as secret with same name),
 # otherwise Wrangler reports "Binding name already in use".
 TMP_FILE="$(mktemp)"
 awk -v url="$PROVIDER_URL" '
 BEGIN { updated = 0 }
 {
-  if ($0 ~ /^INFERENCE_WEBHOOK_URL[[:space:]]*=/) {
-    print "INFERENCE_WEBHOOK_URL = \"" url "\""
+  if ($0 ~ /^PROVIDER_URL[[:space:]]*=/) {
+    print "PROVIDER_URL = \"" url "\""
     updated = 1
   } else {
     print $0
@@ -40,15 +40,15 @@ END {
 }
 ' wrangler.toml > "$TMP_FILE" || {
   rm -f "$TMP_FILE"
-  echo "Failed to update INFERENCE_WEBHOOK_URL in wrangler.toml" >&2
+  echo "Failed to update PROVIDER_URL in wrangler.toml" >&2
   exit 1
 }
 mv "$TMP_FILE" wrangler.toml
 
-printf '%s' "$CALLBACK_SECRET" | npx wrangler secret put INFERENCE_CALLBACK_SECRET
+printf '%s' "$CALLBACK_SECRET" | npx wrangler secret put PROVIDER_SECRET
 
 npx wrangler deploy
 
 echo "Done."
-echo "INFERENCE_WEBHOOK_URL set to: $PROVIDER_URL"
-echo "INFERENCE_CALLBACK_SECRET set (save this on provider side if callback mode): $CALLBACK_SECRET"
+echo "PROVIDER_URL set to: $PROVIDER_URL"
+echo "PROVIDER_SECRET set (save this on provider side if callback mode): $CALLBACK_SECRET"

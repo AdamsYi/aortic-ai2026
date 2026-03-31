@@ -9,6 +9,8 @@ for %%F in (provider_service.pid provider_uvicorn.pid provider_launcher.pid clou
   )
 )
 
+taskkill /FI "WINDOWTITLE eq AorticAI Provider" /T /F >nul 2>nul
+
 for /f "tokens=2 delims==; " %%P in ('wmic process where "name='python.exe' and commandline like '%%provider_service.py%%'" get processid /value 2^>nul ^| find "="') do taskkill /PID %%P /T /F >nul 2>nul
 for /f "tokens=2 delims==; " %%P in ('wmic process where "name='python.exe' and commandline like '%%uvicorn app:app%%'" get processid /value 2^>nul ^| find "="') do taskkill /PID %%P /T /F >nul 2>nul
 for /f "tokens=2 delims==; " %%P in ('wmic process where "name='cloudflared.exe' and commandline like '%%tunnel run%%'" get processid /value 2^>nul ^| find "="') do taskkill /PID %%P /T /F >nul 2>nul

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
@@ -8,6 +8,8 @@ import { buildDefaultCaseBundle } from './build_default_case_bundle.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
+const distRoot = path.join(repoRoot, 'dist');
+const distAssetsRoot = path.join(distRoot, 'assets');
 
 const appEntry = path.join(repoRoot, 'apps/web/src/main.ts');
 const workerEntry = path.join(repoRoot, 'apps/web/src/dicomZip.worker.ts');
@@ -156,6 +158,17 @@ const appSha256 = sha256Hex(appJs);
 const workerSha256 = sha256Hex(workerJs);
 const assetDigest = sha256Hex(`${buildVersion}:${styleSha256}:${appSha256}:${workerSha256}`);
 
+await rm(distAssetsRoot, { recursive: true, force: true });
+await mkdir(distAssetsRoot, { recursive: true });
+
+const styleFileName = `style.${buildVersion}.css`;
+const appFileName = `app.${buildVersion}.js`;
+const dicomWorkerFileName = `dicom-zip-worker.${buildVersion}.js`;
+
+await writeFile(path.join(distAssetsRoot, styleFileName), css, 'utf8');
+await writeFile(path.join(distAssetsRoot, appFileName), appJs, 'utf8');
+await writeFile(path.join(distAssetsRoot, dicomWorkerFileName), workerJs, 'utf8');
+
 await buildDefaultCaseBundle({ buildVersion });
 
 let existingOutput = '';
@@ -184,9 +197,9 @@ export const WORKSTATION_STYLE_SHA256 = ${JSON.stringify(styleSha256)};
 export const WORKSTATION_APP_SHA256 = ${JSON.stringify(appSha256)};
 export const WORKSTATION_DICOM_WORKER_SHA256 = ${JSON.stringify(workerSha256)};
 export const WORKSTATION_ASSET_DIGEST = ${JSON.stringify(assetDigest)};
-export const WORKSTATION_STYLE_CSS = ${JSON.stringify(css)};
-export const WORKSTATION_APP_JS = ${JSON.stringify(appJs)};
-export const WORKSTATION_DICOM_WORKER_JS = ${JSON.stringify(workerJs)};
+export const WORKSTATION_STYLE_PATH = ${JSON.stringify(`/assets/${styleFileName}`)};
+export const WORKSTATION_APP_PATH = ${JSON.stringify(`/assets/${appFileName}`)};
+export const WORKSTATION_DICOM_WORKER_PATH = ${JSON.stringify(`/assets/${dicomWorkerFileName}`)};
 `;
 
 await writeFile(outputPath, moduleSource, 'utf8');

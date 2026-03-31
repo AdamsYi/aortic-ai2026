@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const defaultCaseRoot = path.join(repoRoot, "cases/default_clinical_case");
+const distDefaultCaseRoot = path.join(repoRoot, "dist/default-case");
 const outputPath = path.join(repoRoot, "src/generated/defaultCaseBundle.ts");
 
 function sha256Hex(input) {
@@ -34,6 +35,19 @@ async function readDirMap(dirPath, mode) {
   return out;
 }
 
+async function writeDirMap(dirPath, map, mode) {
+  await rm(dirPath, { recursive: true, force: true });
+  await mkdir(dirPath, { recursive: true });
+  for (const [name, value] of Object.entries(map)) {
+    const absPath = path.join(dirPath, name);
+    if (mode === "utf8") {
+      await writeFile(absPath, value, "utf8");
+    } else {
+      await writeFile(absPath, Buffer.from(value, "base64"));
+    }
+  }
+}
+
 export async function buildDefaultCaseBundle({ buildVersion } = {}) {
   if (!buildVersion || typeof buildVersion !== "string") {
     throw new Error("default_case_bundle_requires_build_version");
@@ -47,6 +61,12 @@ export async function buildDefaultCaseBundle({ buildVersion } = {}) {
   const manifest = JSON.parse(artifacts["case_manifest.json"] || "{}");
   manifest.build_version = buildVersion;
   artifacts["case_manifest.json"] = JSON.stringify(manifest, null, 2);
+
+  await writeDirMap(path.join(distDefaultCaseRoot, "artifacts"), artifacts, "utf8");
+  await writeDirMap(path.join(distDefaultCaseRoot, "qa"), qa, "utf8");
+  await writeDirMap(path.join(distDefaultCaseRoot, "meshes"), meshes, "base64");
+  await writeDirMap(path.join(distDefaultCaseRoot, "reports"), reports, "base64");
+  await writeDirMap(path.join(distDefaultCaseRoot, "imaging_hidden"), imaging, "base64");
 
   const digests = {};
   for (const [groupName, group] of Object.entries({ artifacts, qa, meshes, reports, imaging })) {
@@ -81,19 +101,7 @@ export async function buildDefaultCaseBundle({ buildVersion } = {}) {
 export const DEFAULT_CASE_BUILD_VERSION = ${JSON.stringify(buildVersion)};
 export const DEFAULT_CASE_DIGEST = ${JSON.stringify(defaultCaseDigest)};
 export const DEFAULT_CASE_FILE_DIGESTS = ${JSON.stringify(digests, null, 2)};
-export const DEFAULT_CASE_BUNDLE = ${JSON.stringify(
-    {
-      manifest,
-      artifacts,
-      meshes,
-      reports,
-      qa,
-      imaging,
-      digests,
-    },
-    null,
-    2
-  )};
+export const DEFAULT_CASE_ASSET_PREFIX = "/default-case";
 `;
 
   await writeFile(outputPath, moduleSource, "utf8");

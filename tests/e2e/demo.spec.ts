@@ -3,20 +3,94 @@ import { test, expect } from "@playwright/test";
 test("default showcase case renders full first-screen workstation", async ({ page }) => {
   await page.goto("/demo");
   await expect(page.locator("h1")).toContainText("AorticAI");
+  await expect(page.locator("#load-showcase")).toBeVisible();
+  await expect(page.locator("#load-latest")).toBeVisible();
+  await expect(page.locator("#run-annotation")).toBeVisible();
+  await expect(page.locator("#focus-coronary")).toBeVisible();
+  await expect(page.locator("[data-tool-mode='crosshair']")).toBeVisible();
+  await expect(page.locator("[data-tool-mode='windowLevel']")).toBeVisible();
+  await expect(page.locator("#window-preset")).toBeVisible();
+  await expect(page.locator("#cine-toggle")).toBeVisible();
+  await expect(page.locator("#undo-measurement")).toBeVisible();
+  await expect(page.locator("#delete-measurement")).toBeVisible();
+  await expect(page.locator("#clear-measurements")).toBeVisible();
+  await expect(page.locator("#back-to-crosshair")).toBeVisible();
   await expect(page.locator("#measurement-grid .metric-row").first()).toBeVisible();
   await expect(page.locator("#planning-grid .metric-row").first()).toBeVisible();
+  await expect(page.locator("#acceptance-summary")).toContainText("Review Required");
+  await expect(page.locator("#acceptance-list")).toContainText("Viewing");
   await expect(page.locator("#qa-list")).toBeVisible();
+  await expect(page.locator("#annotation-status")).toContainText("precomputed");
   await expect(page.locator("#download-list .download-link").first()).toBeVisible();
   await expect(page.locator("#viewport-axial")).toBeVisible();
   await expect(page.locator("#viewport-sagittal")).toBeVisible();
   await expect(page.locator("#viewport-coronal")).toBeVisible();
   await expect(page.locator("#three-root")).toBeVisible();
+  await expect(page.locator("#case-meta")).toContainText("Gold Showcase CTA Case");
+  await expect(page.locator("text=Debug")).toHaveCount(0);
+  await expect(page.locator("text=Evidence")).toHaveCount(0);
 });
 
 test("default showcase case displays success and failure states together", async ({ page }) => {
   await page.goto("/demo");
   await expect(page.locator("#planning-grid")).toContainText("TAVI");
-  await expect(page.locator("#planning-grid")).toContainText("null");
-  await expect(page.locator("#qa-list")).toContainText("placeholder");
-  await expect(page.locator("#qa-list")).toContainText("cpr_artifact_missing");
+  await expect(page.locator("#planning-grid")).toContainText("Access Route Assessment");
+  await expect(page.locator("#planning-grid")).toContainText("Coronary Obstruction Risk");
+  await expect(page.locator("#acceptance-summary")).toContainText("Review Required");
+  await expect(page.locator("#qa-list")).toContainText("reference");
+  await expect(page.locator("#qa-list")).toContainText("Cpr Artifact Missing");
+  await expect(page.locator("#capability-grid")).toContainText("unavailable");
+});
+
+test("same workstation can switch from showcase to latest case", async ({ page }) => {
+  await page.goto("/demo");
+  await page.locator("#load-latest").click();
+  await expect(page.locator("#case-meta")).toContainText(/Latest Real Case|Latest Case Auto Annotation/);
+  await expect(page.locator("#planning-grid .metric-row").first()).toBeVisible();
+  await expect(page.locator("#acceptance-summary")).toContainText("Review Required");
+  await expect(page.locator("#acceptance-list")).not.toContainText("Blocked");
+  await expect(page.locator("#qa-list .qa-item").first()).toBeVisible();
+  await expect(page.locator("#viewport-axial")).toBeVisible();
+  await expect(page.locator("#download-list .download-link").first()).toBeVisible();
+});
+
+test("latest case stays stable through core viewing interactions", async ({ page }) => {
+  await page.goto("/demo");
+  await page.locator("#load-latest").click();
+  await expect(page.locator("#case-meta")).toContainText(/Latest Real Case|Latest Case Auto Annotation/);
+  await expect(page.locator("#acceptance-summary")).toContainText(/Review Required|Pass/);
+  await expect(page.locator("#acceptance-list")).not.toContainText("Blocked");
+  await expect(page.locator("#header-status")).not.toContainText("MPR unavailable");
+  await expect(page.locator("#viewport-footer-axial")).not.toContainText("slice —");
+  await expect(page.locator("#viewport-footer-sagittal")).not.toContainText("slice —");
+  await expect(page.locator("#viewport-footer-coronal")).not.toContainText("slice —");
+  await page.locator("[data-tool-mode='windowLevel']").click();
+  await page.locator("#window-preset").selectOption("calcium");
+  await page.locator("#viewport-axial").hover();
+  await page.mouse.wheel(0, 240);
+  await page.locator("#focus-annulus").click();
+  const coronaryButton = page.locator("#focus-coronary");
+  if (await coronaryButton.isEnabled()) {
+    await coronaryButton.click();
+  }
+  await page.locator("#cine-toggle").click();
+  await expect(page.locator("#mpr-status")).toContainText("cine");
+  await page.locator("#cine-toggle").click();
+  await page.locator("#aux-mode").selectOption("centerline");
+  await page.locator("[data-tool-mode='pan']").click();
+  await expect(page.locator("#viewport-footer-axial")).not.toContainText("slice —");
+  await expect(page.locator("#viewport-footer-sagittal")).not.toContainText("slice —");
+  await expect(page.locator("#viewport-footer-coronal")).not.toContainText("slice —");
+  await expect(page.locator("#viewport-footer-aux")).not.toContainText("slice —");
+  await expect(page.locator("#download-list")).toContainText("Raw CT");
+  await expect(page.locator("#acceptance-list")).toContainText("Clinical");
+});
+
+test("latest case can auto-trigger annotation and keep the same workstation shell", async ({ page }) => {
+  await page.goto("/demo");
+  await page.locator("#load-latest").click();
+  await expect(page.locator("#annotation-status")).toContainText(/ready|queued|running|completed/i);
+  await expect(page.locator("#case-meta")).toContainText("Latest Case Auto Annotation", { timeout: 10_000 });
+  await expect(page.locator("#planning-grid .metric-row").first()).toBeVisible();
+  await expect(page.locator("#download-list .download-link").first()).toBeVisible();
 });

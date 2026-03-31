@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "codex": {
+      "type": "stdio",
+      "command": "/Users/adams/.npm-global/bin/codex",
+      "args": ["mcp-server"],
+      "env": {}
+    }
+  }
+}

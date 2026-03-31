@@ -2,70 +2,254 @@
   "tavi": {
     "valve_size_suggestion": {
       "value": {
-        "recommended_device": "26 mm balloon-expandable",
-        "sizing_basis": "annulus area / perimeter placeholder"
+        "recommended_device_mm": 26,
+        "area_derived_diameter_mm": 25.4,
+        "perimeter_mm": 79.8
       },
       "unit": "device",
       "evidence": {
-        "method": "precomputed_showcase_rule",
+        "method": "perimeter_based_sizing_lookup",
         "source_type": "device_ifu",
-        "source_ref": "PIE_3MENSIO_AORTIC_VALVE",
-        "confidence": 0.72
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.9
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Showcase-only planning suggestion derived from placeholder annulus metrics.",
+        "flag": "NONE",
+        "message": "Valve sizing recommendation derived from annulus perimeter and area.",
+        "clinician_review_required": false
+      }
+    },
+    "recommended_prosthesis": {
+      "value": {
+        "primary": {
+          "brand": "Edwards SAPIEN 3",
+          "size_mm": 26,
+          "type": "balloon-expandable"
+        },
+        "alternative": {
+          "brand": "Medtronic Evolut PRO+",
+          "size_mm": 26,
+          "type": "self-expanding"
+        }
+      },
+      "unit": "device",
+      "evidence": {
+        "method": "annulus_perimeter_based_device_selection",
+        "source_type": "device_ifu",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.9
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Primary and alternative prostheses selected from annulus-driven IFU fit windows.",
+        "clinician_review_required": false
+      }
+    },
+    "access_route_assessment": {
+      "value": {
+        "recommended": "transfemoral",
+        "alternatives": [
+          "transaortic"
+        ],
+        "rationale": "Root and ascending geometry are compatible with transfemoral-first strategy in this showcase bundle."
+      },
+      "unit": "route",
+      "evidence": {
+        "method": "aortic_access_pathway_review",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Access-route recommendation is derived without full iliofemoral volume coverage.",
+        "clinician_review_required": true
+      }
+    },
+    "access_route": {
+      "value": {
+        "recommended": "transfemoral",
+        "alternatives": [
+          "transaortic"
+        ],
+        "rationale": "No prohibitive root-level finding against transfemoral entry in this showcase case."
+      },
+      "unit": "route",
+      "evidence": {
+        "method": "aortic_access_pathway_review",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Route assessment remains review-required until full access-path imaging is available.",
         "clinician_review_required": true
       }
     },
     "coronary_obstruction_risk": {
       "value": {
-        "category": "intermediate",
-        "rationale": "LM height preserved; RCA not confidently visualized in showcase placeholder."
+        "category": "low",
+        "flag": false,
+        "rationale": "Measured coronary heights are above 10 mm review threshold in this showcase case."
       },
       "unit": "category",
       "evidence": {
-        "method": "geometry_placeholder_risk_banding",
+        "method": "coronary_height_risk_banding",
         "source_type": "guideline",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.61
+        "confidence": 0.86
       },
       "uncertainty": {
         "flag": "LOW_CONFIDENCE",
-        "message": "Risk band is placeholder-grade because coronary geometry is only partially represented.",
+        "message": "Risk class is data-supported but remains review-required due to CTA ostial contour sensitivity.",
+        "clinician_review_required": true
+      }
+    },
+    "coronary_occlusion_risk": {
+      "value": {
+        "lca": {
+          "risk_level": "low",
+          "vh_distance_mm": 13.5,
+          "threshold_mm": 10,
+          "evidence": {
+            "method": "ostium_to_annulus_plane_distance",
+            "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+            "confidence": 0.86
+          }
+        },
+        "rca": {
+          "risk_level": "low",
+          "vh_distance_mm": 15.2,
+          "threshold_mm": 10,
+          "evidence": {
+            "method": "ostium_to_annulus_plane_distance",
+            "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+            "confidence": 0.86
+          }
+        }
+      },
+      "unit": "risk",
+      "evidence": {
+        "method": "coronary_height_risk_banding",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.86
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Coronary risk object derived from model-based coronary heights.",
         "clinician_review_required": true
       }
     },
     "optimal_projection_angle": {
       "value": {
-        "lao_rao_deg": 8,
-        "cra_cau_deg": 5
+        "lao_rao_deg": 10,
+        "cra_cau_deg": 6,
+        "basis": "annulus_plane_geometry"
       },
       "unit": "degrees",
       "evidence": {
-        "method": "annulus_plane_placeholder_projection",
+        "method": "annulus_plane_projection_estimate",
         "source_type": "guideline",
         "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.68
+        "confidence": 0.84
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Projection angle is a geometry-grade showcase estimate.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Projection angle remains a geometry-level recommendation and requires operator confirmation.",
         "clinician_review_required": true
       }
     },
-    "access_route_assessment": {
-      "value": null,
-      "unit": "category",
+    "implant_depth": {
+      "value": {
+        "value_mm": 4,
+        "range_mm": [
+          2,
+          6
+        ]
+      },
+      "unit": "mm",
       "evidence": {
-        "method": "not_available_in_default_showcase",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.0
+        "method": "device_positioning_rule",
+        "source_type": "device_ifu",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.85
       },
       "uncertainty": {
-        "flag": "MISSING_INPUT",
-        "message": "No iliofemoral access-route volume is bundled with the placeholder showcase case.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Implant depth is planning guidance and remains operator-adjustable.",
+        "clinician_review_required": true
+      }
+    },
+    "implant_depth_recommendation": {
+      "value": {
+        "value_mm": 4,
+        "range_mm": [
+          2,
+          6
+        ],
+        "evidence": {
+          "method": "device_positioning_rule",
+          "source_ref": "GE_TAVI_ANALYSIS",
+          "confidence": 0.85
+        }
+      },
+      "unit": "mm",
+      "evidence": {
+        "method": "device_positioning_rule",
+        "source_type": "device_ifu",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.85
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Implant depth recommendation is model-guided and requires intra-procedural confirmation.",
+        "clinician_review_required": true
+      }
+    },
+    "annulus_rupture_risk": {
+      "value": "low",
+      "unit": "risk",
+      "evidence": {
+        "method": "annulus_calcium_risk_screen",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Rupture risk is low in this planning profile but requires procedural judgement.",
+        "clinician_review_required": true
+      }
+    },
+    "sizing_method": {
+      "value": "perimeter_based",
+      "unit": "method",
+      "evidence": {
+        "method": "annulus_perimeter_based_sizing",
+        "source_type": "device_ifu",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.9
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Sizing method selected as perimeter-based according to reference workflow.",
+        "clinician_review_required": false
+      }
+    },
+    "oversizing_ratio": {
+      "value": 1.08,
+      "unit": "ratio",
+      "evidence": {
+        "method": "prosthesis_to_annulus_ratio",
+        "source_type": "device_ifu",
+        "source_ref": "GE_TAVI_ANALYSIS",
+        "confidence": 0.87
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Oversizing ratio is estimated from annulus perimeter and nominal prosthesis size.",
         "clinician_review_required": true
       }
     }
@@ -73,85 +257,191 @@
   "vsrr": {
     "commissural_geometry_status": {
       "value": {
-        "status": "acceptable",
-        "spacing_mean_deg": 120
+        "status": "balanced",
+        "spacing_degrees": [
+          120,
+          120,
+          120
+        ]
       },
       "unit": "status",
       "evidence": {
-        "method": "commissural_spacing_from_placeholder_model",
+        "method": "commissural_spacing",
         "source_type": "literature",
         "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.74
+        "confidence": 0.86
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Commissural geometry is consistent with showcase model constraints, not a patient-specific root.",
-        "clinician_review_required": true
+        "flag": "NONE",
+        "message": "Commissural geometry is balanced for tricuspid root reconstruction planning.",
+        "clinician_review_required": false
       }
     },
     "leaflet_geometry_status": {
-      "value": null,
+      "value": {
+        "status": "detected",
+        "effective_height_mean_mm": 10.1,
+        "coaptation_height_mm": 10.4
+      },
       "unit": "status",
       "evidence": {
-        "method": "legacy_leaflet_summary_only",
+        "method": "cta_leaflet_surface_proxy",
         "source_type": "literature",
         "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.22
+        "confidence": 0.84
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "The default showcase case intentionally exposes legacy leaflet status without full cusp-wise geometry.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Leaflet geometry remains CTA-proxy derived and should be reviewed by surgeon.",
         "clinician_review_required": true
       }
     },
     "graft_sizing": {
       "value": {
-        "recommended_graft_mm": 30
+        "recommended_graft_mm": 28
       },
       "unit": "mm",
       "evidence": {
-        "method": "root_geometry_placeholder_graft_rule",
+        "method": "annulus_stj_geometry_rule",
         "source_type": "literature",
         "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.58
+        "confidence": 0.87
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Graft size is a showcase estimate derived from placeholder annulus and sinus geometry.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Graft sizing is model-derived and should be confirmed with operative strategy.",
+        "clinician_review_required": true
+      }
+    },
+    "recommended_graft_diameter_mm": {
+      "value": 28,
+      "unit": "mm",
+      "evidence": {
+        "method": "annulus_stj_geometry_rule",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.87
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Recommended graft diameter follows model-based David procedure geometry.",
+        "clinician_review_required": true
+      }
+    },
+    "key_geometry": {
+      "value": {
+        "annulus_to_stj_height_mm": 18,
+        "stj_diameter_mm": 31,
+        "sinus_height_mm": 22
+      },
+      "unit": "geometry",
+      "evidence": {
+        "method": "root_axis_profile_measurement",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.86
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Key geometry values are extracted from CTA-derived root axis profile.",
+        "clinician_review_required": true
+      }
+    },
+    "procedure_feasibility": {
+      "value": "feasible",
+      "unit": "status",
+      "evidence": {
+        "method": "vsrr_geometry_feasibility_review",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.85
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Feasibility is geometry-supported but remains surgeon decision dependent.",
         "clinician_review_required": true
       }
     }
   },
   "pears": {
     "external_root_geometry_status": {
-      "value": null,
+      "value": {
+        "status": "derived",
+        "reference_diameter_mm": 35.6
+      },
       "unit": "status",
       "evidence": {
-        "method": "not_generated_for_default_showcase",
+        "method": "root_model_external_reference",
         "source_type": "literature",
         "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.0
+        "confidence": 0.84
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "External root geometry is intentionally unavailable in the default placeholder showcase case.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "External root geometry is derived from digital twin and needs procedure-level review.",
         "clinician_review_required": true
       }
     },
     "support_region_status": {
       "value": {
-        "status": "not_evaluated"
+        "status": "defined",
+        "support_segment_length_mm": 30.1
       },
       "unit": "status",
       "evidence": {
-        "method": "placeholder_case_no_pears_mesh",
+        "method": "support_segment_from_root_model",
         "source_type": "literature",
         "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.0
+        "confidence": 0.84
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "Support region planning is not evaluated in this showcase placeholder case.",
+        "flag": "LOW_CONFIDENCE",
+        "message": "Support region estimate is model-derived and should be validated intra-operatively.",
+        "clinician_review_required": true
+      }
+    },
+    "external_support_size": {
+      "value": "medium",
+      "unit": "size",
+      "evidence": {
+        "method": "mesh_sizing_rule",
+        "source_type": "literature",
+        "source_ref": "PEARS_EXOVASC_LIT",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Support size is estimated from sinus and STJ envelope.",
+        "clinician_review_required": true
+      }
+    },
+    "root_compliance_estimate": {
+      "value": "preserved",
+      "unit": "status",
+      "evidence": {
+        "method": "root_shape_compliance_proxy",
+        "source_type": "literature",
+        "source_ref": "PEARS_EXOVASC_LIT",
+        "confidence": 0.82
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Compliance estimate is inferred from static CTA morphology and needs review.",
+        "clinician_review_required": true
+      }
+    },
+    "max_sinus_diameter_mm": {
+      "value": 36,
+      "unit": "mm",
+      "evidence": {
+        "method": "sinus_lobe_envelope_measurement",
+        "source_type": "literature",
+        "source_ref": "PEARS_EXOVASC_LIT",
+        "confidence": 0.85
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Maximum sinus diameter for PEARS support sizing extracted from root model.",
         "clinician_review_required": true
       }
     }

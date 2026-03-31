@@ -9,15 +9,30 @@
       "type": "object",
       "required": [
         "valve_size_suggestion",
+        "recommended_prosthesis",
+        "access_route",
         "coronary_obstruction_risk",
+        "coronary_occlusion_risk",
         "optimal_projection_angle",
-        "access_route_assessment"
+        "access_route_assessment",
+        "implant_depth_recommendation",
+        "annulus_rupture_risk",
+        "sizing_method",
+        "oversizing_ratio"
       ],
       "properties": {
         "valve_size_suggestion": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "recommended_prosthesis": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "access_route": { "$ref": "common.json#/$defs/ScalarMeasurement" },
         "coronary_obstruction_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "coronary_occlusion_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
         "optimal_projection_angle": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "access_route_assessment": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+        "access_route_assessment": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "implant_depth_recommendation": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "annulus_rupture_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "sizing_method": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "oversizing_ratio": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "implant_depth": { "$ref": "common.json#/$defs/ScalarMeasurement" }
       },
       "additionalProperties": false
     },
@@ -26,21 +41,36 @@
       "required": [
         "commissural_geometry_status",
         "leaflet_geometry_status",
-        "graft_sizing"
+        "graft_sizing",
+        "recommended_graft_diameter_mm",
+        "key_geometry",
+        "procedure_feasibility"
       ],
       "properties": {
         "commissural_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
         "leaflet_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "graft_sizing": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+        "graft_sizing": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "recommended_graft_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "key_geometry": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "procedure_feasibility": { "$ref": "common.json#/$defs/ScalarMeasurement" }
       },
       "additionalProperties": false
     },
     "pears": {
       "type": "object",
-      "required": ["external_root_geometry_status", "support_region_status"],
+      "required": [
+        "external_root_geometry_status",
+        "support_region_status",
+        "external_support_size",
+        "root_compliance_estimate",
+        "max_sinus_diameter_mm"
+      ],
       "properties": {
         "external_root_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "support_region_status": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+        "support_region_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "external_support_size": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "root_compliance_estimate": { "$ref": "common.json#/$defs/ScalarMeasurement" },
+        "max_sinus_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" }
       },
       "additionalProperties": false
     }

@@ -45,21 +45,31 @@ def _component_skeleton_length(mask: np.ndarray) -> int:
 
 
 def _empty_side(status: str) -> dict[str, Any]:
+    clinician_review_required = status in {"not_found", "uncertain", "detection_failed"}
     return {
         "status": status,
         "height_mm": None,
         "confidence": 0.0,
         "ostium_world": None,
         "ostium_voxel": None,
+        "clinician_review_required": clinician_review_required,
     }
 
 
 def _finalize_side(candidate: dict[str, Any] | None) -> dict[str, Any]:
     if candidate is None:
-        return _empty_side("not_found")
+        return _empty_side("detection_failed")
     confidence = float(candidate.get("confidence", 0.0))
     out = dict(candidate)
-    out["status"] = "detected" if confidence >= 0.55 else "uncertain"
+    if confidence < 0.25:
+        out["status"] = "detection_failed"
+        out["clinician_review_required"] = True
+    elif confidence < 0.55:
+        out["status"] = "uncertain"
+        out["clinician_review_required"] = True
+    else:
+        out["status"] = "detected"
+        out["clinician_review_required"] = False
     return out
 
 
@@ -70,12 +80,23 @@ def detect_coronary_ostia(
     landmark_sections: dict[str, SectionMetrics | None],
     spacing_mm: tuple[float, float, float],
     affine: np.ndarray,
+    expected_height_mm: float = 12.0,
 ) -> dict[str, Any]:
     annulus = landmark_sections.get("annulus")
     stj = landmark_sections.get("stj")
     sinus = landmark_sections.get("sinus")
     if annulus is None or stj is None or sinus is None:
-        return {"left": _empty_side("not_found"), "right": _empty_side("not_found"), "detected": [], "method": "frangi_branch_wall_intersection"}
+        result = {
+            "left": _empty_side("detection_failed"),
+            "right": _empty_side("detection_failed"),
+            "detected": [],
+            "method": "frangi_branch_wall_intersection",
+            "expected_height_mm": float(expected_height_mm),
+        }
+        result["clinician_review_required"] = bool(
+            result["left"].get("clinician_review_required", True) or result["right"].get("clinician_review_required", True)
+        )
+        return result
 
     centers = np.vstack([annulus.center_voxel, sinus.center_voxel, stj.center_voxel]).astype(np.float64)
     x0 = max(0, int(np.floor(np.min(centers[:, 0]) - 64)))
@@ -95,7 +116,17 @@ def detect_coronary_ostia(
     search = roi_crop & shell_outer
     coords = np.argwhere(search)
     if coords.shape[0] == 0:
-        return {"left": _empty_side("not_found"), "right": _empty_side("not_found"), "detected": [], "method": "frangi_branch_wall_intersection"}
+        result = {
+            "left": _empty_side("detection_failed"),
+            "right": _empty_side("detection_failed"),
+            "detected": [],
+            "method": "frangi_branch_wall_intersection",
+            "expected_height_mm": float(expected_height_mm),
+        }
+        result["clinician_review_required"] = bool(
+            result["left"].get("clinician_review_required", True) or result["right"].get("clinician_review_required", True)
+        )
+        return result
 
     min_xyz = np.maximum(coords.min(axis=0) - np.array([12, 12, 2]), 0)
     max_xyz = np.minimum(coords.max(axis=0) + np.array([12, 12, 2]), np.array(lumen_roi.shape) - 1)
@@ -118,7 +149,17 @@ def detect_coronary_ostia(
 
     lab, num = ndimage.label(cand_crop)
     if num == 0:
-        return {"left": _empty_side("not_found"), "right": _empty_side("not_found"), "detected": [], "method": "frangi_branch_wall_intersection"}
+        result = {
+            "left": _empty_side("detection_failed"),
+            "right": _empty_side("detection_failed"),
+            "detected": [],
+            "method": "frangi_branch_wall_intersection",
+            "expected_height_mm": float(expected_height_mm),
+        }
+        result["clinician_review_required"] = bool(
+            result["left"].get("clinician_review_required", True) or result["right"].get("clinician_review_required", True)
+        )
+        return result
 
     annulus_origin = np.asarray(annulus_plane.get("origin_world", annulus.center_world), dtype=np.float64)
     annulus_normal = np.asarray(annulus_plane.get("normal_world", annulus.tangent_world), dtype=np.float64)
@@ -156,7 +197,7 @@ def detect_coronary_ostia(
         lateral = float(np.dot(ostium_world - annulus_origin, annulus_u))
         skeleton_len = _component_skeleton_length(lab == cid)
         wall_contact_ratio = float(wall_pts.shape[0] / max(1, local_pts.shape[0]))
-        height_score = 1.0 - min(1.0, abs(height_mm - 12.0) / 15.0)
+        height_score = 1.0 - min(1.0, abs(height_mm - float(expected_height_mm)) / 15.0)
         confidence = float(
             np.clip(
                 0.35 * min(1.0, best_score / 0.25 if best_score > 0 else 0.0)
@@ -184,7 +225,17 @@ def detect_coronary_ostia(
         )
 
     if not detected:
-        return {"left": _empty_side("not_found"), "right": _empty_side("not_found"), "detected": [], "method": "frangi_branch_wall_intersection"}
+        result = {
+            "left": _empty_side("detection_failed"),
+            "right": _empty_side("detection_failed"),
+            "detected": [],
+            "method": "frangi_branch_wall_intersection",
+            "expected_height_mm": float(expected_height_mm),
+        }
+        result["clinician_review_required"] = bool(
+            result["left"].get("clinician_review_required", True) or result["right"].get("clinician_review_required", True)
+        )
+        return result
 
     detected.sort(key=lambda x: (-float(x["confidence"]), -x["voxels"], x["height_mm"]))
     top = detected[:6]
@@ -195,9 +246,14 @@ def detect_coronary_ostia(
     if left is not None and right is not None and left["component_id"] == right["component_id"]:
         right = right_candidates[1] if len(right_candidates) > 1 else (top[1] if len(top) > 1 else None)
 
-    return {
+    result = {
         "left": _finalize_side(left),
         "right": _finalize_side(right),
         "detected": top,
         "method": "frangi_branch_wall_intersection",
+        "expected_height_mm": float(expected_height_mm),
     }
+    result["clinician_review_required"] = bool(
+        result["left"].get("clinician_review_required", True) or result["right"].get("clinician_review_required", True)
+    )
+    return result

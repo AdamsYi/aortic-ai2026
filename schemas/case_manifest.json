@@ -9,6 +9,7 @@
     "display_name",
     "placeholder",
     "not_real_cta",
+    "imaging_index",
     "artifact_index",
     "mesh_index",
     "report_index",
@@ -37,6 +38,7 @@
     "placeholder": { "type": "boolean" },
     "not_real_cta": { "type": "boolean" },
     "build_version": { "type": "string" },
+    "imaging_index": { "type": "object" },
     "artifact_index": { "type": "object" },
     "mesh_index": { "type": "object" },
     "report_index": { "type": "object" },
@@ -53,7 +55,22 @@
       "additionalProperties": false
     },
     "planning_summary": { "type": "object" },
-    "quality_gates_summary": { "type": "object" },
+    "quality_gates_summary": {
+      "type": "object",
+      "required": [
+        "sinus_annulus_relation",
+        "stj_sinus_relation",
+        "commissure_symmetry",
+        "coronary_height_assessment"
+      ],
+      "properties": {
+        "sinus_annulus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "stj_sinus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "commissure_symmetry": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "coronary_height_assessment": { "$ref": "common.json#/$defs/ClinicalGate" }
+      },
+      "additionalProperties": false
+    },
     "uncertainty_summary": { "type": "object" }
   },
   "additionalProperties": true

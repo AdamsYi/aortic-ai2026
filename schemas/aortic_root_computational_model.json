@@ -108,7 +108,8 @@
           "required": ["status", "point_world", "evidence", "uncertainty"],
           "properties": {
             "status": { "type": "string" },
-            "point_world": { "$ref": "common.json#/$defs/Vector3" },
+            "clinician_review_required": { "type": "boolean" },
+            "point_world": { "anyOf": [{ "$ref": "common.json#/$defs/Vector3" }, { "type": "null" }] },
             "evidence": { "$ref": "common.json#/$defs/Evidence" },
             "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
           },
@@ -119,9 +120,27 @@
           "required": ["status", "point_world", "evidence", "uncertainty"],
           "properties": {
             "status": { "type": "string" },
-            "point_world": { "$ref": "common.json#/$defs/Vector3" },
+            "clinician_review_required": { "type": "boolean" },
+            "point_world": { "anyOf": [{ "$ref": "common.json#/$defs/Vector3" }, { "type": "null" }] },
             "evidence": { "$ref": "common.json#/$defs/Evidence" },
             "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          },
+          "additionalProperties": true
+        },
+        "clinician_review_required": { "type": "boolean" },
+        "expected_height_mm": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "reference_sections": {
+      "type": "object",
+      "properties": {
+        "geometry_stats": {
+          "type": "object",
+          "properties": {
+            "regularization_applied": { "type": "boolean" },
+            "regularization_reason": { "type": "string" },
+            "primary_spacing_error_deg": { "type": "number" }
           },
           "additionalProperties": true
         }
@@ -146,12 +165,16 @@
     },
     "quality_gates": {
       "type": "object",
-      "required": ["sinus_ge_annulus", "stj_le_sinus", "commissure_spacing_ok", "coronary_height_reasonable"],
+      "required": ["sinus_annulus_relation", "stj_sinus_relation", "commissure_symmetry", "coronary_height_assessment", "notes"],
       "properties": {
-        "sinus_ge_annulus": { "type": "boolean" },
-        "stj_le_sinus": { "type": "boolean" },
-        "commissure_spacing_ok": { "type": "boolean" },
-        "coronary_height_reasonable": { "type": "boolean" }
+        "sinus_annulus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "stj_sinus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "commissure_symmetry": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "coronary_height_assessment": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
       "additionalProperties": true
     }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import heapq
 import math
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy import interpolate, ndimage
@@ -368,6 +369,50 @@ def sample_radii(distance_map_mm: np.ndarray, points_voxel: np.ndarray) -> np.nd
     coords = np.vstack([points_voxel[:, 0], points_voxel[:, 1], points_voxel[:, 2]])
     radii = ndimage.map_coordinates(distance_map_mm.astype(np.float32), coords, order=1, mode="nearest")
     return np.asarray(radii, dtype=np.float64)
+
+
+def compute_centerline_quality(
+    result: CenterlineResult,
+    lumen_mask: np.ndarray,
+    spacing_mm: tuple[float, float, float],
+) -> dict[str, Any]:
+    del lumen_mask, spacing_mm
+    point_count = int(result.points_world.shape[0])
+    total_length_mm = float(result.s_mm[-1]) if result.s_mm.size > 0 else 0.0
+    mean_radius_mm = float(np.mean(result.radii_mm)) if result.radii_mm.size > 0 else 0.0
+    min_radius_mm = float(np.min(result.radii_mm)) if result.radii_mm.size > 0 else 0.0
+
+    tangents = np.asarray(result.tangents_world, dtype=np.float64)
+    if tangents.shape[0] >= 2:
+        norms = np.linalg.norm(tangents, axis=1)
+        valid = norms > 1e-8
+        tangents_n = np.zeros_like(tangents, dtype=np.float64)
+        tangents_n[valid] = tangents[valid] / norms[valid, None]
+        pairwise = np.sum(tangents_n[:-1] * tangents_n[1:], axis=1)
+        smoothness_score = float(np.clip(np.mean(pairwise), 0.0, 1.0)) if pairwise.size > 0 else 0.0
+    else:
+        smoothness_score = 0.0
+
+    if point_count >= 20 and smoothness_score >= 0.95 and min_radius_mm >= 1.0:
+        quality_flag = "good"
+        uncertainty_flag = "NONE"
+    elif point_count >= 10 and smoothness_score >= 0.85:
+        quality_flag = "acceptable"
+        uncertainty_flag = "LOW_CONFIDENCE"
+    else:
+        quality_flag = "poor"
+        uncertainty_flag = "DETECTION_FAILED"
+
+    return {
+        "point_count": point_count,
+        "total_length_mm": total_length_mm,
+        "mean_radius_mm": mean_radius_mm,
+        "min_radius_mm": min_radius_mm,
+        "smoothness_score": smoothness_score,
+        "method": result.method,
+        "quality_flag": quality_flag,
+        "uncertainty_flag": uncertainty_flag,
+    }
 
 
 def compute_centerline(

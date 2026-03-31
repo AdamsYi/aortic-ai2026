@@ -33,19 +33,119 @@
       },
       "additionalProperties": true
     },
+    "measurements_raw": {
+      "type": "object",
+      "properties": {
+        "sinus_of_valsalva": {
+          "type": "object",
+          "properties": {
+            "uncertainty_flag": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "MISSING_INPUT",
+                "DETECTION_FAILED",
+                "LOW_CONFIDENCE",
+                "ANATOMY_CONSTRAINT_VIOLATION",
+                "OUT_OF_RANGE",
+                "IMAGE_QUALITY_LIMITATION",
+                "MODEL_INCONSISTENCY",
+                "PLACEHOLDER_ONLY",
+                "NOT_AVAILABLE"
+              ]
+            },
+            "constraint_note": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "stj": {
+          "type": "object",
+          "properties": {
+            "uncertainty_flag": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "MISSING_INPUT",
+                "DETECTION_FAILED",
+                "LOW_CONFIDENCE",
+                "ANATOMY_CONSTRAINT_VIOLATION",
+                "OUT_OF_RANGE",
+                "IMAGE_QUALITY_LIMITATION",
+                "MODEL_INCONSISTENCY",
+                "PLACEHOLDER_ONLY",
+                "NOT_AVAILABLE"
+              ]
+            },
+            "constraint_note": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "measurements_regularized": {
+      "type": "object",
+      "properties": {
+        "sinus_of_valsalva": {
+          "type": "object",
+          "properties": {
+            "uncertainty_flag": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "MISSING_INPUT",
+                "DETECTION_FAILED",
+                "LOW_CONFIDENCE",
+                "ANATOMY_CONSTRAINT_VIOLATION",
+                "OUT_OF_RANGE",
+                "IMAGE_QUALITY_LIMITATION",
+                "MODEL_INCONSISTENCY",
+                "PLACEHOLDER_ONLY",
+                "NOT_AVAILABLE"
+              ]
+            },
+            "constraint_note": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "stj": {
+          "type": "object",
+          "properties": {
+            "uncertainty_flag": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "MISSING_INPUT",
+                "DETECTION_FAILED",
+                "LOW_CONFIDENCE",
+                "ANATOMY_CONSTRAINT_VIOLATION",
+                "OUT_OF_RANGE",
+                "IMAGE_QUALITY_LIMITATION",
+                "MODEL_INCONSISTENCY",
+                "PLACEHOLDER_ONLY",
+                "NOT_AVAILABLE"
+              ]
+            },
+            "constraint_note": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "constraints": {
       "type": "object",
       "required": [
-        "sinus_ge_annulus",
-        "stj_le_sinus",
-        "commissure_spacing_ok",
-        "coronary_height_reasonable"
+        "sinus_annulus_relation",
+        "stj_sinus_relation",
+        "commissure_symmetry",
+        "coronary_height_assessment"
       ],
       "properties": {
-        "sinus_ge_annulus": { "type": "boolean" },
-        "stj_le_sinus": { "type": "boolean" },
-        "commissure_spacing_ok": { "type": "boolean" },
-        "coronary_height_reasonable": { "type": "boolean" }
+        "sinus_annulus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "stj_sinus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "commissure_symmetry": { "$ref": "common.json#/$defs/ClinicalGate" },
+        "coronary_height_assessment": { "$ref": "common.json#/$defs/ClinicalGate" }
       },
       "additionalProperties": true
     }

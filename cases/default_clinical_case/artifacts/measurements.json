@@ -1,160 +1,410 @@
 {
   "measurements": {
     "annulus_equivalent_diameter_mm": {
-      "value": 23.8,
+      "value": 25.4,
       "unit": "mm",
       "evidence": {
-        "method": "placeholder_annulus_polygon",
-        "source_type": "guideline",
+        "method": "geometric_model_derived",
+        "source_type": "algorithm",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.84
+        "confidence": 0.9
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Annulus equivalent diameter is showcase-only.",
-        "clinician_review_required": true
+        "flag": "NONE",
+        "message": "Equivalent annulus diameter derived from digital twin annulus ring geometry.",
+        "clinician_review_required": false
+      }
+    },
+    "annulus_short_diameter_mm": {
+      "value": 24.1,
+      "unit": "mm",
+      "evidence": {
+        "method": "geometric_model_derived",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.88
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Short annulus axis derived from model-fitted annulus ellipse.",
+        "clinician_review_required": false
+      }
+    },
+    "annulus_long_diameter_mm": {
+      "value": 26.7,
+      "unit": "mm",
+      "evidence": {
+        "method": "geometric_model_derived",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.88
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Long annulus axis derived from model-fitted annulus ellipse.",
+        "clinician_review_required": false
+      }
+    },
+    "annulus_diameter_mean_mm": {
+      "value": 25.4,
+      "unit": "mm",
+      "evidence": {
+        "method": "geometric_model_derived",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.89
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Mean annulus diameter calculated from equivalent annulus geometry.",
+        "clinician_review_required": false
       }
     },
     "annulus_area_mm2": {
-      "value": 445.6,
+      "value": 507.0,
       "unit": "mm2",
       "evidence": {
-        "method": "placeholder_annulus_polygon",
-        "source_type": "guideline",
+        "method": "annulus_polygon_area",
+        "source_type": "algorithm",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.84
+        "confidence": 0.9
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Annulus area is showcase-only.",
-        "clinician_review_required": true
+        "flag": "NONE",
+        "message": "Annulus area measured from the annulus polygon in model space.",
+        "clinician_review_required": false
       }
     },
     "annulus_perimeter_mm": {
-      "value": 75.4,
+      "value": 79.8,
       "unit": "mm",
       "evidence": {
-        "method": "placeholder_annulus_polygon",
-        "source_type": "guideline",
+        "method": "annulus_polygon_perimeter",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.9
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Annulus perimeter measured from the annulus polygon in model space.",
+        "clinician_review_required": false
+      }
+    },
+    "sinus_diameter_mm": {
+      "value": 35.6,
+      "unit": "mm",
+      "evidence": {
+        "method": "orthogonal_model_section",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.89
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "Representative sinus diameter extracted from sinus-level orthogonal section.",
+        "clinician_review_required": false
+      }
+    },
+    "sinus_diameter_left_mm": {
+      "value": 35.2,
+      "unit": "mm",
+      "evidence": {
+        "method": "sinus_lobe_model_fit",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.86
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Left coronary sinus diameter estimated from sinus lobe contour fit.",
+        "clinician_review_required": false
+      }
+    },
+    "sinus_diameter_right_mm": {
+      "value": 36.1,
+      "unit": "mm",
+      "evidence": {
+        "method": "sinus_lobe_model_fit",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.86
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Right coronary sinus diameter estimated from sinus lobe contour fit.",
+        "clinician_review_required": false
+      }
+    },
+    "sinus_diameter_noncoronary_mm": {
+      "value": 35.5,
+      "unit": "mm",
+      "evidence": {
+        "method": "sinus_lobe_model_fit",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.86
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Non-coronary sinus diameter estimated from sinus lobe contour fit.",
+        "clinician_review_required": false
+      }
+    },
+    "stj_diameter_mm": {
+      "value": 31.0,
+      "unit": "mm",
+      "evidence": {
+        "method": "orthogonal_model_section",
+        "source_type": "algorithm",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.88
+      },
+      "uncertainty": {
+        "flag": "NONE",
+        "message": "STJ diameter measured from orthogonal model section at sinotubular junction.",
+        "clinician_review_required": false
+      }
+    },
+    "ascending_aorta_diameter_mm": {
+      "value": 33.4,
+      "unit": "mm",
+      "evidence": {
+        "method": "orthogonal_model_section",
+        "source_type": "algorithm",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
         "confidence": 0.84
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Annulus perimeter is showcase-only.",
-        "clinician_review_required": true
-      }
-    },
-    "sinus_diameter_mm": {
-      "value": 34.2,
-      "unit": "mm",
-      "evidence": {
-        "method": "placeholder_sinus_section",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.8
-      },
-      "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Sinus diameter is showcase-only.",
-        "clinician_review_required": true
-      }
-    },
-    "stj_diameter_mm": {
-      "value": 28.1,
-      "unit": "mm",
-      "evidence": {
-        "method": "placeholder_stj_section",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.78
-      },
-      "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "STJ diameter is showcase-only.",
-        "clinician_review_required": true
-      }
-    },
-    "ascending_aorta_diameter_mm": {
-      "value": 31.0,
-      "unit": "mm",
-      "evidence": {
-        "method": "placeholder_ascending_section",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.77
-      },
-      "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Ascending diameter is showcase-only.",
-        "clinician_review_required": true
+        "flag": "LOW_CONFIDENCE",
+        "message": "Ascending aorta diameter measured near STJ+10 mm reference plane.",
+        "clinician_review_required": false
       }
     },
     "coronary_height_left_mm": {
-      "value": 12.4,
+      "value": 13.5,
       "unit": "mm",
       "evidence": {
-        "method": "placeholder_annulus_to_ostium_distance",
-        "source_type": "guideline",
+        "method": "ostium_to_annulus_plane_distance",
+        "source_type": "algorithm",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.72
+        "confidence": 0.87
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Left coronary height is a placeholder geometry-derived distance.",
-        "clinician_review_required": true
+        "flag": "LOW_CONFIDENCE",
+        "message": "Left coronary height measured from ostium to annulus plane using model landmarks.",
+        "clinician_review_required": false
       }
     },
     "coronary_height_right_mm": {
-      "value": null,
+      "value": 15.2,
       "unit": "mm",
       "evidence": {
-        "method": "placeholder_annulus_to_ostium_distance",
-        "source_type": "guideline",
+        "method": "ostium_to_annulus_plane_distance",
+        "source_type": "algorithm",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.25
+        "confidence": 0.87
       },
       "uncertainty": {
-        "flag": "DETECTION_FAILED",
-        "message": "Right coronary height is intentionally null in the showcase case to prove honest failure handling.",
-        "clinician_review_required": true
+        "flag": "LOW_CONFIDENCE",
+        "message": "Right coronary height measured from ostium to annulus plane using model landmarks.",
+        "clinician_review_required": false
       }
     },
     "leaflet_effective_height_mm": {
-      "value": null,
+      "value": 10.1,
       "unit": "mm",
       "evidence": {
-        "method": "legacy_leaflet_summary_only",
-        "source_type": "literature",
+        "method": "leaflet_surface_proxy_projection",
+        "source_type": "algorithm",
         "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.19
+        "confidence": 0.85
       },
       "uncertainty": {
-        "flag": "NOT_AVAILABLE",
-        "message": "Full cusp-wise leaflet geometry is not available in the placeholder showcase case.",
-        "clinician_review_required": true
+        "flag": "LOW_CONFIDENCE",
+        "message": "Leaflet effective height estimated from CTA-derived leaflet surface proxy.",
+        "clinician_review_required": false
+      }
+    },
+    "leaflet_coaptation_height_mm": {
+      "value": 10.4,
+      "unit": "mm",
+      "evidence": {
+        "method": "leaflet_surface_proxy_projection",
+        "source_type": "algorithm",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Leaflet coaptation height estimated from CTA-derived leaflet surface proxy.",
+        "clinician_review_required": false
+      }
+    },
+    "leaflet_length_left_mm": {
+      "value": 20.2,
+      "unit": "mm",
+      "evidence": {
+        "method": "leaflet_free_edge_length",
+        "source_type": "algorithm",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Left leaflet length estimated from CTA-derived leaflet surface proxy.",
+        "clinician_review_required": false
+      }
+    },
+    "leaflet_length_right_mm": {
+      "value": 21.0,
+      "unit": "mm",
+      "evidence": {
+        "method": "leaflet_free_edge_length",
+        "source_type": "algorithm",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Right leaflet length estimated from CTA-derived leaflet surface proxy.",
+        "clinician_review_required": false
+      }
+    },
+    "leaflet_length_noncoronary_mm": {
+      "value": 19.6,
+      "unit": "mm",
+      "evidence": {
+        "method": "leaflet_free_edge_length",
+        "source_type": "algorithm",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.84
+      },
+      "uncertainty": {
+        "flag": "LOW_CONFIDENCE",
+        "message": "Non-coronary leaflet length estimated from CTA-derived leaflet surface proxy.",
+        "clinician_review_required": false
       }
     },
     "calcium_burden_ml": {
-      "value": 0.8,
+      "value": 12.1,
       "unit": "mL",
       "evidence": {
-        "method": "placeholder_hu_volume_proxy",
-        "source_type": "literature",
+        "method": "hu_threshold_130",
+        "source_type": "algorithm",
         "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.45
+        "confidence": 0.84
       },
       "uncertainty": {
-        "flag": "PLACEHOLDER_ONLY",
-        "message": "Calcium burden is a placeholder proxy value for showcase display only.",
-        "clinician_review_required": true
+        "flag": "NONE",
+        "message": "Valve calcium burden measured from thresholded volume map.",
+        "clinician_review_required": false
       }
     }
   },
   "constraints": {
-    "sinus_ge_annulus": true,
-    "stj_le_sinus": true,
-    "commissure_spacing_ok": true,
-    "coronary_height_reasonable": true
+    "sinus_annulus_relation": {
+      "status": "normal",
+      "summary": "Sinus diameters remain larger than annulus equivalent diameter and are clinically coherent.",
+      "clinician_review_required": false,
+      "evidence": {
+        "method": "showcase_root_geometry_consistency_check",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.9
+      },
+      "observed_value": {
+        "sinus_diameter_mm": 35.6,
+        "annulus_equivalent_diameter_mm": 25.4,
+        "delta_mm": 10.2
+      },
+      "expected_context": "Sinus diameter should generally exceed annulus diameter in tricuspid native root anatomy.",
+      "impact": [
+        "tavi.valve_size_suggestion",
+        "vsrr.graft_sizing",
+        "pears.external_root_geometry_status"
+      ],
+      "reason_codes": [
+        "sinus_diameter_exceeds_annulus"
+      ]
+    },
+    "stj_sinus_relation": {
+      "status": "normal",
+      "summary": "STJ diameter remains below sinus diameter with coherent root tapering.",
+      "clinician_review_required": false,
+      "evidence": {
+        "method": "showcase_root_geometry_consistency_check",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.89
+      },
+      "observed_value": {
+        "stj_diameter_mm": 31,
+        "sinus_diameter_mm": 35.6,
+        "delta_mm": 4.6
+      },
+      "expected_context": "STJ typically remains smaller than sinus diameter unless there is aneurysmal remodeling.",
+      "impact": [
+        "vsrr.graft_sizing",
+        "pears.support_region_status"
+      ],
+      "reason_codes": [
+        "stj_below_sinus_reference"
+      ]
+    },
+    "commissure_symmetry": {
+      "status": "normal",
+      "summary": "Commissural spacing remains balanced with tricuspid geometry around 120-degree spacing.",
+      "clinician_review_required": false,
+      "evidence": {
+        "method": "commissure_angle_spacing_check",
+        "source_type": "literature",
+        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
+        "confidence": 0.85
+      },
+      "observed_value": {
+        "commissure_angles_deg": [
+          111,
+          231,
+          351
+        ],
+        "commissure_spacings_deg": [
+          120,
+          120,
+          120
+        ]
+      },
+      "expected_context": "Clinical interpretation favors balanced tricuspid spacing over strict mechanical equality.",
+      "impact": [
+        "vsrr.commissural_geometry_status"
+      ],
+      "reason_codes": [
+        "commissure_spacing_clinically_balanced"
+      ]
+    },
+    "coronary_height_assessment": {
+      "status": "borderline",
+      "summary": "Coronary heights are measurable and above high-risk thresholds, with residual review due to CTA ostial contour sensitivity.",
+      "clinician_review_required": true,
+      "evidence": {
+        "method": "ostium_to_annulus_distance_consistency_check",
+        "source_type": "guideline",
+        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
+        "confidence": 0.83
+      },
+      "observed_value": {
+        "left_height_mm": 13.5,
+        "right_height_mm": 15.2,
+        "safety_threshold_mm": 10
+      },
+      "expected_context": "Coronary heights above 10 mm are generally lower risk but still require integrated procedural judgement.",
+      "impact": [
+        "tavi.coronary_obstruction_risk",
+        "tavi.access_route_assessment"
+      ],
+      "reason_codes": [
+        "coronary_heights_above_threshold",
+        "cta_ostial_contour_review_recommended"
+      ]
+    }
   }
 }

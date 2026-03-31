@@ -1,16 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { DEFAULT_CASE_BUNDLE } from "../src/generated/defaultCaseBundle";
 import {
   buildDefaultCaseSummary,
   buildDefaultCaseWorkstationPayload,
-  createDefaultCaseStoreFromBundle,
 } from "../services/api/defaultCaseHandlers";
+import { createCaseStoreFromFs } from "../services/api/defaultCaseStore.node";
 import { WORKSTATION_BUILD_VERSION } from "../src/generated/workstationAssets";
 
 test("default showcase bundle can build summary and workstation payload under 15s", async () => {
-  const store = createDefaultCaseStoreFromBundle(DEFAULT_CASE_BUNDLE);
+  const store = createCaseStoreFromFs();
   const started = performance.now();
   const summary = await buildDefaultCaseSummary(store, WORKSTATION_BUILD_VERSION);
   const workstation = await buildDefaultCaseWorkstationPayload(store, WORKSTATION_BUILD_VERSION);

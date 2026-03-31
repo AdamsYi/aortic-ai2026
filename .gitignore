@@ -7,3 +7,9 @@ __pycache__/
 runs/
 data/
 .aorticai-work/
+dist/
+test-results/
+output/
+*.pid
+gpu_provider/.venv/
+gpu_provider/__pycache__/

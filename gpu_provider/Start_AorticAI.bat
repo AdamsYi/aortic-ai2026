@@ -31,9 +31,17 @@ if not exist ".venv\Scripts\python.exe" (
   call ".venv\Scripts\activate.bat"
 )
 
+python -c "import nibabel, scipy, skimage, fastapi, uvicorn; print('deps OK')" >nul 2>nul
+if errorlevel 1 (
+  echo [AorticAI] Python dependencies are missing or broken.
+  echo [AorticAI] Please run gpu_provider\\setup_windows_once.ps1 first.
+  exit /b 1
+)
+
 set MODEL_DEVICE=gpu
 set PIPELINE_QUALITY=high
 set PROVIDER_RESPONSE_MODE=callback
+set PROVIDER_SECRET=aorticai-internal-2026
 if "%AORTICAI_TUNNEL_NAME%"=="" set AORTICAI_TUNNEL_NAME=aortic-gpu
 
 call "%~dp0Stop_AorticAI.bat" >nul 2>nul
@@ -43,7 +51,8 @@ if exist provider_uvicorn.pid del /q provider_uvicorn.pid >nul 2>nul
 if exist cloudflared.pid del /q cloudflared.pid >nul 2>nul
 
 echo [AorticAI] starting provider supervisor...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList 'provider_service.py --host 127.0.0.1 --port 8000 --quality high --response-mode callback --update-interval-seconds 120' -WorkingDirectory '%CD%' -WindowStyle Minimized -PassThru; Set-Content -Path 'provider_launcher.pid' -Value $p.Id"
+rem 如首次运行请先执行 preload_models.bat 下载模型权重
+START "AorticAI Provider" /MIN cmd /k ".venv\Scripts\python.exe provider_service.py --host 127.0.0.1 --port 8000 --quality fast"
 
 where cloudflared >nul 2>nul
 if errorlevel 1 (
@@ -70,16 +79,9 @@ if "%HEALTH_OK%"=="1" (
 )
 
 echo [AorticAI] health check failed, restarting provider once...
-if exist provider_service.pid (
-  set /p SERVICEPID=<provider_service.pid
-  taskkill /PID !SERVICEPID! /T /F >nul 2>nul
-)
-if exist provider_uvicorn.pid (
-  set /p UVPID=<provider_uvicorn.pid
-  taskkill /PID !UVPID! /T /F >nul 2>nul
-)
+taskkill /FI "WINDOWTITLE eq AorticAI Provider" /T /F >nul 2>nul
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList 'provider_service.py --host 127.0.0.1 --port 8000 --quality high --response-mode callback --update-interval-seconds 120' -WorkingDirectory '%CD%' -WindowStyle Minimized -PassThru; Set-Content -Path 'provider_launcher.pid' -Value $p.Id"
+START "AorticAI Provider" /MIN cmd /k ".venv\Scripts\python.exe provider_service.py --host 127.0.0.1 --port 8000 --quality fast"
 
 for /L %%I in (1,1,15) do (
   powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 3; if ($r.ok -eq $true) { exit 0 } else { exit 2 } } catch { exit 1 }"

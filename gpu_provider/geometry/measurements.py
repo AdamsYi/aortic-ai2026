@@ -56,16 +56,22 @@ def _regularize_measurements(raw_measurements: dict[str, Any], root_model: Aorti
     if sinus_d is not None and annulus_eq is not None and sinus_d < annulus_eq:
         measurements["sinus_of_valsalva"]["max_diameter_mm"] = float(annulus_eq)
         measurements["sinus_of_valsalva"]["constraint_corrected_from_mm"] = float(sinus_d)
+        measurements["sinus_of_valsalva"]["uncertainty_flag"] = "ANATOMY_CONSTRAINT_VIOLATION"
+        measurements["sinus_of_valsalva"]["constraint_note"] = "sinus_raised_to_annulus_value"
         corrected["sinus_was_raised_to_annulus"] = True
         sinus_d = float(annulus_eq)
     if stj_d is not None and sinus_d is not None and stj_d > sinus_d:
         measurements["stj"]["diameter_mm"] = float(sinus_d)
         measurements["stj"]["constraint_corrected_from_mm"] = float(stj_d)
+        measurements["stj"]["uncertainty_flag"] = "ANATOMY_CONSTRAINT_VIOLATION"
+        measurements["stj"]["constraint_note"] = "stj_limited_to_sinus_value"
         corrected["stj_was_limited_to_sinus"] = True
         stj_d = float(sinus_d)
     if stj_d is not None and annulus_eq is not None and stj_d < annulus_eq:
         measurements["stj"]["diameter_mm"] = float(annulus_eq)
         measurements["stj"]["constraint_corrected_from_mm"] = float(stj_d)
+        measurements["stj"]["uncertainty_flag"] = "ANATOMY_CONSTRAINT_VIOLATION"
+        measurements["stj"]["constraint_note"] = "stj_raised_to_annulus_value"
         corrected["stj_was_raised_to_annulus"] = True
 
     comm_checks = root_model.anatomical_constraints.get("checks", []) if isinstance(root_model.anatomical_constraints, dict) else []
@@ -355,6 +361,12 @@ def build_measurements(
     right_h = regularized_measurements["coronary_heights_mm"]["right"]
     if (left_h is not None and left_h < 10.0) or (right_h is not None and right_h < 10.0):
         risk_flags.append({"id": "low_coronary_height", "severity": "high", "message": "Coronary ostial height below 10 mm"})
+    if coronary.get("clinician_review_required"):
+        risk_flags.append({
+            "id": "coronary_detection_requires_review",
+            "severity": "critical",
+            "message": "Coronary ostial detection requires clinician review before proceeding",
+        })
     if coronary.get("left", {}).get("status") == "uncertain" or coronary.get("right", {}).get("status") == "uncertain":
         risk_flags.append({"id": "coronary_ostia_uncertain", "severity": "moderate", "message": "Coronary ostial detection is uncertain"})
     if leaflet_model.status != "detected" or any(item.status != "detected" for item in leaflet_model.leaflet_surfaces):
