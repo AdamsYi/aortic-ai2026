@@ -22,6 +22,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import nibabel as nib
@@ -49,17 +51,38 @@ def run_cmd(cmd: list[str]) -> tuple[str, str]:
     return proc.stdout, proc.stderr
 
 
+def _heartbeat(stop_event: threading.Event, label: str) -> None:
+    start = time.time()
+    while not stop_event.wait(15):
+        elapsed = int(time.time() - start)
+        print(f"  [heartbeat] {label} still running... {elapsed}s elapsed", flush=True)
+
+
+def _run_cmd_with_heartbeat(cmd: list[str], label: str) -> tuple[str, str]:
+    stop_evt = threading.Event()
+    hb = threading.Thread(target=_heartbeat, args=(stop_evt, label), daemon=True)
+    start = time.time()
+    hb.start()
+    try:
+        return run_cmd(cmd)
+    finally:
+        stop_evt.set()
+        hb.join(timeout=1)
+        elapsed = int(time.time() - start)
+        print(f"  [{label}] completed in {elapsed}s", flush=True)
+
+
 def _run_totalsegmentator(cmd_gpu: list[str], cmd_cpu: list[str]) -> tuple[str, str]:
     """Try GPU first, fall back to CPU if CUDA kernel error."""
     try:
         _progress("totalsegmentator", f"trying GPU: {' '.join(cmd_gpu)}")
-        return run_cmd(cmd_gpu)
+        return _run_cmd_with_heartbeat(cmd_gpu, "totalsegmentator")
     except Exception as exc:
         err_str = str(exc).lower()
         if "cuda" in err_str or "kernel image" in err_str or "no kernel" in err_str or "device-side" in err_str:
             _progress("totalsegmentator", "GPU failed (CUDA kernel incompatibility), retrying on CPU...")
             _progress("totalsegmentator", f"CPU cmd: {' '.join(cmd_cpu)}")
-            return run_cmd(cmd_cpu)
+            return _run_cmd_with_heartbeat(cmd_cpu, "totalsegmentator")
         raise
 
 
