@@ -319,6 +319,8 @@ def run_geometry_pipeline(
     builder_meta: dict[str, Any],
     input_meta: dict[str, Any] | None,
     output_dir: Path,
+    job_id: str = "",
+    study_id: str = "",
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     timers: dict[str, float] = {}
     t_pipeline = time.time()
@@ -606,7 +608,7 @@ def run_geometry_pipeline(
 
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     report_lines = [
-        f"病例 ID：{args.job_id or args.study_id or ct_path.stem}          生成时间：{generated_at}",
+        f"病例 ID：{job_id or study_id or ct_path.stem}          生成时间：{generated_at}",
         f"管线版本：aortic_geometry_pipeline_v3   处理设备：{builder_meta.get('device', 'gpu')}",
         "",
         "■ 解剖测量（Anatomical Measurements）",
@@ -667,7 +669,7 @@ def run_geometry_pipeline(
     root_model_payload = sanitize_for_json(asdict(root_model))
     leaflet_payload = sanitize_for_json(leaflet_model_payload(leaflet_model))
     payload = {
-        "result_case_id": args.job_id or args.study_id or ct_path.stem,
+        "result_case_id": job_id or study_id or ct_path.stem,
         "labels": labels,
         "spacing_mm": {"dx": spacing[0], "dy": spacing[1], "dz": spacing[2]},
         "volume_reconstruction": {
@@ -911,6 +913,8 @@ def main() -> None:
             builder_meta=builder_meta,
             input_meta=prep_meta,
             output_dir=output_dir,
+            job_id=args.job_id,
+            study_id=args.study_id,
         )
 
         elapsed = round(time.time() - t0, 4)
