@@ -118,12 +118,32 @@ def find_bin(name: str) -> str:
     return found
 
 
+def _is_nifti_by_magic(path: Path) -> bool:
+    """Detect NIfTI by file content: gzip magic (0x1f 0x8b) or uncompressed NIfTI magic."""
+    try:
+        header = path.read_bytes()[:4]
+        if header[:2] == b"\x1f\x8b":  # gzip -> likely .nii.gz
+            return True
+        if header[:4] in (b"\x5c\x01\x00\x00", b"\x00\x00\x01\x5c"):  # NIfTI-1 sizeof_hdr=348
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def prepare_nifti_input(input_path: Path, work_dir: Path) -> tuple[Path, dict[str, Any]]:
     suffix = input_path.name.lower()
     meta: dict[str, Any] = {"input_kind": "unknown", "conversion": "none"}
     if suffix.endswith(".nii") or suffix.endswith(".nii.gz"):
         meta["input_kind"] = "nifti"
         return input_path, meta
+    # Extension-less files (e.g. input.bin from API): detect by magic bytes
+    if not suffix.endswith(".zip") and not suffix.endswith(".dcm") and _is_nifti_by_magic(input_path):
+        nii_path = work_dir / "input_detected.nii.gz"
+        shutil.copy2(input_path, nii_path)
+        meta["input_kind"] = "nifti"
+        meta["detection"] = "magic_bytes"
+        return nii_path, meta
 
     try:
         dcm2niix = find_bin("dcm2niix")
