@@ -34,6 +34,8 @@ class InferenceRequest(BaseModel):
     download_url: Optional[str] = None
     input_url: Optional[str] = None
     skip_segmentation: bool = False
+    device: Optional[str] = None   # override MODEL_DEVICE env ("cpu"/"gpu"/"mps")
+    quality: Optional[str] = None  # override PIPELINE_QUALITY env ("fast"/"high")
     callback_url: Optional[str] = None
     status_url: Optional[str] = None
     callback: CallbackSpec = Field(default_factory=CallbackSpec)
@@ -130,8 +132,8 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
             "Place a real inference pipeline and configure INFER_CMD."
         )
 
-    model_device = env("MODEL_DEVICE", "gpu")
-    quality = env("PIPELINE_QUALITY", "high")
+    model_device = req.device or env("MODEL_DEVICE", "gpu")
+    quality = req.quality or env("PIPELINE_QUALITY", "high")
     safe_study_id = req.study_id or req.patient_id or "unknown-study"
     _py = sys.executable
     cmd = (
