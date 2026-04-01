@@ -3804,7 +3804,7 @@ async function startAutoAnnotation(): Promise<void> {
   };
   renderAnnotationPanel(activeCase);
   try {
-    const payload = await fetchJson<Record<string, unknown>>('/jobs', {
+    const payload = await fetchJson<Record<string, unknown>>('/api/jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -3841,7 +3841,7 @@ async function waitForAnnotationJob(jobId: string, studyId: string): Promise<voi
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     await delay(1000);
-    const payload = await fetchJson<Record<string, unknown>>(`/jobs/${encodeURIComponent(jobId)}`);
+    const payload = await fetchJson<Record<string, unknown>>(`/api/jobs/${encodeURIComponent(jobId)}`);
     const status = String(payload.status || '').toLowerCase();
     annotationRunState = {
       status: status === 'succeeded' ? 'succeeded' : status === 'failed' ? 'failed' : 'running',

@@ -1280,6 +1280,11 @@ export default {
         return respond(await createJob(payload, env));
       }
 
+      if (request.method === "POST" && path === "/api/jobs") {
+        const payload = await readJson(request);
+        return respond(await createJob(payload, env));
+      }
+
       if (request.method === "GET" && /^\/api\/jobs\/[^/]+\/status$/.test(path)) {
         const parts = path.split("/");
         const jobId = decodeURIComponent(parts[3] || "");
@@ -1304,6 +1309,12 @@ export default {
         const parts = path.split("/");
         const jobId = decodeURIComponent(parts[3] || "");
         return respond(await streamJobInputForProvider(request, jobId, env));
+      }
+
+      if (request.method === "GET" && /^\/api\/jobs\/[^/]+$/.test(path)) {
+        const parts = path.split("/");
+        const jobId = decodeURIComponent(parts[3] || "");
+        return respond(await getJob(jobId, env));
       }
 
       if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/raw")) {

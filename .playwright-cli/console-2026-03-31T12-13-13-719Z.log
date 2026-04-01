@@ -1,0 +1,2 @@
+[42763929ms] [ERROR] Access to fetch at 'https://api.heartvalvepro.edu.kg/health' from origin 'http://127.0.0.1:4173' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ http://127.0.0.1:4173/demo:0
+[42763930ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://api.heartvalvepro.edu.kg/health:0

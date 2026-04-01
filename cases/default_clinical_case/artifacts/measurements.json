@@ -299,6 +299,15 @@
         "message": "Valve calcium burden measured from thresholded volume map.",
         "clinician_review_required": false
       }
+    },
+    "annulus": {
+      "equivalent_diameter_mm": 25.4
+    },
+    "sinus_of_valsalva": {
+      "max_diameter_mm": 35.6
+    },
+    "stj": {
+      "diameter_mm": 31.0
     }
   },
   "annulus": {
