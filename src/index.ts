@@ -1568,7 +1568,10 @@ async function uploadCaseMultipart(request: Request, env: Env): Promise<Response
 
   const patientId = stringOr(form.get("patient_id"), "").trim() || null;
   const studyId = stringOr(form.get("study_id"), "").trim() || crypto.randomUUID();
-  const filename = sanitizeFilename(fileCandidate.name || "upload.nii.gz");
+  const { filename, imageFormat } = normalizeUploadFileDescriptor(
+    sanitizeFilename(fileCandidate.name || "upload.nii.gz"),
+    fileCandidate.type || ""
+  );
   const objectKey = `studies/${studyId}/raw/${Date.now()}-${filename}`;
 
   await env.R2_RAW.put(objectKey, bytes, {
@@ -1593,7 +1596,7 @@ async function uploadCaseMultipart(request: Request, env: Env): Promise<Response
       patientId,
       "web_upload",
       objectKey,
-      "nifti",
+      imageFormat,
       nullableString(form.get("phase"))
     )
     .run();
@@ -1618,7 +1621,7 @@ async function uploadCaseMultipart(request: Request, env: Env): Promise<Response
     },
     {
       rawFilename: filename,
-      ingestionFormat: "nifti",
+      ingestionFormat: imageFormat,
       imageBytes: bytes.byteLength,
       imageSha256: await sha256HexFromBytes(bytes),
     }
@@ -3715,6 +3718,32 @@ function nullableString(v: unknown): string | null {
 
 function sanitizeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function normalizeUploadFileDescriptor(filenameRaw: string, contentTypeRaw: string): {
+  filename: string;
+  imageFormat: "nifti" | "dicom_zip";
+} {
+  const filename = sanitizeFilename(filenameRaw || "upload.nii.gz");
+  const lowerName = filename.toLowerCase();
+  const lowerType = String(contentTypeRaw || "").toLowerCase();
+
+  const isZipLike =
+    lowerName.endsWith(".zip")
+    || lowerType.includes("zip")
+    || lowerType.includes("dicom");
+
+  if (isZipLike) {
+    const normalized = lowerName.endsWith(".zip") ? filename : `${filename}.zip`;
+    return { filename: normalized, imageFormat: "dicom_zip" };
+  }
+
+  if (lowerName.endsWith(".nii.gz") || lowerName.endsWith(".nii")) {
+    return { filename, imageFormat: "nifti" };
+  }
+
+  const normalized = `${filename}.nii.gz`;
+  return { filename: normalized, imageFormat: "nifti" };
 }
 
 function asError(error: unknown): Error {

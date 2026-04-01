@@ -93,21 +93,36 @@ def prepare_nifti_input(input_path: Path, work_dir: Path) -> tuple[Path, dict[st
         meta["input_kind"] = "nifti"
         return input_path, meta
 
-    dcm2niix = find_bin("dcm2niix")
+    try:
+        dcm2niix = find_bin("dcm2niix")
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "dcm2niix_not_found: DICOM input requires dcm2niix. "
+            "Install dcm2niix and ensure it is available in PATH."
+        ) from exc
     dicom_dir = work_dir / "dicom_input"
     dicom_dir.mkdir(parents=True, exist_ok=True)
 
     if suffix.endswith(".zip"):
         meta["input_kind"] = "dicom_zip"
-        with zipfile.ZipFile(input_path, "r") as zf:
-            zf.extractall(dicom_dir)
+        try:
+            with zipfile.ZipFile(input_path, "r") as zf:
+                zf.extractall(dicom_dir)
+        except Exception as exc:
+            raise RuntimeError(f"dicom_zip_extract_failed: {exc}") from exc
     else:
         meta["input_kind"] = "dicom_file_or_series"
-        shutil.copy2(input_path, dicom_dir / input_path.name)
+        try:
+            shutil.copy2(input_path, dicom_dir / input_path.name)
+        except Exception as exc:
+            raise RuntimeError(f"dicom_input_prepare_failed: {exc}") from exc
 
     out_dir = work_dir / "nifti"
     out_dir.mkdir(parents=True, exist_ok=True)
-    run_cmd([dcm2niix, "-z", "y", "-o", str(out_dir), str(dicom_dir)])
+    try:
+        run_cmd([dcm2niix, "-z", "y", "-o", str(out_dir), str(dicom_dir)])
+    except Exception as exc:
+        raise RuntimeError(f"dcm2niix_conversion_failed: {exc}") from exc
     nii_files = sorted(out_dir.glob("*.nii.gz")) + sorted(out_dir.glob("*.nii"))
     if not nii_files:
         raise RuntimeError("dcm2niix produced no NIfTI output.")
@@ -476,27 +491,90 @@ def run_geometry_pipeline(
     measurements_json_path.write_text(json.dumps(sanitize_for_json(measurements_json_payload), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "measurements_json", measurements_json_path.name, "application/json", measurements_json_path)
 
-    report_lines = [
-        f"Study ID: {ct_path.name}",
-        f"Centerline method: {centerline.method}",
-        f"Annulus short/long diameter: {measurements_structured['annulus']['diameter_short_mm']} / {measurements_structured['annulus']['diameter_long_mm']} mm",
-        f"Annulus area/perimeter: {measurements_structured['annulus']['area_mm2']} mm2 / {measurements_structured['annulus']['perimeter_mm']} mm",
-        f"Sinus max diameter: {measurements_structured['sinus_of_valsalva']['max_diameter_mm']} mm",
-        f"STJ diameter: {measurements_structured['stj']['diameter_mm']} mm",
-        f"Ascending aorta diameter: {measurements_structured['ascending_aorta']['diameter_mm']} mm",
-        f"LVOT diameter: {measurements_structured['lvot']['diameter_mm']} mm",
-        f"Coronary height left/right: {measurements_structured['coronary_heights_mm']['left']} / {measurements_structured['coronary_heights_mm']['right']} mm",
-        f"Calcium burden (HU>130): {measurements_structured['calcium_burden']['calc_volume_ml']} mL",
-        f"Leaflet coaptation height estimate: {measurements_structured['leaflet_geometry']['coaptation_height_mm']} mm",
-        "",
-        "Risk flags:",
-    ]
+    def fmt_value(value: Any, unit: str = "", digits: int = 2) -> str:
+        if isinstance(value, (int, float)) and np.isfinite(value):
+            return f"{float(value):.{digits}f}{unit}"
+        return "N/A"
+
+    annulus = measurements_structured.get("annulus", {}) if isinstance(measurements_structured.get("annulus"), dict) else {}
+    sinus = measurements_structured.get("sinus_of_valsalva", {}) if isinstance(measurements_structured.get("sinus_of_valsalva"), dict) else {}
+    stj = measurements_structured.get("stj", {}) if isinstance(measurements_structured.get("stj"), dict) else {}
+    coronary = measurements_structured.get("coronary_heights_mm", {}) if isinstance(measurements_structured.get("coronary_heights_mm"), dict) else {}
+    leaflet_geo = measurements_structured.get("leaflet_geometry", {}) if isinstance(measurements_structured.get("leaflet_geometry"), dict) else {}
+
+    tavi = planning_metrics.get("tavi", {}) if isinstance(planning_metrics.get("tavi"), dict) else {}
+    tavi_size = (
+        (tavi.get("recommended_prosthesis") or {}).get("primary", {}).get("size_mm")
+        if isinstance(tavi.get("recommended_prosthesis"), dict)
+        else None
+    )
+    if tavi_size is None and isinstance(tavi.get("area_derived_valve_size"), dict):
+        tavi_size = tavi.get("area_derived_valve_size", {}).get("nearest_nominal_size_mm")
+    tavi_match = tavi.get("sizing_method") if isinstance(tavi, dict) else None
+    coronary_risk = tavi.get("coronary_obstruction_risk") if isinstance(tavi, dict) else None
+
+    vsrr = planning_metrics.get("vsrr", {}) if isinstance(planning_metrics.get("vsrr"), dict) else {}
+    vsrr_graft = vsrr.get("recommended_graft_diameter_mm")
+    vsrr_effective_height = (vsrr.get("leaflet_geometry_status") or {}).get("effective_height_mm") if isinstance(vsrr.get("leaflet_geometry_status"), dict) else None
+
+    risk_lines = []
     if risk_flags:
-        report_lines.extend([f"- {flag['id']}: {flag['message']}" for flag in risk_flags])
+        for flag in risk_flags:
+            if not isinstance(flag, dict):
+                continue
+            fid = str(flag.get("id") or "risk")
+            msg = str(flag.get("message") or "N/A")
+            risk_lines.append(f"  - {fid}: {msg}")
     else:
-        report_lines.append("- none")
+        risk_lines.append("  - none")
+
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    report_lines = [
+        f"病例 ID：{args.job_id or args.study_id or ct_path.stem}          生成时间：{generated_at}",
+        f"管线版本：aortic_geometry_pipeline_v3   处理设备：{builder_meta.get('device', 'gpu')}",
+        "",
+        "■ 解剖测量（Anatomical Measurements）",
+        "┌──────────────────────────────────────────┐",
+        "│  瓣环（Annulus）                           │",
+        f"│    等效直径：{fmt_value(annulus.get('equivalent_diameter_mm'), ' mm')}         │",
+        f"│    短轴：{fmt_value(annulus.get('diameter_short_mm'), ' mm')}               │",
+        f"│    长轴：{fmt_value(annulus.get('diameter_long_mm'), ' mm')}                │",
+        f"│    面积：{fmt_value(annulus.get('area_mm2'), ' mm²')}              │",
+        f"│    周长：{fmt_value(annulus.get('perimeter_mm'), ' mm')}           │",
+        "├──────────────────────────────────────────┤",
+        "│  主动脉窦（Sinus of Valsalva）              │",
+        f"│    最大直径：{fmt_value(sinus.get('max_diameter_mm'), ' mm')}           │",
+        "├──────────────────────────────────────────┤",
+        "│  窦管交界（STJ）                            │",
+        f"│    直径：{fmt_value(stj.get('diameter_mm'), ' mm')}                │",
+        "├──────────────────────────────────────────┤",
+        "│  冠状动脉开口高度（Coronary Ostia Heights）  │",
+        f"│    左冠：{fmt_value(coronary.get('left'), ' mm')}                  │",
+        f"│    右冠：{fmt_value(coronary.get('right'), ' mm')}                  │",
+        "└──────────────────────────────────────────┘",
+        "",
+        "■ TAVI 规划建议",
+        f"  推荐瓣膜尺寸：{fmt_value(tavi_size, ' mm', 0)}",
+        f"  瓣环面积-瓣膜匹配：{str(tavi_match or 'N/A')}",
+        f"  冠脉遮挡风险评估：{str(coronary_risk or 'N/A')}",
+        "",
+        "■ VSRR 规划参考",
+        f"  推荐移植物直径：{fmt_value(vsrr_graft, ' mm', 0)}",
+        f"  有效高度参考：{fmt_value(vsrr_effective_height or leaflet_geo.get('coaptation_height_mm'), ' mm')}",
+        "",
+        "■ 风险标志（Risk Flags）",
+        *risk_lines,
+        "",
+        "■ 质量声明",
+        "  本报告由自动化算法生成，仅供参考。",
+        "  所有临床决策须经专科医师独立评估确认。",
+        "  This report is generated by automated analysis for reference only.",
+        "  All clinical decisions require independent review by qualified clinicians.",
+        "─────────────────────────────────",
+        "AorticAI | heartvalvepro.edu.kg",
+    ]
     planning_report_pdf = output_dir / "planning_report.pdf"
-    write_planning_report_pdf(planning_report_pdf, "Aortic Geometry Planning Report", report_lines)
+    write_planning_report_pdf(planning_report_pdf, "AorticAI 主动脉根部分析报告", report_lines)
     _record_artifact(artifacts_manifest, "planning_report_pdf", planning_report_pdf.name, "application/pdf", planning_report_pdf)
 
     total_runtime = round(time.time() - t_pipeline, 4)
@@ -508,6 +586,8 @@ def run_geometry_pipeline(
         "lumen": float(lumen_mask.sum() * voxel_ml),
     }
 
+    root_model_payload = sanitize_for_json(asdict(root_model))
+    leaflet_payload = sanitize_for_json(leaflet_model_payload(leaflet_model))
     payload = {
         "result_case_id": args.job_id or args.study_id or ct_path.stem,
         "labels": labels,
@@ -563,7 +643,8 @@ def run_geometry_pipeline(
             "anatomical_constraints": root_model.anatomical_constraints,
             "confidence_scores": root_model.confidence_scores,
         },
-        "measurements": flat_measurements,
+        "measurements": measurements_json_payload.get("measurements_regularized", measurements_structured),
+        "measurements_flat": flat_measurements,
         "measurements_structured": measurements_structured,
         "measurements_structured_raw": measurements_json_payload.get("measurements_raw", {}),
         "measurements_structured_regularized": measurements_json_payload.get("measurements_regularized", measurements_structured),
@@ -576,6 +657,9 @@ def run_geometry_pipeline(
         "planning_metrics": planning_metrics,
         "planning_evidence": measurements_json_payload.get("planning_evidence", {}),
         "digital_twin_simulation": digital_twin_simulation,
+        "annulus_plane": annulus_plane_payload,
+        "aortic_root_model": root_model_payload,
+        "leaflet_model": leaflet_payload,
         "exports": {
             "measurements_json": measurements_json_path.name,
             "planning_report_pdf": planning_report_pdf.name,
@@ -609,6 +693,7 @@ def run_geometry_pipeline(
             "Raw and regularized landmark/measurement sets are both preserved for auditability.",
         ],
         "stage_timings_seconds": timers,
+        "pipeline_version": "aortic_geometry_pipeline_v3",
     }
     payload["pipeline"] = {
         "input_prep": {"input_kind": "nifti", "conversion": "none"},
@@ -739,6 +824,15 @@ def main() -> None:
             **result_payload,
             "artifacts_manifest": artifacts_meta,
         }
+        # Normalize top-level keys for downstream tools (save_as_default_case.py).
+        if "measurements_structured" in payload and not isinstance(payload.get("measurements"), dict):
+            payload["measurements"] = payload["measurements_structured"]
+        if "planning_metrics" in payload and not isinstance(payload.get("planning"), dict):
+            payload["planning"] = payload["planning_metrics"]
+        if "landmarks" in payload and not isinstance(payload.get("annulus_plane"), dict):
+            payload["annulus_plane"] = payload.get("landmarks", {}).get("annulus_plane")
+        if "aortic_root_computational_model" in payload and not isinstance(payload.get("aortic_root_model"), dict):
+            payload["aortic_root_model"] = payload["aortic_root_computational_model"]
         out_json.write_text(json.dumps(sanitize_for_json(payload), indent=2), encoding="utf-8")
 
 

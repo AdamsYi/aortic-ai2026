@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -132,8 +133,9 @@ def build_pipeline_cmd(input_path: Path, output_mask: Path, output_json: Path, r
     model_device = env("MODEL_DEVICE", "gpu")
     quality = env("PIPELINE_QUALITY", "high")
     safe_study_id = req.study_id or req.patient_id or "unknown-study"
+    _py = sys.executable
     cmd = (
-        f'python "{pipeline_py}" '
+        f'"{_py}" "{pipeline_py}" '
         f'--input "{input_path}" '
         f'--output-mask "{output_mask}" '
         f'--output-json "{output_json}" '
@@ -414,9 +416,11 @@ def health() -> Dict[str, Any]:
     infer_cmd_from_env = bool(os.getenv("INFER_CMD", "").strip())
     infer_cmd_from_cfg = bool(str(cfg.get("infer_cmd", "")).strip())
     gpu_ok = bool(shutil.which("nvidia-smi"))
+    dcm2niix_ok = bool(shutil.which("dcm2niix"))
     return {
         "status": "ok",
         "gpu": gpu_ok,
+        "dcm2niix_available": dcm2niix_ok,
         "ok": True,
         "service": "gpu-provider",
         "provider_response_mode": env("PROVIDER_RESPONSE_MODE", "inline"),

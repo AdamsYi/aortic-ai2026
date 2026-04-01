@@ -429,6 +429,7 @@ const DOM = {
   headerStatus: null as HTMLDivElement | null,
   bootStage: null as HTMLDivElement | null,
   demoCaseBadge: null as HTMLSpanElement | null,
+  dataSourceBanner: null as HTMLDivElement | null,
   coronaryReviewBanner: null as HTMLDivElement | null,
   coronaryReviewAcknowledge: null as HTMLButtonElement | null,
   caseInfoLeft: null as HTMLDivElement | null,
@@ -729,6 +730,7 @@ function renderShell(): void {
                   <button type="button" id="toggle-measurements-panel">Hide</button>
                 </div>
               </div>
+              <div id="data-source-banner" class="data-source-banner hidden"></div>
               <div class="metric-grid" id="measurement-grid">
                 <div class="metric-row skeleton-shimmer">
                   <div class="metric-name">Annulus Equivalent Diameter</div>
@@ -821,8 +823,8 @@ function renderShell(): void {
             <button type="button" id="submit-case-close" data-i18n="action.close">Close</button>
           </div>
           <form id="submit-case-form" class="submit-case-form">
-            <label data-i18n="label.case_file">Case File (.nii/.nii.gz)</label>
-            <input type="file" id="submit-case-file" accept=".nii,.nii.gz,application/gzip,application/octet-stream" required />
+            <label data-i18n="label.case_file">Case file: NIfTI (.nii.gz) or DICOM archive (.zip)</label>
+            <input type="file" id="submit-case-file" accept=".nii,.nii.gz,.zip,.dcm,application/gzip,application/zip,application/x-zip-compressed,application/dicom,application/octet-stream" required />
             <label data-i18n="label.patient_id">Patient ID</label>
             <input type="text" id="submit-case-patient-id" placeholder="patient-001" />
             <button type="submit" id="submit-case-submit" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
@@ -835,6 +837,7 @@ function renderShell(): void {
   DOM.headerStatus = document.getElementById('header-status') as HTMLDivElement;
   DOM.bootStage = document.getElementById('boot-stage') as HTMLDivElement;
   DOM.demoCaseBadge = document.getElementById('demo-case-badge') as HTMLSpanElement;
+  DOM.dataSourceBanner = document.getElementById('data-source-banner') as HTMLDivElement;
   DOM.coronaryReviewBanner = document.getElementById('coronary-review-banner') as HTMLDivElement;
   DOM.coronaryReviewAcknowledge = document.getElementById('coronary-review-ack') as HTMLButtonElement;
   DOM.caseInfoLeft = document.getElementById('case-info-left') as HTMLDivElement;
@@ -3314,6 +3317,7 @@ function renderPearsPanel(casePayload: WorkstationCasePayload): void {
 function renderSidePanels(casePayload: WorkstationCasePayload): void {
   if (!casePayload) return;
   renderCoronaryReviewBanner(casePayload);
+  renderDataSourceBanner(casePayload);
   renderCaseOverviewSummary(casePayload);
   renderCapabilitySummary(casePayload);
   renderAnnotationPanel(casePayload);
@@ -3352,6 +3356,41 @@ function renderCoronaryReviewBanner(casePayload: WorkstationCasePayload | null):
   }
   const show = resolveCoronaryReviewRequired(casePayload);
   DOM.coronaryReviewBanner.classList.toggle('hidden', !show);
+}
+
+function resolveCaseDataSource(casePayload: WorkstationCasePayload | null): string {
+  if (!casePayload) return '';
+  const direct = pickObject(casePayload as unknown as Record<string, unknown>)?.data_source;
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  const caseId = String(casePayload.case_id || casePayload.job?.id || '');
+  if (caseId === SHOWCASE_CASE_ID) {
+    const fromManifest = defaultCaseManifestArtifact?.data_source;
+    if (typeof fromManifest === 'string' && fromManifest.trim()) return fromManifest.trim();
+  }
+  return '';
+}
+
+function renderDataSourceBanner(casePayload: WorkstationCasePayload | null): void {
+  if (!DOM.dataSourceBanner) return;
+  const source = resolveCaseDataSource(casePayload).toLowerCase();
+  if (!source) {
+    DOM.dataSourceBanner.classList.add('hidden');
+    DOM.dataSourceBanner.textContent = '';
+    return;
+  }
+  DOM.dataSourceBanner.classList.remove('hidden', 'banner-reference', 'banner-real');
+  if (source === 'real_ct_pipeline_output') {
+    DOM.dataSourceBanner.classList.add('banner-real');
+    DOM.dataSourceBanner.textContent = t('banner.real_ct_pipeline_output');
+    return;
+  }
+  if (source.includes('reference') || source.includes('not_from_real_ct')) {
+    DOM.dataSourceBanner.classList.add('banner-reference');
+    DOM.dataSourceBanner.textContent = t('banner.reference_case_warning');
+    return;
+  }
+  DOM.dataSourceBanner.classList.add('hidden');
+  DOM.dataSourceBanner.textContent = '';
 }
 
 function renderMeasurementsPanel(casePayload: WorkstationCasePayload): void {
@@ -5248,16 +5287,22 @@ function setSubmitCaseModalOpen(open: boolean): void {
   DOM.submitCaseModal?.classList.toggle('hidden', !open);
 }
 
+const STAGE_LABELS: Record<string, { zh: string; en: string }> = {
+  segmentation: { zh: '分割主动脉根部...', en: 'Segmenting aortic root...' },
+  centerline: { zh: '提取中心线...', en: 'Extracting centerline...' },
+  measurements: { zh: '计算解剖测量值...', en: 'Computing measurements...' },
+  completed: { zh: '处理完成', en: 'Processing complete' },
+  succeeded: { zh: '处理完成', en: 'Processing complete' },
+  failed: { zh: '处理失败', en: 'Processing failed' },
+  queued: { zh: '排队中...', en: 'Queued...' },
+  running: { zh: '处理中...', en: 'Processing...' },
+};
+
 function stageLabel(stage: string | null | undefined): string {
   const raw = String(stage || '').toLowerCase();
-  if (!raw) return t('status.queued');
-  if (raw === 'segmentation') return t('status.segmentation');
-  if (raw === 'centerline') return t('status.centerline');
-  if (raw === 'measurements') return t('status.measurements');
-  if (raw === 'completed' || raw === 'succeeded') return t('status.completed');
-  if (raw === 'failed') return t('status.failed');
-  if (raw === 'queued') return t('status.queued');
-  if (raw === 'running') return t('status.running');
+  if (!raw) return currentLocale === 'zh-CN' ? STAGE_LABELS.queued.zh : STAGE_LABELS.queued.en;
+  const entry = STAGE_LABELS[raw];
+  if (entry) return currentLocale === 'zh-CN' ? entry.zh : entry.en;
   return humanize(raw);
 }
 
@@ -5354,11 +5399,13 @@ async function submitCaseFromModal(): Promise<void> {
 
 async function refreshGpuStatusIndicator(): Promise<void> {
   if (!DOM.gpuStatusDot || !DOM.gpuStatusText) return;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 5000);
   try {
-    const resp = await fetch('https://api.heartvalvepro.edu.kg/health', { cache: 'no-store' });
+    const resp = await fetch('https://api.heartvalvepro.edu.kg/health', { cache: 'no-store', signal: controller.signal });
     if (!resp.ok) throw new Error(`gpu_health_failed:${resp.status}`);
     const payload = (await resp.json()) as Record<string, unknown>;
-    const online = Boolean(payload.ok);
+    const online = Boolean(payload.ok) || String(payload.status || '').toLowerCase() === 'ok';
     DOM.gpuStatusDot.classList.toggle('gpu-online', online);
     DOM.gpuStatusDot.classList.toggle('gpu-offline', !online);
     DOM.gpuStatusText.textContent = online ? t('status.gpu_online') : t('status.gpu_offline');
@@ -5366,13 +5413,26 @@ async function refreshGpuStatusIndicator(): Promise<void> {
     DOM.gpuStatusDot.classList.add('gpu-offline');
     DOM.gpuStatusDot.classList.remove('gpu-online');
     DOM.gpuStatusText.textContent = t('status.gpu_offline');
+  } finally {
+    window.clearTimeout(timer);
   }
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, { cache: 'no-store', ...(init || {}) });
   if (!resp.ok) {
-    throw new Error(`request_failed:${url}:${resp.status}`);
+    let detail = '';
+    try {
+      const payload = await resp.clone().json() as Record<string, unknown>;
+      detail = String(payload.error || payload.message || payload.detail || '').trim();
+    } catch {
+      try {
+        detail = (await resp.clone().text()).trim().slice(0, 200);
+      } catch {
+        detail = '';
+      }
+    }
+    throw new Error(`request_failed:${url}:${resp.status}${detail ? `:${detail}` : ''}`);
   }
   return (await resp.json()) as T;
 }

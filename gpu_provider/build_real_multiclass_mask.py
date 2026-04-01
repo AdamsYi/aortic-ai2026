@@ -282,10 +282,9 @@ def main() -> None:
         seg_dir = td_path / "ts_total_open"
         seg_dir.mkdir(parents=True, exist_ok=True)
 
-        common_flags: list[str] = []
-        if args.quality == "fast":
-            common_flags.extend(["--fast"])
-        else:
+        # Always keep --fast for better reliability on consumer GPUs (e.g., RTX 4060).
+        common_flags: list[str] = ["--fast"]
+        if args.quality != "fast":
             common_flags.extend(["--robust_crop", "--higher_order_resampling"])
 
         # Open-only task: no license required.

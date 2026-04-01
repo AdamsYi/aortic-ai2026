@@ -7,9 +7,10 @@ Rules:
 - No synthetic fallback.
 - If all sources fail, print reason and exit non-zero.
 
-Priority:
-1) Zenodo TotalSegmentator record 6802614 (API first)
-2) GitHub release archive fallback
+Data source and citation:
+- Zenodo TotalSegmentator record 6802614
+- Zenodo fallback record 10047292
+- TotalSegmentator GitHub release archive (fallback)
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from __future__ import annotations
 import argparse
 import io
 import os
-import sys
 import zipfile
 from pathlib import Path
 from typing import Iterable
@@ -26,6 +26,7 @@ import requests
 
 
 ZENODO_RECORD_API = "https://zenodo.org/api/records/6802614"
+ZENODO_FALLBACK_RECORD_API = "https://zenodo.org/api/records/10047292"
 GITHUB_FALLBACK_ZIP = (
     "https://github.com/wasserth/TotalSegmentator/releases/download/"
     "v2.0.0-weights/Totalsegmentator_dataset_small_v201.zip"
@@ -43,6 +44,11 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default=os.getenv("AORTICAI_DEMO_DATA_DIR", str(WINDOWS_DEFAULT_DIR)),
         help="Output directory (default: C:\\AorticAI\\gpu_provider\\demo_data)",
+    )
+    parser.add_argument(
+        "--url",
+        default=None,
+        help="Direct URL to a .nii.gz or .zip-containing-nifti file (overrides auto-discovery).",
     )
     return parser.parse_args()
 
@@ -76,6 +82,56 @@ def score_nifti_name(name: str) -> tuple[int, int]:
     return penalty, len(name)
 
 
+def iter_zip_nifti_candidates(zf: zipfile.ZipFile) -> Iterable[str]:
+    names = [name for name in zf.namelist() if is_nifti_filename(name)]
+    names.sort(key=lambda name: score_nifti_name(name))
+    for name in names:
+        yield name
+
+
+def decode_downloaded_payload(url_hint: str, payload: bytes) -> tuple[str, bytes] | None:
+    if len(payload) < 1024:
+        return None
+    lower = url_hint.lower()
+    if is_nifti_filename(lower):
+        return url_hint, payload
+    if lower.endswith(".zip"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+                for name in iter_zip_nifti_candidates(zf):
+                    data = zf.read(name)
+                    if len(data) >= 1024:
+                        return f"{url_hint}!{name}", data
+        except Exception:
+            return None
+        return None
+
+    # Unknown extension: try ZIP sniff as graceful fallback.
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+            for name in iter_zip_nifti_candidates(zf):
+                data = zf.read(name)
+                if len(data) >= 1024:
+                    return f"{url_hint}!{name}", data
+    except Exception:
+        pass
+    return None
+
+
+def fetch_direct_url(url: str) -> tuple[str, bytes] | None:
+    try:
+        resp = requests.get(url, timeout=TIMEOUT_SECONDS)
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[fail] direct URL failed ({error_kind(exc)}): {exc}")
+        return None
+    decoded = decode_downloaded_payload(url, resp.content)
+    if decoded is None:
+        print("[fail] direct URL payload is not a usable NIfTI or ZIP-containing NIfTI.")
+        return None
+    return decoded
+
+
 def pick_zenodo_file(files: list[dict]) -> dict | None:
     nifti_candidates = []
     zip_candidates = []
@@ -88,7 +144,6 @@ def pick_zenodo_file(files: list[dict]) -> dict | None:
         if is_nifti_filename(key):
             nifti_candidates.append((score_nifti_name(key), size, item))
         elif lower.endswith(".zip"):
-            # Prefer "small" archives, then smaller size.
             size_rank = 0 if "small" in lower else 1
             zip_candidates.append((size_rank, size, item))
     if nifti_candidates:
@@ -100,91 +155,56 @@ def pick_zenodo_file(files: list[dict]) -> dict | None:
     return None
 
 
-def try_download_zenodo_nifti() -> tuple[str, bytes] | None:
-    print(f"[1/2] Query Zenodo API: {ZENODO_RECORD_API}")
+def try_download_zenodo_nifti(record_api: str, label: str) -> tuple[str, bytes] | None:
+    print(f"[{label}] Query Zenodo API: {record_api}")
     try:
-        resp = requests.get(ZENODO_RECORD_API, timeout=TIMEOUT_SECONDS)
+        resp = requests.get(record_api, timeout=TIMEOUT_SECONDS)
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:  # noqa: BLE001
-        print(f"[fail] Zenodo API failed ({error_kind(exc)}): {exc}")
+        print(f"[fail] {label} API failed ({error_kind(exc)}): {exc}")
         return None
 
     files = payload.get("files")
     if not isinstance(files, list) or not files:
-        print("[fail] Zenodo API returned no files.")
+        print(f"[fail] {label} API returned no files.")
         return None
 
     chosen = pick_zenodo_file(files)
     if not chosen:
-        print("[fail] Zenodo files found, but no .nii/.nii.gz CT candidate.")
+        print(f"[fail] {label} has no .nii/.nii.gz or zip candidates.")
         return None
 
     key = str(chosen.get("key") or "unknown")
-    chosen_size = int(chosen.get("size") or 0)
     links = chosen.get("links") if isinstance(chosen.get("links"), dict) else {}
     direct_url = str(links.get("self") or links.get("download") or "").strip()
     if not direct_url:
-        print(f"[fail] Zenodo candidate has no downloadable URL: {key}")
-        return None
-    if key.lower().endswith(".zip") and chosen_size > 800 * 1024 * 1024:
-        print(
-            f"[fail] Zenodo zip too large for quick demo fetch ({chosen_size / (1024 * 1024):.1f} MB): {key}"
-        )
+        print(f"[fail] {label} candidate has no direct URL: {key}")
         return None
 
-    try:
-        print(f"[download] Zenodo file: {key}")
-        file_resp = requests.get(direct_url, timeout=TIMEOUT_SECONDS)
-        file_resp.raise_for_status()
-        content = file_resp.content
-        if len(content) < 1024:
-            print(f"[fail] Zenodo file too small: {len(content)} bytes")
-            return None
-        if is_nifti_filename(key):
-            return f"zenodo:{key}", content
-        if key.lower().endswith(".zip"):
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                for name in iter_zip_nifti_candidates(zf):
-                    data = zf.read(name)
-                    if len(data) >= 1024:
-                        return f"zenodo:{key}!{name}", data
-            print(f"[fail] Zenodo zip has no usable CT NIfTI file: {key}")
-            return None
-        print(f"[fail] Zenodo candidate is neither NIfTI nor ZIP: {key}")
+    print(f"[download] {label} file: {key}")
+    decoded = fetch_direct_url(direct_url)
+    if decoded is None:
         return None
-    except Exception as exc:  # noqa: BLE001
-        print(f"[fail] Zenodo file download failed ({error_kind(exc)}): {exc}")
-        return None
+    source_path, content = decoded
+    return f"{label}:{key}->{source_path}", content
 
 
-def iter_zip_nifti_candidates(zf: zipfile.ZipFile) -> Iterable[str]:
-    names = [name for name in zf.namelist() if is_nifti_filename(name)]
-    names.sort(key=lambda name: score_nifti_name(name))
-    for name in names:
-        yield name
+def try_download_zenodo_nifti_primary() -> tuple[str, bytes] | None:
+    return try_download_zenodo_nifti(ZENODO_RECORD_API, "zenodo-6802614")
+
+
+def try_download_zenodo_nifti_alt() -> tuple[str, bytes] | None:
+    return try_download_zenodo_nifti(ZENODO_FALLBACK_RECORD_API, "zenodo-10047292")
 
 
 def try_download_github_archive() -> tuple[str, bytes] | None:
-    print(f"[2/2] Try GitHub fallback: {GITHUB_FALLBACK_ZIP}")
-    try:
-        resp = requests.get(GITHUB_FALLBACK_ZIP, timeout=TIMEOUT_SECONDS)
-        resp.raise_for_status()
-        archive = resp.content
-        if len(archive) < 1024:
-            print(f"[fail] GitHub archive too small: {len(archive)} bytes")
-            return None
-        with zipfile.ZipFile(io.BytesIO(archive)) as zf:
-            for name in iter_zip_nifti_candidates(zf):
-                data = zf.read(name)
-                if len(data) < 1024:
-                    continue
-                return f"github:{name}", data
-        print("[fail] GitHub archive has no usable CT NIfTI file.")
+    print(f"[github] Try fallback: {GITHUB_FALLBACK_ZIP}")
+    direct = fetch_direct_url(GITHUB_FALLBACK_ZIP)
+    if direct is None:
         return None
-    except Exception as exc:  # noqa: BLE001
-        print(f"[fail] GitHub fallback failed ({error_kind(exc)}): {exc}")
-        return None
+    source, content = direct
+    return f"github:{source}", content
 
 
 def save_output(target_dir: Path, content: bytes, source: str) -> Path:
@@ -204,10 +224,22 @@ def main() -> int:
     print("AorticAI demo CT fetcher")
     print("Data source + citation:")
     print("- Zenodo TotalSegmentator record 6802614")
+    print("- Zenodo fallback record 10047292")
     print("- GitHub TotalSegmentator release archive fallback")
     print("Please follow dataset license/citation requirements before usage.")
 
-    result = try_download_zenodo_nifti()
+    result: tuple[str, bytes] | None = None
+    if args.url:
+        print(f"[direct] Using user-specified URL: {args.url}")
+        result = fetch_direct_url(args.url)
+        if result is None:
+            print("未找到可用公开数据，请手动提供CT文件")
+            return 1
+
+    if result is None:
+        result = try_download_zenodo_nifti_primary()
+    if result is None:
+        result = try_download_zenodo_nifti_alt()
     if result is None:
         result = try_download_github_archive()
 
