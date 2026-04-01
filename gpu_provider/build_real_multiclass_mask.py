@@ -35,11 +35,32 @@ def _progress(step: str, detail: str = "") -> None:
     print(msg, flush=True)
 
 
-def run_cmd(cmd: list[str]) -> None:
+def run_cmd(cmd: list[str]) -> tuple[str, str]:
     print("[cmd]", " ".join(cmd), flush=True)
-    proc = subprocess.run(cmd, text=True)
+    proc = subprocess.run(cmd, text=True, capture_output=True)
+    if proc.stdout:
+        print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n", flush=True)
+    if proc.stderr:
+        print(proc.stderr, end="" if proc.stderr.endswith("\n") else "\n", file=sys.stderr, flush=True)
     if proc.returncode != 0:
-        raise RuntimeError(f"Command failed: {' '.join(cmd)}")
+        raise RuntimeError(
+            f"Command failed: {' '.join(cmd)}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    return proc.stdout, proc.stderr
+
+
+def _run_totalsegmentator(cmd_gpu: list[str], cmd_cpu: list[str]) -> tuple[str, str]:
+    """Try GPU first, fall back to CPU if CUDA kernel error."""
+    try:
+        _progress("totalsegmentator", f"trying GPU: {' '.join(cmd_gpu)}")
+        return run_cmd(cmd_gpu)
+    except Exception as exc:
+        err_str = str(exc).lower()
+        if "cuda" in err_str or "kernel image" in err_str or "no kernel" in err_str or "device-side" in err_str:
+            _progress("totalsegmentator", "GPU failed (CUDA kernel incompatibility), retrying on CPU...")
+            _progress("totalsegmentator", f"CPU cmd: {' '.join(cmd_cpu)}")
+            return run_cmd(cmd_cpu)
+        raise
 
 
 def load_mask_optional(path: Path, shape: tuple[int, int, int]) -> np.ndarray:
@@ -295,7 +316,7 @@ def main() -> None:
             common_flags.extend(["--robust_crop", "--higher_order_resampling"])
 
         # Open-only task: no license required.
-        totalseg_cmd = [
+        totalseg_cmd_base = [
             totalseg_bin,
             "-i",
             str(input_path),
@@ -311,12 +332,16 @@ def main() -> None:
             "common_carotid_artery_left",
             "subclavian_artery_right",
             "subclavian_artery_left",
-            "--device",
-            args.device,
             *common_flags,
         ]
-        _progress("totalsegmentator", f"cmd={' '.join(str(part) for part in totalseg_cmd)}")
-        run_cmd(totalseg_cmd)
+        if args.device == "gpu":
+            totalseg_cmd_gpu = [*totalseg_cmd_base, "--device", "gpu"]
+            totalseg_cmd_cpu = [*totalseg_cmd_base, "--device", "cpu"]
+            _run_totalsegmentator(totalseg_cmd_gpu, totalseg_cmd_cpu)
+        else:
+            totalseg_cmd = [*totalseg_cmd_base, "--device", args.device]
+            _progress("totalsegmentator", f"cmd={' '.join(str(part) for part in totalseg_cmd)}")
+            run_cmd(totalseg_cmd)
 
         aorta_nii = nib.load(str(seg_dir / "aorta.nii.gz"))
         aorta = aorta_nii.get_fdata() > 0.5
