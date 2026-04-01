@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from dataclasses import asdict
@@ -77,13 +78,37 @@ def _progress(step: str, detail: str = "") -> None:
 
 
 def run_cmd(cmd: list[str]) -> tuple[str, str]:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    def drain(pipe, lines: list[str], label: str) -> None:
+        if pipe is None:
+            return
+        for line in pipe:
+            line = line.rstrip("\n")
+            lines.append(line)
+            print(f"  [{label}] {line}", flush=True)
+
+    t1 = threading.Thread(target=drain, args=(proc.stdout, stdout_lines, "out"), daemon=True)
+    t2 = threading.Thread(target=drain, args=(proc.stderr, stderr_lines, "err"), daemon=True)
+    t1.start()
+    t2.start()
+    proc.wait()
+    t1.join()
+    t2.join()
     if proc.returncode != 0:
         raise RuntimeError(
             f"Command failed ({proc.returncode}): {' '.join(cmd)}\n"
-            f"stderr_tail={proc.stderr[-1200:]}"
+            f"stderr_tail={chr(10).join(stderr_lines[-30:])}"
         )
-    return proc.stdout or "", proc.stderr or ""
+    return "\n".join(stdout_lines), "\n".join(stderr_lines)
 
 
 def find_bin(name: str) -> str:
