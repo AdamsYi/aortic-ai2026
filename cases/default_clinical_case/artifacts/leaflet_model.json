@@ -19,6 +19,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Geometric height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "effective_height_mm": {
@@ -34,6 +38,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Effective height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "coaptation_height_mm": {
@@ -49,6 +57,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Coaptation height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "evidence": {
@@ -82,6 +94,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Geometric height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "effective_height_mm": {
@@ -97,6 +113,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Effective height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "coaptation_height_mm": {
@@ -112,6 +132,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Coaptation height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "evidence": {
@@ -145,6 +169,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Geometric height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "effective_height_mm": {
@@ -160,6 +188,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Effective height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "coaptation_height_mm": {
@@ -175,6 +207,10 @@
           "flag": "LOW_CONFIDENCE",
           "message": "Coaptation height is derived from CTA leaflet proxy geometry.",
           "clinician_review_required": true
+        },
+        "provenance": {
+          "source": "reference_estimate_not_from_ct_pipeline",
+          "note": "临床参考值，非真实CT管线输出，需真实病例替换"
         }
       },
       "evidence": {

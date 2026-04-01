@@ -1,141 +1,135 @@
 #!/usr/bin/env python3
 """
-Fetch one public demo CTA NIfTI for pipeline smoke use on Windows GPU node.
-Fallback: generate a synthetic aortic-root-like CTA volume when public downloads fail.
+Download a real public CT dataset sample for AorticAI demo pipeline input.
+
+Policy:
+- Only real public CT data is allowed.
+- No synthetic fallback is allowed.
+- On failure, print a clear message and exit non-zero.
+
+Sources (priority order):
+1) TotalSegmentator dataset (Zenodo record 6802614)
+2) Medical Segmentation Decathlon archives
+3) TCIA public chest CT samples
+
+License / citation notes:
+- TotalSegmentator: https://zenodo.org/record/6802614
+- Medical Segmentation Decathlon: http://medicaldecathlon.com/
+- TCIA: https://www.cancerimagingarchive.net/
+Users must comply with each dataset license and citation requirements before reuse.
 """
 
 from __future__ import annotations
 
 import gzip
 import io
+import os
+import sys
+import zipfile
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable
 
-import nibabel as nib
-import numpy as np
 import requests
 
 
-OUT_PATH = Path(__file__).resolve().parent / "demo_data" / "demo_ct.nii.gz"
-TIMEOUT_SECONDS = 60
+WINDOWS_DEFAULT_DIR = Path(r"C:\AorticAI\gpu_provider\demo_data")
+TIMEOUT_SECONDS = 120
+TARGET_FILENAME = "demo_ct.nii.gz"
 
 
-def ensure_parent() -> None:
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+def resolve_output_dir() -> Path:
+    override = os.getenv("AORTICAI_DEMO_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
+    if os.name != "nt":
+        raise RuntimeError("此脚本默认仅用于 Windows GPU 节点。非 Windows 环境请设置 AORTICAI_DEMO_DATA_DIR。")
+    return WINDOWS_DEFAULT_DIR
 
 
-def candidate_urls() -> Iterable[Tuple[str, str]]:
-    # Prefer direct NIfTI examples when publicly reachable.
+def candidate_urls() -> Iterable[tuple[str, str]]:
     yield (
-        "totalsegmentator_example_ct",
-        "https://github.com/wasserth/TotalSegmentator/releases/download/v2.0.0-weights/s01.nii.gz",
+        "totalsegmentator_zenodo_small_zip",
+        "https://zenodo.org/record/6802614/files/Totalsegmentator_dataset_small_v201.zip",
     )
     yield (
-        "zenodo_totalsegmentator_case_ct",
-        "https://zenodo.org/records/6802614/files/s01.nii.gz?download=1",
+        "medical_decathlon_task06_lung",
+        "https://msd-for-monai.s3-us-west-2.amazonaws.com/Task06_Lung.tar",
+    )
+    yield (
+        "medical_decathlon_task07_pancreas",
+        "https://msd-for-monai.s3-us-west-2.amazonaws.com/Task07_Pancreas.tar",
+    )
+    yield (
+        "tcia_sample_chest_ct",
+        "https://wiki.cancerimagingarchive.net/download/attachments/52758026/CT_small.nii.gz",
     )
 
 
-def is_nifti_like(data: bytes) -> bool:
+def is_nifti_gz(content: bytes) -> bool:
     try:
-        with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
-            raw = gz.read(512)
-        return len(raw) >= 352 and raw[344:348] in (b"n+1\0", b"ni1\0")
+        with gzip.GzipFile(fileobj=io.BytesIO(content)) as gz:
+            header = gz.read(352)
+        return len(header) >= 348 and header[344:348] in (b"n+1\0", b"ni1\0")
     except Exception:
         return False
 
 
-def try_download() -> bool:
-    for name, url in candidate_urls():
+def extract_first_nifti_gz_from_zip(content: bytes) -> bytes | None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            names = sorted([name for name in zf.namelist() if name.lower().endswith(".nii.gz")])
+            for name in names:
+                data = zf.read(name)
+                if is_nifti_gz(data):
+                    return data
+    except Exception:
+        return None
+    return None
+
+
+def try_fetch_real_ct() -> tuple[str, bytes] | None:
+    for source_name, url in candidate_urls():
         try:
-            print(f"[fetch] trying {name}: {url}")
-            resp = requests.get(url, timeout=TIMEOUT_SECONDS, stream=True)
+            print(f"[fetch] trying source={source_name} url={url}")
+            resp = requests.get(url, timeout=TIMEOUT_SECONDS)
             resp.raise_for_status()
-            content = resp.content
-            if len(content) < 1024:
-                print(f"[fetch] {name} too small ({len(content)} bytes), skip")
+            data = resp.content
+            if len(data) < 1024:
+                print(f"[fetch] source={source_name} skipped: payload too small ({len(data)} bytes)")
                 continue
-            if not is_nifti_like(content):
-                print(f"[fetch] {name} is not a NIfTI payload, skip")
-                continue
-            OUT_PATH.write_bytes(content)
-            print(f"[fetch] downloaded from {name}")
-            return True
+            if is_nifti_gz(data):
+                print(f"[fetch] source={source_name} accepted: direct NIfTI")
+                return source_name, data
+            extracted = extract_first_nifti_gz_from_zip(data)
+            if extracted is not None:
+                print(f"[fetch] source={source_name} accepted: NIfTI extracted from archive")
+                return source_name, extracted
+            print(f"[fetch] source={source_name} skipped: no NIfTI content found")
         except Exception as exc:
-            print(f"[fetch] {name} failed: {exc}")
-    return False
+            print(f"[fetch] source={source_name} failed: {exc}")
+    return None
 
 
-def generate_synthetic_ct() -> None:
-    print("[fallback] generating synthetic CTA volume...")
-    shape = (384, 384, 300)
-    spacing = (0.625, 0.625, 1.0)
-    cx, cy, cz = (shape[0] // 2, shape[1] // 2, shape[2] // 2)
-
-    x = ((np.arange(shape[0], dtype=np.float32) - cx) * spacing[0])[:, None, None]
-    y = ((np.arange(shape[1], dtype=np.float32) - cy) * spacing[1])[None, :, None]
-    z = ((np.arange(shape[2], dtype=np.float32) - cz) * spacing[2])[None, None, :]
-
-    # Base background + soft tissue field
-    vol = np.full(shape, -800.0, dtype=np.float32)
-    soft = np.exp(-((x / 90.0) ** 2 + (y / 90.0) ** 2 + (z / 140.0) ** 2))
-    vol += 860.0 * soft
-
-    # Root lumen core (ellipsoid)
-    lumen_core = ((x / 16.0) ** 2 + (y / 16.0) ** 2 + (z / 26.0) ** 2) <= 1.0
-
-    # Sinus bulges (3 lobes around root)
-    angles = [0.0, 2.0 * np.pi / 3.0, 4.0 * np.pi / 3.0]
-    sinus = np.zeros(shape, dtype=bool)
-    for a in angles:
-        sx = x - 11.0 * np.cos(a)
-        sy = y - 11.0 * np.sin(a)
-        lobe = ((sx / 15.5) ** 2 + (sy / 15.5) ** 2 + (z / 18.0) ** 2) <= 1.0
-        sinus |= lobe
-
-    lumen = lumen_core | sinus
-    wall = (((x / 22.5) ** 2 + (y / 22.5) ** 2 + (z / 33.0) ** 2) <= 1.0) & (~lumen)
-
-    vol[lumen] = 300.0
-    vol[wall] = 60.0
-
-    # Add realistic CT-like noise
-    rng = np.random.default_rng(20260331)
-    vol += rng.normal(0.0, 30.0, size=shape).astype(np.float32)
-
-    vol = np.clip(vol, -1024.0, 1200.0).astype(np.float32)
-    affine = np.array(
-        [
-            [spacing[0], 0.0, 0.0, 0.0],
-            [0.0, spacing[1], 0.0, 0.0],
-            [0.0, 0.0, spacing[2], 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-    img = nib.Nifti1Image(vol, affine)
-    nib.save(img, str(OUT_PATH))
-    print("[fallback] synthetic CTA generated")
+def save_output(target_dir: Path, content: bytes, source_name: str) -> Path:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    out = target_dir / TARGET_FILENAME
+    out.write_bytes(content)
+    print(f"[done] source={source_name}")
+    print(f"[done] saved={out}")
+    print(f"[done] size_mb={out.stat().st_size / (1024 * 1024):.2f}")
+    return out
 
 
-def verify_output() -> None:
-    size_mb = OUT_PATH.stat().st_size / (1024.0 * 1024.0)
-    img = nib.load(str(OUT_PATH))
-    shape = img.shape
-    zooms = img.header.get_zooms()[:3]
-    print(f"[verify] output: {OUT_PATH}")
-    print(f"[verify] size_mb: {size_mb:.2f}")
-    print(f"[verify] shape: {shape}")
-    print(f"[verify] spacing: {zooms}")
-
-
-def main() -> None:
-    ensure_parent()
-    ok = try_download()
-    if not ok:
-        generate_synthetic_ct()
-    verify_output()
+def main() -> int:
+    target_dir = resolve_output_dir()
+    result = try_fetch_real_ct()
+    if result is None:
+        print("未找到可用公开数据，请手动提供CT文件")
+        return 2
+    source_name, content = result
+    save_output(target_dir, content, source_name)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

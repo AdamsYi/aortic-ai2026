@@ -17,6 +17,10 @@
         "flag": "NONE",
         "message": "Valve sizing recommendation derived from annulus perimeter and area.",
         "clinician_review_required": false
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "area_derived_valve_size": {
@@ -36,6 +40,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Area-derived size is an estimate from annulus area and should be confirmed in final planning review.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "recommended_prosthesis": {
@@ -62,6 +70,10 @@
         "flag": "NONE",
         "message": "Primary and alternative prostheses selected from annulus-driven IFU fit windows.",
         "clinician_review_required": false
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "access_route_assessment": {
@@ -83,6 +95,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Access-route recommendation is derived without full iliofemoral volume coverage.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "access_route": {
@@ -104,6 +120,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Route assessment remains review-required until full access-path imaging is available.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "coronary_obstruction_risk": {
@@ -123,6 +143,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Risk class is data-supported but remains review-required due to CTA ostial contour sensitivity.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "coronary_occlusion_risk": {
@@ -159,6 +183,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Coronary risk object derived from model-based coronary heights.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "optimal_projection_angle": {
@@ -178,6 +206,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Projection angle remains a geometry-level recommendation and requires operator confirmation.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "implant_depth": {
@@ -199,6 +231,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Implant depth is planning guidance and remains operator-adjustable.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "implant_depth_recommendation": {
@@ -225,6 +261,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Implant depth recommendation is model-guided and requires intra-procedural confirmation.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "annulus_rupture_risk": {
@@ -240,6 +280,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Rupture risk is low in this planning profile but requires procedural judgement.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "sizing_method": {
@@ -255,6 +299,10 @@
         "flag": "NONE",
         "message": "Sizing method selected as perimeter-based according to reference workflow.",
         "clinician_review_required": false
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "oversizing_ratio": {
@@ -270,6 +318,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Oversizing ratio is estimated from annulus perimeter and nominal prosthesis size.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     }
   },
@@ -294,6 +346,10 @@
         "flag": "NONE",
         "message": "Commissural geometry is balanced for tricuspid root reconstruction planning.",
         "clinician_review_required": false
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "leaflet_geometry_status": {
@@ -313,6 +369,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Leaflet geometry remains CTA-proxy derived and should be reviewed by surgeon.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "graft_sizing": {
@@ -330,6 +390,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Graft sizing is model-derived and should be confirmed with operative strategy.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "recommended_graft_diameter_mm": {
@@ -345,6 +409,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Recommended graft diameter follows model-based David procedure geometry.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "key_geometry": {
@@ -364,6 +432,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Key geometry values are extracted from CTA-derived root axis profile.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "procedure_feasibility": {
@@ -379,6 +451,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Feasibility is geometry-supported but remains surgeon decision dependent.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     }
   },
@@ -399,6 +475,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "External root geometry is derived from digital twin and needs procedure-level review.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "support_region_status": {
@@ -417,6 +497,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Support region estimate is model-derived and should be validated intra-operatively.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "external_support_size": {
@@ -432,6 +516,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Support size is estimated from sinus and STJ envelope.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "root_compliance_estimate": {
@@ -447,6 +535,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Compliance estimate is inferred from static CTA morphology and needs review.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     },
     "max_sinus_diameter_mm": {
@@ -462,6 +554,10 @@
         "flag": "LOW_CONFIDENCE",
         "message": "Maximum sinus diameter for PEARS support sizing extracted from root model.",
         "clinician_review_required": true
+      },
+      "provenance": {
+        "source": "reference_estimate_not_from_ct_pipeline",
+        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
       }
     }
   }

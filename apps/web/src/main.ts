@@ -408,6 +408,7 @@ const I18N: Record<Locale, Record<string, string>> = {
 const DOM = {
   headerStatus: null as HTMLDivElement | null,
   bootStage: null as HTMLDivElement | null,
+  demoCaseBadge: null as HTMLSpanElement | null,
   coronaryReviewBanner: null as HTMLDivElement | null,
   coronaryReviewAcknowledge: null as HTMLButtonElement | null,
   caseInfoLeft: null as HTMLDivElement | null,
@@ -521,6 +522,7 @@ function renderShell(): void {
           <button id="focus-stj" data-i18n="action.focus_stj">STJ</button>
           <button id="focus-root" data-i18n="action.focus_root">Root</button>
           <button id="focus-coronary" data-i18n="action.focus_coronary">Coronary</button>
+          <span id="demo-case-badge" class="demo-case-badge hidden" data-i18n="label.demo_case_badge">示范病例 / Demo Case</span>
           <div class="cluster locale-cluster">
             <button type="button" class="locale-button" data-locale-switch="en">EN</button>
             <button type="button" class="locale-button" data-locale-switch="zh-CN">中文</button>
@@ -784,6 +786,7 @@ function renderShell(): void {
 
   DOM.headerStatus = document.getElementById('header-status') as HTMLDivElement;
   DOM.bootStage = document.getElementById('boot-stage') as HTMLDivElement;
+  DOM.demoCaseBadge = document.getElementById('demo-case-badge') as HTMLSpanElement;
   DOM.coronaryReviewBanner = document.getElementById('coronary-review-banner') as HTMLDivElement;
   DOM.coronaryReviewAcknowledge = document.getElementById('coronary-review-ack') as HTMLButtonElement;
   DOM.caseInfoLeft = document.getElementById('case-info-left') as HTMLDivElement;
@@ -2855,6 +2858,10 @@ function updateHeaderMeta(casePayload: WorkstationCasePayload): void {
       casePayload.pipeline_run?.inferred ? 'Historical inferred provenance' : null,
     ].filter(Boolean).join(' · ');
   }
+  if (DOM.demoCaseBadge) {
+    const isDemoCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
+    DOM.demoCaseBadge.classList.toggle('hidden', !isDemoCase);
+  }
 }
 
 function isCapabilityAvailable(state: CapabilityState | null | undefined): boolean {
@@ -3442,32 +3449,41 @@ function renderPlanningPanel(casePayload: WorkstationCasePayload): void {
   const planningRoot = pickObject(defaultPlanningArtifact) || pickObject(casePayload.planning) || {};
   const tabKey = currentPlanningTab.toLowerCase();
   const section = pickObject(planningRoot[tabKey]);
-  const requiredKeys: Record<'TAVI' | 'VSRR' | 'PEARS', string[]> = {
-    TAVI: ['valve_size_suggestion', 'access_route_assessment', 'coronary_obstruction_risk', 'implant_depth', 'optimal_projection_angle'],
-    VSRR: ['graft_sizing', 'commissural_geometry_status', 'leaflet_geometry_status', 'key_geometry_ratio'],
-    PEARS: ['external_root_geometry_status', 'support_region_status'],
-  };
-  const rows = requiredKeys[currentPlanningTab]
-    .map((key) => planningPanelRow(currentPlanningTab, key, section?.[key]))
-    .filter(Boolean) as string[];
+  const measurementMap = currentMeasurementsEnvelopeMap(casePayload);
+  let rows: string[] = [];
+  if (currentPlanningTab === 'TAVI') {
+    rows = buildTaviPlanningRows(section, measurementMap);
+  } else if (currentPlanningTab === 'VSRR') {
+    rows = buildVsrrPlanningRows(section, measurementMap);
+  } else {
+    rows = buildPearsPlanningRows(section, measurementMap);
+  }
   DOM.planningGrid.innerHTML = rows.join('') || `<div class="muted">${escapeHtml(t('message.no_planning'))}</div>`;
 }
 
-function planningPanelRow(tab: 'TAVI' | 'VSRR' | 'PEARS', key: string, entry: unknown): string | null {
+function planningPanelRow(
+  tab: 'TAVI' | 'VSRR' | 'PEARS',
+  key: string,
+  entry: unknown,
+  overrideDisplay?: string,
+  overrideTone?: MetricTone,
+  overrideReason?: string
+): string | null {
   const envelope = pickObject(entry) || {
     value: null,
     evidence: { method: 'not_available', source_ref: 'N/A', confidence: 0 },
-    uncertainty: { flag: 'NOT_AVAILABLE', message: 'Planning value is not available in this artifact.' },
+    uncertainty: { flag: 'NOT_AVAILABLE', message: 'Planning value is not available in this artifact.', clinician_review_required: true },
   };
   const evidence = pickObject(envelope.evidence);
   const uncertainty = pickObject(envelope.uncertainty);
   const value = envelope.value;
-  const tone = classifyEnvelopeTone(envelope);
-  const displayValue = value == null
+  const flag = String(uncertainty?.flag || 'NOT_AVAILABLE').toUpperCase();
+  const tone = overrideTone || measurementToneFromFlag(flag);
+  const displayValue = overrideDisplay || (value == null
     ? 'Unavailable'
     : typeof value === 'object'
       ? JSON.stringify(value)
-      : String(value);
+      : String(value));
   const tooltip = [
     evidence?.method ? `method: ${String(evidence.method)}` : null,
     evidence?.source_ref ? `source: ${String(evidence.source_ref)}` : null,
@@ -3478,19 +3494,105 @@ function planningPanelRow(tab: 'TAVI' | 'VSRR' | 'PEARS', key: string, entry: un
     <div class="metric-row tone-${tone}" title="${escapeHtml(tooltip || 'No evidence metadata')}">
       <div class="metric-label">
         <span class="metric-group tone-${tone}">${escapeHtml(tab)}</span>
-        <span class="metric-label-text">${escapeHtml(humanize(key))}</span>
-        <span class="metric-meta">${escapeHtml(`${t('planning.recommendation_reason')}: ${String(evidence?.method || 'not_available')}`)}</span>
+        <span class="metric-label-text"><span class="confidence-dot tone-${tone}"></span>${escapeHtml(humanize(key))}</span>
+        <span class="metric-meta">${escapeHtml(`method: ${String(evidence?.method || 'not_available')} · flag: ${flag}`)}</span>
+        <span class="metric-meta">${escapeHtml(`${t('planning.recommendation_reason')}: ${String(overrideReason || evidence?.method || 'not_available')}`)}</span>
       </div>
       <div class="metric-value">${escapeHtml(displayValue)}</div>
     </div>
   `;
 }
 
+function envelopeNumber(entry: unknown): number | null {
+  const envelope = pickObject(entry);
+  if (!envelope) return null;
+  const value = envelope.value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return null;
+}
+
+function buildTaviPlanningRows(
+  section: Record<string, unknown> | null | undefined,
+  measurements: Record<string, Record<string, unknown>>
+): string[] {
+  const rows: Array<string | null> = [];
+  const annulusArea = envelopeNumber(measurements.annulus_area_mm2);
+  const annulusPerimeter = envelopeNumber(measurements.annulus_perimeter_mm);
+  const annulusAreaDisplay = annulusArea == null || annulusPerimeter == null
+    ? 'Unavailable'
+    : `${annulusArea.toFixed(1)} mm² / ${annulusPerimeter.toFixed(1)} mm`;
+  rows.push(planningPanelRow('TAVI', 'annulus_area_perimeter', measurements.annulus_area_mm2, annulusAreaDisplay, annulusArea == null ? 'danger' : 'ok', 'annulus area + perimeter derived sizing'));
+
+  const areaDerived = pickObject(section?.area_derived_valve_size);
+  const derivedValue = pickObject(areaDerived?.value);
+  const recommendedNominal = typeof derivedValue?.nearest_nominal_size_mm === 'number' ? derivedValue.nearest_nominal_size_mm : null;
+  const recommendedDisplay = recommendedNominal == null ? 'Unavailable' : `${recommendedNominal} mm`;
+  rows.push(planningPanelRow('TAVI', 'recommended_valve_size', section?.area_derived_valve_size, recommendedDisplay, recommendedNominal == null ? 'danger' : 'ok', 'area/perimeter nominal size mapping'));
+
+  const lca = envelopeNumber(measurements.coronary_height_left_mm);
+  const rca = envelopeNumber(measurements.coronary_height_right_mm);
+  const minCor = [lca, rca].filter((v): v is number => typeof v === 'number').reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
+  const corTone: MetricTone = !Number.isFinite(minCor) ? 'danger' : minCor < 12 ? 'warn' : 'ok';
+  const corReason = Number.isFinite(minCor) && minCor < 12 ? 'coronary obstruction risk warning (<12 mm)' : 'coronary heights above warning threshold';
+  const corDisplay = lca == null || rca == null ? 'Unavailable' : `L ${lca.toFixed(1)} mm / R ${rca.toFixed(1)} mm`;
+  rows.push(planningPanelRow('TAVI', 'coronary_height', measurements.coronary_height_left_mm, corDisplay, corTone, corReason));
+
+  const stj = envelopeNumber(measurements.stj_diameter_mm);
+  const stjDisplay = stj == null || recommendedNominal == null ? 'Unavailable' : `${stj.toFixed(1)} mm vs valve ${recommendedNominal} mm`;
+  rows.push(planningPanelRow('TAVI', 'stj_vs_valve', measurements.stj_diameter_mm, stjDisplay, stj == null ? 'danger' : 'info', 'stj diameter compared with recommended prosthesis size'));
+
+  return rows.filter(Boolean) as string[];
+}
+
+function buildVsrrPlanningRows(
+  section: Record<string, unknown> | null | undefined,
+  measurements: Record<string, Record<string, unknown>>
+): string[] {
+  const rows: Array<string | null> = [];
+  const graftEntry = section?.recommended_graft_diameter_mm || section?.graft_sizing;
+  const graftNum = envelopeNumber(graftEntry);
+  const graftDisplay = graftNum == null ? (pickObject(graftEntry)?.value != null ? JSON.stringify(pickObject(graftEntry)?.value) : 'Unavailable') : `${graftNum} mm`;
+  rows.push(planningPanelRow('VSRR', 'recommended_graft_diameter', graftEntry, graftDisplay, graftNum == null ? 'warn' : 'ok', 'David procedure graft sizing guidance'));
+
+  const leafletEff = envelopeNumber(measurements.leaflet_effective_height_mm);
+  const leafletTone: MetricTone = leafletEff == null ? 'danger' : leafletEff > 9 ? 'ok' : 'danger';
+  const leafletDisplay = leafletEff == null ? 'Unavailable' : `${leafletEff.toFixed(1)} mm (target > 9 mm)`;
+  rows.push(planningPanelRow('VSRR', 'leaflet_effective_height_target', measurements.leaflet_effective_height_mm, leafletDisplay, leafletTone, 'leaflet effective height target check'));
+
+  const ann = envelopeNumber(measurements.annulus_equivalent_diameter_mm);
+  const stj = envelopeNumber(measurements.stj_diameter_mm);
+  const mismatch = ann != null && stj != null ? Math.abs(ann - stj) : null;
+  const mismatchTone: MetricTone = mismatch == null ? 'danger' : mismatch > 4 ? 'warn' : 'ok';
+  const mismatchDisplay = mismatch == null ? 'Unavailable' : `Δ ${mismatch.toFixed(1)} mm (annulus ${ann!.toFixed(1)} / STJ ${stj!.toFixed(1)})`;
+  rows.push(planningPanelRow('VSRR', 'annulus_stj_mismatch', measurements.stj_diameter_mm, mismatchDisplay, mismatchTone, 'annulus to STJ mismatch review'));
+
+  return rows.filter(Boolean) as string[];
+}
+
+function buildPearsPlanningRows(
+  section: Record<string, unknown> | null | undefined,
+  measurements: Record<string, Record<string, unknown>>
+): string[] {
+  const rows: Array<string | null> = [];
+  const rootDiameterEntry = section?.max_sinus_diameter_mm || measurements.sinus_diameter_mm;
+  const rootDiameter = envelopeNumber(rootDiameterEntry);
+  const rootDiameterDisplay = rootDiameter == null ? 'Unavailable' : `${rootDiameter.toFixed(1)} mm`;
+  rows.push(planningPanelRow('PEARS', 'root_external_reference_diameter', rootDiameterEntry, rootDiameterDisplay, rootDiameter == null ? 'danger' : 'ok', 'external root reference diameter'));
+
+  const supportEntry = pickObject(section?.support_region_status);
+  const supportValue = pickObject(supportEntry?.value);
+  const supportLength = typeof supportValue?.support_segment_length_mm === 'number' ? supportValue.support_segment_length_mm : null;
+  const supportDisplay = supportLength == null ? 'Unavailable' : `${supportLength.toFixed(1)} mm`;
+  rows.push(planningPanelRow('PEARS', 'support_segment_length', section?.support_region_status, supportDisplay, supportLength == null ? 'warn' : 'ok', 'support region segment length'));
+
+  return rows.filter(Boolean) as string[];
+}
+
 function measurementToneFromFlag(flag: string): MetricTone {
   const normalized = flag.toUpperCase();
   if (normalized === 'NONE') return 'ok';
   if (normalized === 'LOW_CONFIDENCE' || normalized === 'BORDERLINE') return 'warn';
-  if (normalized === 'NOT_AVAILABLE') return 'neutral';
+  if (normalized === 'NOT_AVAILABLE' || normalized === 'DETECTION_FAILED') return 'danger';
   return 'danger';
 }
 

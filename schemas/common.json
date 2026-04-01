@@ -27,6 +27,15 @@
       },
       "additionalProperties": false
     },
+    "Provenance": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "Uncertainty": {
       "type": "object",
       "required": ["flag", "message", "clinician_review_required"],
@@ -58,7 +67,8 @@
         "value": { "type": ["number", "string", "boolean", "object", "array", "null"] },
         "unit": { "type": "string" },
         "evidence": { "$ref": "common.json#/$defs/Evidence" },
-        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" },
+        "provenance": { "$ref": "common.json#/$defs/Provenance" }
       },
       "additionalProperties": false
     },

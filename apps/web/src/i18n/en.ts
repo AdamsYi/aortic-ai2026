@@ -36,6 +36,7 @@ const en = {
   'label.processing_case': 'Processing case',
   'label.case_file': 'Case file (.nii/.nii.gz)',
   'label.patient_id': 'Patient ID',
+  'label.demo_case_badge': 'Demo Case',
   'toolbar.layout': 'Layout',
   'toolbar.tools': 'Tools',
   'toolbar.measurement_edit': 'Edit',

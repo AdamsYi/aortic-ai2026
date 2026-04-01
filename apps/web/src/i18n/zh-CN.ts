@@ -36,6 +36,7 @@ const zhCN = {
   'label.processing_case': '病例处理中',
   'label.case_file': '病例文件（.nii/.nii.gz）',
   'label.patient_id': '患者 ID',
+  'label.demo_case_badge': '示范病例',
   'toolbar.layout': '布局',
   'toolbar.tools': '工具',
   'toolbar.measurement_edit': '编辑',
