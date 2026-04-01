@@ -1648,9 +1648,12 @@ function applyPrimaryToolBindings(toolGroup = session ? ToolGroupManager.getTool
       ],
     });
   } else if (currentPrimaryTool !== 'crosshair') {
-    toolGroup.setToolActive(primaryToolName(currentPrimaryTool), {
-      bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
-    });
+    const toolName = primaryToolName(currentPrimaryTool);
+    if (toolName) {
+      toolGroup.setToolActive(toolName, {
+        bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+      });
+    }
   }
   syncToolUi();
 }
@@ -2882,10 +2885,14 @@ function getBootstrapWorldPoint(casePayload: WorkstationCasePayload | null): Poi
 }
 
 function preferredDisplayName(casePayload: WorkstationCasePayload): string {
-  if (typeof casePayload.display_name === 'string' && casePayload.display_name.trim()) {
-    return casePayload.display_name.trim();
+  const displayName = casePayload.display_name;
+  if (typeof displayName === 'string' && displayName.trim()) {
+    return displayName.trim();
   }
-  const localized = casePayload.display_name?.[currentLocale] || casePayload.display_name?.en || casePayload.display_name?.['zh-CN'];
+  const localized =
+    displayName && typeof displayName === 'object'
+      ? displayName[currentLocale] || displayName.en || displayName['zh-CN']
+      : null;
   if (typeof localized === 'string' && localized.trim()) return localized.trim();
   if (isHistoricalInferredCase(casePayload)) {
     return currentLocale === 'zh-CN' ? '最新真实病例' : 'Latest Real Case';
@@ -3870,7 +3877,7 @@ function renderCaseOverviewSummary(casePayload: WorkstationCasePayload): void {
     </div>
     <div class="case-overview-caption">${escapeHtml(preferredDisplayName(casePayload))}</div>
     ${limitations.length
-      ? `<div class="case-overview-limitations">${limitations.map((item) => `<span class="case-limit-pill">${escapeHtml(item)}</span>`).join('')}</div>`
+      ? `<div class="case-overview-limitations">${limitations.map((item) => `<span class="case-limit-pill">${escapeHtml(String(item))}</span>`).join('')}</div>`
       : ''
     }
   `;
@@ -3959,10 +3966,14 @@ function renderDownloadPanel(casePayload: WorkstationCasePayload): void {
   const downloads = casePayload.downloads || {};
   const rawLink = normalizeDownloadEntry(downloads.raw, 'Raw CT');
   const jsonLinks = Array.isArray(downloads.json)
-    ? downloads.json.map((entry, index) => normalizeDownloadEntry(entry, `JSON ${index + 1}`)).filter(Boolean)
+    ? downloads.json
+      .map((entry, index) => normalizeDownloadEntry(entry, `JSON ${index + 1}`))
+      .filter((entry): entry is { label: string; href: string } => Boolean(entry))
     : [];
   const stlLinks = Array.isArray(downloads.stl)
-    ? downloads.stl.map((entry, index) => normalizeDownloadEntry(entry, `STL ${index + 1}`)).filter(Boolean)
+    ? downloads.stl
+      .map((entry, index) => normalizeDownloadEntry(entry, `STL ${index + 1}`))
+      .filter((entry): entry is { label: string; href: string } => Boolean(entry))
     : [];
   const pdfLink = normalizeDownloadEntry(downloads.pdf, 'PDF report');
   const items: string[] = [];
@@ -4282,7 +4293,7 @@ function collectClinicalGateItems(casePayload: WorkstationCasePayload): Clinical
   return items;
 }
 
-type QaTone = 'ok' | 'warn' | 'danger' | 'info';
+type QaTone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral';
 
 type QaItem = {
   section: string;
@@ -4551,8 +4562,13 @@ async function createThreeRuntime(container: HTMLDivElement): Promise<ThreeRunti
   if (!webglContext) {
     throw new Error('webgl_context_unavailable');
   }
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, canvas, context: webglContext as WebGLRenderingContext });
-  renderer.preserveDrawingBuffer = true;
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: false,
+    canvas,
+    context: webglContext as WebGLRenderingContext,
+    preserveDrawingBuffer: true,
+  });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight));
   container.replaceChildren(canvas);
@@ -4761,16 +4777,20 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
   if (annulusRingPoints.length > 2) {
     runtime.layerGroups.annulus.add(buildRingLine(annulusRingPoints, 0xf06c7f, 'annulus-ring'));
   } else if (annulusRing?.origin_world && casePayload.display_planes?.annulus) {
+    const rawMeasurements = pickObject(pickObject(casePayload.measurements)?.raw_measurements);
+    const rawAnnulus = pickObject(rawMeasurements?.annulus);
     const annulusDiameter =
       readMetricValue(pickObject(casePayload.measurements)?.annulus_equivalent_diameter_mm)
-      ?? readMetricValue(pickObject(pickObject(casePayload.measurements)?.raw_measurements)?.annulus?.equivalent_diameter_mm)
+      ?? readMetricValue(rawAnnulus?.equivalent_diameter_mm)
       ?? 22;
     runtime.layerGroups.annulus.add(
       buildDerivedRing(casePayload.display_planes.annulus, annulusDiameter / 2, 0xf06c7f, 'annulus-ring')
     );
   }
-  const annulusPlaneRecord = pickObject(defaultAnnulusPlaneArtifact) || pickObject(casePayload.aortic_root_model)?.annulus_ring;
-  const annulusPlane = buildAnnulusPlaneOverlay(annulusPlaneRecord);
+  const annulusPlaneRecord =
+    pickObject(defaultAnnulusPlaneArtifact)
+    || pickObject(pickObject(casePayload.aortic_root_model)?.annulus_ring as Record<string, unknown> | null);
+  const annulusPlane = buildAnnulusPlaneOverlay(annulusPlaneRecord || null);
   if (annulusPlane) {
     runtime.layerGroups.annulus_plane.add(annulusPlane.plane);
     runtime.layerGroups.annulus_plane.add(annulusPlane.normalArrow);
@@ -4778,9 +4798,11 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
 
   const stjPlane = casePayload.display_planes?.stj;
   if (stjPlane?.origin_world) {
+    const rawMeasurements = pickObject(pickObject(casePayload.measurements)?.raw_measurements);
+    const rawStj = pickObject(rawMeasurements?.stj);
     const stjDiameter =
       readMetricValue(pickObject(casePayload.measurements)?.stj_diameter_mm)
-      ?? readMetricValue(pickObject(pickObject(casePayload.measurements)?.raw_measurements)?.stj?.diameter_mm)
+      ?? readMetricValue(rawStj?.diameter_mm)
       ?? 26;
     runtime.layerGroups.stj.add(buildDerivedRing(stjPlane, stjDiameter / 2, 0x9f8cff, 'stj-ring'));
   }
@@ -5029,13 +5051,14 @@ function readMeshOpacityFromUi(key: string, fallback: number): number {
 
 function updateThreeMeshFromUi(): void {
   if (!threeRuntime) return;
-  Object.entries(threeRuntime.meshGroups).forEach(([key, group]) => {
+  const runtime = threeRuntime;
+  Object.entries(runtime.meshGroups).forEach(([key, group]) => {
     const toggle = DOM.threeMeshToggles.find((entry) => entry.dataset.threeMeshToggle === key);
     const slider = DOM.threeMeshOpacity.find((entry) => entry.dataset.threeMeshOpacity === key);
     const visible = toggle ? toggle.checked : true;
     const opacity = slider ? Math.max(0, Math.min(1, (Number.parseInt(slider.value, 10) || 0) / 100)) : 1;
-    threeRuntime.meshState[key] = {
-      ...(threeRuntime.meshState[key] || { label: key }),
+    runtime.meshState[key] = {
+      ...(runtime.meshState[key] || { label: key }),
       visible,
       opacity,
     };
