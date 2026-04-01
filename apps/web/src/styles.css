@@ -1047,6 +1047,44 @@ a:hover { text-decoration: underline; }
   background: rgba(77, 166, 255, 0.18);
   color: #fff;
 }
+
+.manual-review-section {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.01);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.manual-review-grid {
+  margin-top: 6px;
+}
+
+.manual-review-row {
+  grid-template-columns: 1fr auto;
+}
+
+.manual-entry-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.manual-input {
+  width: 90px;
+  text-align: right;
+}
+
+.manual-save-btn {
+  white-space: nowrap;
+  padding: 4px 8px;
+}
+
+.manual-review-status {
+  font-size: 10px;
+  margin-top: 6px;
+}
+
 .metric-section {
   display: grid;
   gap: 4px;

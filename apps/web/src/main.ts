@@ -218,6 +218,23 @@ type AnnotationUndoEntry =
     };
 
 type Locale = 'zh-CN' | 'en';
+type ManualReviewFieldKey =
+  | 'annulus_diameter_mm'
+  | 'sinus_diameter_mm'
+  | 'stj_diameter_mm'
+  | 'coronary_height_left_mm'
+  | 'coronary_height_right_mm';
+
+type ManualAnnotationRecord = {
+  case_id: string;
+  annotator: string;
+  annotation_date: string;
+  measurements: Record<ManualReviewFieldKey, { value: number | null; method?: string }>;
+  comparison: {
+    auto_vs_manual_diff_mm: Record<ManualReviewFieldKey, number | null>;
+    acceptable_threshold_mm: number;
+  };
+};
 
 type AuxMode = 'annulus' | 'stj' | 'centerline' | 'cpr';
 type CaseMode = 'showcase' | 'latest';
@@ -391,6 +408,9 @@ let planningPanelCollapsed = false;
 let measurementsPanelCollapsed = false;
 let submitJobPollHandle: number | null = null;
 let activeSubmissionJobId: string | null = null;
+let manualAnnotationRecord: ManualAnnotationRecord | null = null;
+let manualAnnotationCaseId: string | null = null;
+let manualReviewCollapsed = false;
 const activeLandmarkLayers: Record<string, boolean> = {
   annulus: true,
   commissures: true,
@@ -460,8 +480,12 @@ const DOM = {
   planningPanelSection: null as HTMLElement | null,
   measurementPanelSection: null as HTMLElement | null,
   planningPanelToggle: null as HTMLButtonElement | null,
+  manualReviewToggle: null as HTMLButtonElement | null,
   measurementPanelToggle: null as HTMLButtonElement | null,
   exportMeasurementsCsv: null as HTMLButtonElement | null,
+  manualReviewGrid: null as HTMLDivElement | null,
+  manualReviewStatus: null as HTMLDivElement | null,
+  manualReviewSection: null as HTMLElement | null,
   pearsPanel: null as HTMLDivElement | null,
   qaList: null as HTMLUListElement | null,
   evidenceList: null as HTMLUListElement | null,
@@ -493,6 +517,20 @@ const DOM = {
   viewportFooters: {} as Record<ViewportKey, HTMLDivElement>,
   viewportPlaceholders: {} as Record<ViewportKey, HTMLDivElement>,
 };
+
+const MANUAL_REVIEW_THRESHOLD_MM = 1.5;
+const MANUAL_REVIEW_FIELDS: Array<{
+  key: ManualReviewFieldKey;
+  autoKey: string;
+  method: string;
+  labelKey: string;
+}> = [
+  { key: 'annulus_diameter_mm', autoKey: 'annulus_equivalent_diameter_mm', method: 'double_oblique', labelKey: 'manual.annulus_diameter' },
+  { key: 'sinus_diameter_mm', autoKey: 'sinus_diameter_mm', method: 'double_oblique', labelKey: 'manual.sinus_diameter' },
+  { key: 'stj_diameter_mm', autoKey: 'stj_diameter_mm', method: 'double_oblique', labelKey: 'manual.stj_diameter' },
+  { key: 'coronary_height_left_mm', autoKey: 'coronary_height_left_mm', method: 'landmark_distance', labelKey: 'manual.coronary_height_left' },
+  { key: 'coronary_height_right_mm', autoKey: 'coronary_height_right_mm', method: 'landmark_distance', labelKey: 'manual.coronary_height_right' },
+];
 
 function renderShell(): void {
   document.getElementById('pre-load')?.remove();
@@ -705,6 +743,16 @@ function renderShell(): void {
                   <button type="button" id="toggle-planning-panel">Hide</button>
                 </div>
               </div>
+              <div class="manual-review-section" id="manual-review-section">
+                <div class="section-head">
+                  <h5 data-i18n="panel.manual_review_title">人工核查 / Manual Review</h5>
+                  <div class="section-head-actions">
+                    <button type="button" id="toggle-manual-review">Hide</button>
+                  </div>
+                </div>
+                <div class="metric-grid manual-review-grid" id="manual-review-grid"></div>
+                <div class="manual-review-status muted" id="manual-review-status"></div>
+              </div>
               <div class="planning-tabs">
                 <button type="button" class="planning-tab active" data-planning-tab="TAVI">TAVI</button>
                 <button type="button" class="planning-tab" data-planning-tab="VSRR">VSRR</button>
@@ -838,8 +886,12 @@ function renderShell(): void {
   DOM.planningPanelSection = document.getElementById('planning-panel-section');
   DOM.measurementPanelSection = DOM.measurementGrid?.closest('.info-card') as HTMLElement | null;
   DOM.planningPanelToggle = document.getElementById('toggle-planning-panel') as HTMLButtonElement;
+  DOM.manualReviewToggle = document.getElementById('toggle-manual-review') as HTMLButtonElement;
   DOM.measurementPanelToggle = document.getElementById('toggle-measurements-panel') as HTMLButtonElement;
   DOM.exportMeasurementsCsv = document.getElementById('export-measurements-csv') as HTMLButtonElement;
+  DOM.manualReviewGrid = document.getElementById('manual-review-grid') as HTMLDivElement;
+  DOM.manualReviewStatus = document.getElementById('manual-review-status') as HTMLDivElement;
+  DOM.manualReviewSection = document.getElementById('manual-review-section') as HTMLElement;
   DOM.pearsPanel = document.getElementById('pears-panel') as HTMLDivElement;
   DOM.qaList = document.getElementById('qa-list') as HTMLUListElement;
   DOM.evidenceList = document.getElementById('evidence-list') as HTMLUListElement;
@@ -899,8 +951,17 @@ function renderShell(): void {
   DOM.reportOpenButton?.addEventListener('click', () => setReportDrawerOpen(true));
   DOM.reportCloseButton?.addEventListener('click', () => setReportDrawerOpen(false));
   DOM.planningPanelToggle?.addEventListener('click', () => togglePlanningPanelVisibility());
+  DOM.manualReviewToggle?.addEventListener('click', () => toggleManualReviewVisibility());
   DOM.measurementPanelToggle?.addEventListener('click', () => toggleMeasurementsPanelVisibility());
   DOM.exportMeasurementsCsv?.addEventListener('click', () => exportMeasurementsCsv());
+  DOM.manualReviewGrid?.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const button = target?.closest('button[data-manual-save]') as HTMLButtonElement | null;
+    if (!button) return;
+    const fieldKey = String(button.dataset.manualSave || '') as ManualReviewFieldKey;
+    if (!fieldKey) return;
+    void saveManualReviewField(fieldKey);
+  });
   DOM.annotationButton?.addEventListener('click', () => {
     void startAutoAnnotation();
   });
@@ -1830,8 +1891,10 @@ function resetActiveViewport(): void {
 function syncPanelVisibilityButtons(): void {
   if (DOM.planningPanelSection) DOM.planningPanelSection.classList.toggle('hidden', planningPanelCollapsed);
   if (DOM.measurementPanelSection) DOM.measurementPanelSection.classList.toggle('hidden', measurementsPanelCollapsed);
+  if (DOM.manualReviewSection) DOM.manualReviewSection.classList.toggle('hidden', manualReviewCollapsed);
   if (DOM.planningPanelToggle) DOM.planningPanelToggle.textContent = planningPanelCollapsed ? 'Show' : 'Hide';
   if (DOM.measurementPanelToggle) DOM.measurementPanelToggle.textContent = measurementsPanelCollapsed ? 'Show' : 'Hide';
+  if (DOM.manualReviewToggle) DOM.manualReviewToggle.textContent = manualReviewCollapsed ? 'Show' : 'Hide';
 }
 
 function togglePlanningPanelVisibility(): void {
@@ -1841,6 +1904,11 @@ function togglePlanningPanelVisibility(): void {
 
 function toggleMeasurementsPanelVisibility(): void {
   measurementsPanelCollapsed = !measurementsPanelCollapsed;
+  syncPanelVisibilityButtons();
+}
+
+function toggleManualReviewVisibility(): void {
+  manualReviewCollapsed = !manualReviewCollapsed;
   syncPanelVisibilityButtons();
 }
 
@@ -2025,7 +2093,7 @@ async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boole
   syncCaseModeButtons();
   setBootStage('loading_case_index', 'Resolving latest processed CTA case');
   setStatus('Resolving latest processed CTA case...');
-  if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Real Case · loading...';
+  if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Case Auto Annotation · loading...';
   if (DOM.mprStatus) DOM.mprStatus.textContent = 'Looking up the latest processed CTA case...';
   try {
     const latest = await fetchJson<Record<string, unknown>>('/demo/latest-case');
@@ -2064,6 +2132,7 @@ async function loadCase(jobId: string): Promise<void> {
   updateHeaderMeta(activeCase);
   applyCapabilityControls(activeCase);
   renderSidePanels(activeCase);
+  await hydrateManualReview(activeCase);
   setBootStage('ready', `Case ${jobId} shell ready`);
   maybeAutoRunAnnotation(activeCase);
   const volumeFailure = await initializeViewerSession(activeCase);
@@ -3249,6 +3318,7 @@ function renderSidePanels(casePayload: WorkstationCasePayload): void {
   renderCapabilitySummary(casePayload);
   renderAnnotationPanel(casePayload);
   renderMeasurementsPanel(casePayload);
+  renderManualReviewPanel(casePayload);
   renderPlanningPanel(casePayload);
 
   renderAcceptancePanel(casePayload);
@@ -3339,6 +3409,149 @@ function renderMeasurementsPanel(casePayload: WorkstationCasePayload): void {
     `;
   }).join('');
   DOM.measurementGrid.innerHTML = html || `<div class="muted">${escapeHtml(t('message.no_measurements'))}</div>`;
+}
+
+function createEmptyManualAnnotation(caseId: string): ManualAnnotationRecord {
+  const emptyMeasurements = Object.fromEntries(
+    MANUAL_REVIEW_FIELDS.map((entry) => [entry.key, { value: null, method: entry.method }])
+  ) as Record<ManualReviewFieldKey, { value: number | null; method?: string }>;
+  const emptyDiffs = Object.fromEntries(
+    MANUAL_REVIEW_FIELDS.map((entry) => [entry.key, null])
+  ) as Record<ManualReviewFieldKey, number | null>;
+  return {
+    case_id: caseId,
+    annotator: 'manual_reviewer',
+    annotation_date: new Date().toISOString(),
+    measurements: emptyMeasurements,
+    comparison: {
+      auto_vs_manual_diff_mm: emptyDiffs,
+      acceptable_threshold_mm: MANUAL_REVIEW_THRESHOLD_MM,
+    },
+  };
+}
+
+async function hydrateManualReview(casePayload: WorkstationCasePayload): Promise<void> {
+  if (!DOM.manualReviewGrid || !DOM.manualReviewStatus) return;
+  const caseId = String(casePayload.case_id || casePayload.job?.id || SHOWCASE_CASE_ID).trim() || SHOWCASE_CASE_ID;
+  if (manualAnnotationCaseId === caseId && manualAnnotationRecord) {
+    renderManualReviewPanel(casePayload);
+    return;
+  }
+  manualAnnotationCaseId = caseId;
+  manualAnnotationRecord = createEmptyManualAnnotation(caseId);
+  DOM.manualReviewStatus.textContent = t('manual.status_loading');
+  renderManualReviewPanel(casePayload);
+  try {
+    const payload = await fetchJson<{ annotations?: Array<{ annotation?: Record<string, unknown> }> }>(
+      `/api/cases/${encodeURIComponent(caseId)}/annotations`
+    );
+    const latest = Array.isArray(payload.annotations) ? pickObject(payload.annotations[0]?.annotation) : null;
+    if (latest) {
+      manualAnnotationRecord = normalizeManualAnnotation(caseId, latest);
+    }
+    DOM.manualReviewStatus.textContent = t('manual.status_ready');
+  } catch {
+    DOM.manualReviewStatus.textContent = t('manual.status_unavailable');
+  }
+  renderManualReviewPanel(casePayload);
+}
+
+function normalizeManualAnnotation(caseId: string, raw: Record<string, unknown>): ManualAnnotationRecord {
+  const fallback = createEmptyManualAnnotation(caseId);
+  const measurements = pickObject(raw.measurements) || {};
+  const comparison = pickObject(raw.comparison) || {};
+  const diffMap = pickObject(comparison.auto_vs_manual_diff_mm) || {};
+
+  MANUAL_REVIEW_FIELDS.forEach((entry) => {
+    const measurement = pickObject(measurements[entry.key]) || {};
+    const value = Number(measurement.value);
+    fallback.measurements[entry.key] = {
+      value: Number.isFinite(value) ? value : null,
+      method: String(measurement.method || entry.method),
+    };
+    const diff = Number(diffMap[entry.key]);
+    fallback.comparison.auto_vs_manual_diff_mm[entry.key] = Number.isFinite(diff) ? diff : null;
+  });
+  const threshold = Number(comparison.acceptable_threshold_mm);
+  if (Number.isFinite(threshold) && threshold > 0) {
+    fallback.comparison.acceptable_threshold_mm = threshold;
+  }
+  fallback.annotator = String(raw.annotator || fallback.annotator);
+  fallback.annotation_date = String(raw.annotation_date || fallback.annotation_date);
+  return fallback;
+}
+
+function manualDiffTone(diff: number | null): MetricTone {
+  if (diff == null || Number.isNaN(diff)) return 'info';
+  if (diff < MANUAL_REVIEW_THRESHOLD_MM) return 'ok';
+  if (diff < 3) return 'warn';
+  return 'danger';
+}
+
+function manualDiffLabel(diff: number | null): string {
+  if (diff == null || Number.isNaN(diff)) return t('manual.diff_na');
+  if (diff < MANUAL_REVIEW_THRESHOLD_MM) return t('manual.diff_ok');
+  if (diff < 3) return t('manual.diff_review');
+  return t('manual.diff_remeasure');
+}
+
+function renderManualReviewPanel(casePayload: WorkstationCasePayload): void {
+  if (!DOM.manualReviewGrid || !DOM.manualReviewStatus || !manualAnnotationRecord) return;
+  const measurements = currentMeasurementsEnvelopeMap(casePayload);
+  const rows = MANUAL_REVIEW_FIELDS.map((entry) => {
+    const autoValue = envelopeNumber(measurements[entry.autoKey]);
+    const manualValue = manualAnnotationRecord?.measurements?.[entry.key]?.value;
+    const existingDiff = manualAnnotationRecord?.comparison?.auto_vs_manual_diff_mm?.[entry.key];
+    const diff = autoValue == null || manualValue == null ? (existingDiff ?? null) : Math.abs(autoValue - manualValue);
+    const tone = manualDiffTone(diff);
+    const diffText = diff == null ? t('manual.diff_na') : `${diff.toFixed(2)} mm · ${manualDiffLabel(diff)}`;
+    return `
+      <div class="metric-row tone-${tone} manual-review-row">
+        <div class="metric-label">
+          <span class="metric-label-text">${escapeHtml(t(entry.labelKey))}</span>
+          <span class="metric-meta">${escapeHtml(`Auto: ${autoValue == null ? 'N/A' : `${autoValue.toFixed(2)} mm`} · ${diffText}`)}</span>
+        </div>
+        <div class="manual-entry-actions">
+          <input type="number" step="0.1" class="manual-input" data-manual-input="${escapeHtml(entry.key)}" value="${manualValue == null ? '' : escapeHtml(String(manualValue))}" placeholder="mm" />
+          <button type="button" data-manual-save="${escapeHtml(entry.key)}" class="manual-save-btn">${escapeHtml(t('manual.save'))}</button>
+        </div>
+      </div>
+    `;
+  });
+  DOM.manualReviewGrid.innerHTML = rows.join('');
+}
+
+async function saveManualReviewField(fieldKey: ManualReviewFieldKey): Promise<void> {
+  if (!activeCase || !manualAnnotationRecord || !DOM.manualReviewGrid || !DOM.manualReviewStatus) return;
+  const input = DOM.manualReviewGrid.querySelector(`input[data-manual-input="${fieldKey}"]`) as HTMLInputElement | null;
+  if (!input) return;
+  const parsed = Number(input.value);
+  const manualValue = Number.isFinite(parsed) ? parsed : null;
+  manualAnnotationRecord.measurements[fieldKey] = {
+    value: manualValue,
+    method: manualAnnotationRecord.measurements[fieldKey]?.method || 'double_oblique',
+  };
+
+  const entry = MANUAL_REVIEW_FIELDS.find((item) => item.key === fieldKey);
+  const autoEnvelope = entry ? currentMeasurementsEnvelopeMap(activeCase)[entry.autoKey] : null;
+  const autoValue = envelopeNumber(autoEnvelope);
+  manualAnnotationRecord.comparison.auto_vs_manual_diff_mm[fieldKey] =
+    autoValue == null || manualValue == null ? null : Math.abs(autoValue - manualValue);
+  manualAnnotationRecord.annotation_date = new Date().toISOString();
+  DOM.manualReviewStatus.textContent = t('manual.status_saving');
+  renderManualReviewPanel(activeCase);
+
+  try {
+    const caseId = String(activeCase.case_id || activeCase.job?.id || SHOWCASE_CASE_ID).trim() || SHOWCASE_CASE_ID;
+    await fetchJson(`/api/cases/${encodeURIComponent(caseId)}/annotations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(manualAnnotationRecord),
+    });
+    DOM.manualReviewStatus.textContent = t('manual.status_saved');
+  } catch {
+    DOM.manualReviewStatus.textContent = t('manual.status_save_failed');
+  }
 }
 
 function currentMeasurementsEnvelopeMap(casePayload: WorkstationCasePayload | null): Record<string, Record<string, unknown>> {

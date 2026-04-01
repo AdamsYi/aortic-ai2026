@@ -1211,6 +1211,19 @@ export default {
         return respond(json(manifest));
       }
 
+      if (request.method === "POST" && /^\/api\/cases\/[^/]+\/annotations$/.test(path)) {
+        const parts = path.split("/");
+        const caseId = decodeURIComponent(parts[3] || "");
+        const payload = await readJson(request);
+        return respond(await saveManualAnnotation(caseId, payload, env));
+      }
+
+      if (request.method === "GET" && /^\/api\/cases\/[^/]+\/annotations$/.test(path)) {
+        const parts = path.split("/");
+        const caseId = decodeURIComponent(parts[3] || "");
+        return respond(await getManualAnnotations(caseId, env));
+      }
+
       if (request.method === "GET" && path === "/api/cases/default_clinical_case/summary") {
         return respond(await handleDefaultCaseSummary(getDefaultCaseStore(env, request), getBuildVersion()));
       }
@@ -2671,6 +2684,76 @@ async function ensureCaseResultsTable(env: Env): Promise<void> {
        created_at INTEGER
      )`
   ).run();
+}
+
+async function ensureManualAnnotationsTable(env: Env): Promise<void> {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS manual_annotations (
+       id TEXT PRIMARY KEY,
+       case_id TEXT,
+       annotator TEXT,
+       annotation_json TEXT,
+       created_at INTEGER
+     )`
+  ).run();
+}
+
+async function saveManualAnnotation(caseId: string, payload: unknown, env: Env): Promise<Response> {
+  if (!caseId) return json({ error: "missing_case_id" }, 400);
+  const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+  if (!record) return json({ error: "invalid_payload" }, 400);
+
+  await ensureManualAnnotationsTable(env);
+  const annotationId = crypto.randomUUID();
+  const createdAt = Date.now();
+  const annotator = nullableString(record.annotator) || "unknown_annotator";
+  const normalized = {
+    ...record,
+    case_id: caseId,
+    annotator,
+    annotation_date: nullableString(record.annotation_date) || new Date().toISOString(),
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO manual_annotations (id, case_id, annotator, annotation_json, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5)`
+  )
+    .bind(annotationId, caseId, annotator, JSON.stringify(normalized), createdAt)
+    .run();
+
+  return json({
+    ok: true,
+    id: annotationId,
+    case_id: caseId,
+    annotator,
+    created_at: createdAt,
+  });
+}
+
+async function getManualAnnotations(caseId: string, env: Env): Promise<Response> {
+  if (!caseId) return json({ error: "missing_case_id" }, 400);
+  await ensureManualAnnotationsTable(env);
+
+  const rows = await safeAll(
+    env.DB.prepare(
+      `SELECT id, case_id, annotator, annotation_json, created_at
+       FROM manual_annotations
+       WHERE case_id = ?1
+       ORDER BY created_at DESC`
+    )
+      .bind(caseId)
+      .all()
+  );
+
+  const annotations = rows.map((row) => ({
+    id: row.id,
+    case_id: row.case_id,
+    annotator: row.annotator,
+    created_at: row.created_at,
+    annotation: parseJsonColumn(row.annotation_json) || {},
+  }));
+
+  return json({ case_id: caseId, annotations, total: annotations.length });
 }
 
 async function handleCaseResultArtifact(caseId: string, rawName: string, env: Env): Promise<Response> {

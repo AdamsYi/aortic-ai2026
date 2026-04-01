@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aorticai.local/schemas/manual_annotation.json",
+  "title": "Manual Annotation Review",
+  "type": "object",
+  "required": [
+    "case_id",
+    "annotator",
+    "annotation_date",
+    "measurements",
+    "comparison"
+  ],
+  "properties": {
+    "case_id": { "type": "string" },
+    "annotator": { "type": "string" },
+    "annotation_date": { "type": "string", "format": "date-time" },
+    "measurements": {
+      "type": "object",
+      "required": [
+        "annulus_diameter_mm",
+        "sinus_diameter_mm",
+        "stj_diameter_mm",
+        "coronary_height_left_mm",
+        "coronary_height_right_mm"
+      ],
+      "properties": {
+        "annulus_diameter_mm": { "$ref": "#/$defs/manualValue" },
+        "sinus_diameter_mm": { "$ref": "#/$defs/manualValue" },
+        "stj_diameter_mm": { "$ref": "#/$defs/manualValue" },
+        "coronary_height_left_mm": { "$ref": "#/$defs/manualValue" },
+        "coronary_height_right_mm": { "$ref": "#/$defs/manualValue" }
+      },
+      "additionalProperties": true
+    },
+    "comparison": {
+      "type": "object",
+      "required": [
+        "auto_vs_manual_diff_mm",
+        "acceptable_threshold_mm"
+      ],
+      "properties": {
+        "auto_vs_manual_diff_mm": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["number", "null"]
+          }
+        },
+        "acceptable_threshold_mm": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "manualValue": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": { "type": ["number", "null"] },
+        "method": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
