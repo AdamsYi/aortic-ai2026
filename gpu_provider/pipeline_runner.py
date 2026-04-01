@@ -14,6 +14,7 @@ Geometry-driven CTA aortic planning pipeline (research-grade, no placeholders):
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import shutil
 import subprocess
@@ -67,6 +68,12 @@ try:
 except Exception:  # pragma: no cover
     A4 = None
     pdf_canvas = None
+
+
+def _progress(step: str, detail: str = "") -> None:
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    msg = f"[{ts}] [{step}] {detail}" if detail else f"[{ts}] [{step}]"
+    print(msg, flush=True)
 
 
 def run_cmd(cmd: list[str]) -> tuple[str, str]:
@@ -291,10 +298,15 @@ def run_geometry_pipeline(
     timers: dict[str, float] = {}
     t_pipeline = time.time()
 
+    _progress("nifti_load", f"loading CT={ct_path.name} mask={mask_path.name}")
     ct_nii = nib.load(str(ct_path))
     mask_nii = nib.load(str(mask_path))
     ct_hu = ct_nii.get_fdata().astype(np.float32)
     multiclass = mask_nii.get_fdata().astype(np.uint8)
+    _progress(
+        "nifti_load",
+        f"done ct_shape={tuple(int(v) for v in ct_hu.shape)} mask_shape={tuple(int(v) for v in multiclass.shape)}",
+    )
 
     affine = mask_nii.affine.astype(np.float64)
     spacing = tuple(float(v) for v in mask_nii.header.get_zooms()[:3])
@@ -315,11 +327,16 @@ def run_geometry_pipeline(
     _record_artifact(artifacts_manifest, "segmentation_mask_nifti", mask_path.name, "application/gzip", mask_path)
 
     t0 = time.time()
+    _progress("lumen_extraction", "starting lumen mask extraction")
     lumen_mask = extract_lumen_mask(multiclass, spacing)
     lumen_mask_path = output_dir / "lumen_mask.nii.gz"
     save_mask_nifti(lumen_mask, affine, lumen_mask_path)
     timers["lumen_cleanup_seconds"] = round(time.time() - t0, 4)
     _record_artifact(artifacts_manifest, "lumen_mask_nifti", lumen_mask_path.name, "application/gzip", lumen_mask_path)
+    _progress(
+        "lumen_extraction",
+        f"done wrote={lumen_mask_path.name} voxels={int(lumen_mask.sum())} runtime_s={timers['lumen_cleanup_seconds']}",
+    )
 
     t0 = time.time()
     lumen_mesh = generate_surface_mesh(
@@ -331,6 +348,7 @@ def run_geometry_pipeline(
     timers["mesh_seconds"] = round(time.time() - t0, 4)
 
     t0 = time.time()
+    _progress("stl_export", "starting STL export for root/ascending/leaflets")
     root_mesh = generate_surface_mesh(
         root_mask if np.any(root_mask) else lumen_mask,
         affine,
@@ -356,11 +374,20 @@ def run_geometry_pipeline(
     timers["surface_export_seconds"] = round(time.time() - t0, 4)
     _record_artifact(artifacts_manifest, "aortic_root_stl", root_stl_path.name, "model/stl", root_stl_path)
     _record_artifact(artifacts_manifest, "ascending_aorta_stl", asc_stl_path.name, "model/stl", asc_stl_path)
+    _progress(
+        "stl_export",
+        f"partial done root={root_stl_path.name} ascending={asc_stl_path.name} runtime_s={timers['surface_export_seconds']}",
+    )
 
     t0 = time.time()
+    _progress("centerline", "starting centerline computation")
     centerline = compute_centerline(lumen_mask, affine, spacing, sample_step_mm=1.25)
     centerline_quality = compute_centerline_quality(centerline, lumen_mask, spacing)
     timers["centerline_seconds"] = round(time.time() - t0, 4)
+    _progress(
+        "centerline",
+        f"done points={int(centerline.points_world.shape[0])} quality={centerline_quality.get('quality_flag', 'unknown')} runtime_s={timers['centerline_seconds']}",
+    )
 
     t0 = time.time()
     sections = sample_cross_sections(
@@ -379,11 +406,17 @@ def run_geometry_pipeline(
     timers["profile_seconds"] = round(time.time() - t0, 4)
 
     t0 = time.time()
+    _progress("landmark_detection", "starting landmark detection")
     landmarks = detect_landmarks_from_profile(sections, centerline.points_world, centerline.s_mm)
     landmark_sections = pick_section_bundle(sections, landmarks)
     timers["landmark_seconds"] = round(time.time() - t0, 4)
+    _progress(
+        "landmark_detection",
+        f"done annulus_index={int(landmarks.annulus_index)} stj_index={int(landmarks.stj_index)} runtime_s={timers['landmark_seconds']}",
+    )
 
     t0 = time.time()
+    _progress("root_model", "starting root model build")
     root_model = build_aortic_root_model(
         sections=landmark_sections,
         landmarks=landmarks,
@@ -405,8 +438,17 @@ def run_geometry_pipeline(
     leaflet_model_json_path = output_dir / "leaflet_model.json"
     leaflet_model_json_path.write_text(json.dumps(sanitize_for_json(leaflet_model_payload(leaflet_model)), separators=(",", ":")), encoding="utf-8")
     _record_artifact(artifacts_manifest, "leaflet_model_json", leaflet_model_json_path.name, "application/json", leaflet_model_json_path)
+    _progress(
+        "root_model",
+        f"done leaflets_stl={leaflet_stl_path.name} runtime_s={timers['root_model_seconds']}",
+    )
+    _progress(
+        "stl_export",
+        f"done leaflets={leaflet_stl_path.name} total_runtime_s={round(timers['surface_export_seconds'] + timers['root_model_seconds'], 4)}",
+    )
 
     t0 = time.time()
+    _progress("measurements", "starting measurements build")
     measurements_structured, planning_metrics, risk_flags, measurements_json_payload = build_measurements(
         ct_hu=ct_hu,
         lumen_mask=lumen_mask,
@@ -422,6 +464,10 @@ def run_geometry_pipeline(
         centerline_result=centerline,
     )
     timers["measurement_seconds"] = round(time.time() - t0, 4)
+    _progress(
+        "measurements",
+        f"done annulus_diameter_mm={measurements_structured.get('annulus', {}).get('equivalent_diameter_mm')} runtime_s={timers['measurement_seconds']}",
+    )
     measurements_json_payload["centerline_quality"] = centerline_quality
     if centerline_quality.get("quality_flag") == "poor":
         risk_flags.append({
@@ -517,6 +563,7 @@ def run_geometry_pipeline(
     vsrr_graft = vsrr.get("recommended_graft_diameter_mm")
     vsrr_effective_height = (vsrr.get("leaflet_geometry_status") or {}).get("effective_height_mm") if isinstance(vsrr.get("leaflet_geometry_status"), dict) else None
 
+    _progress("planning", "starting planning synthesis")
     risk_lines = []
     if risk_flags:
         for flag in risk_flags:
@@ -527,6 +574,10 @@ def run_geometry_pipeline(
             risk_lines.append(f"  - {fid}: {msg}")
     else:
         risk_lines.append("  - none")
+    _progress(
+        "planning",
+        f"done tavi_size_mm={tavi_size} vsrr_graft_mm={vsrr_graft} risk_flags={len(risk_flags)}",
+    )
 
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     report_lines = [
@@ -574,8 +625,10 @@ def run_geometry_pipeline(
         "AorticAI | heartvalvepro.edu.kg",
     ]
     planning_report_pdf = output_dir / "planning_report.pdf"
+    _progress("pdf_report", f"starting PDF report build -> {planning_report_pdf.name}")
     write_planning_report_pdf(planning_report_pdf, "AorticAI 主动脉根部分析报告", report_lines)
     _record_artifact(artifacts_manifest, "planning_report_pdf", planning_report_pdf.name, "application/pdf", planning_report_pdf)
+    _progress("pdf_report", f"done wrote={planning_report_pdf.name}")
 
     total_runtime = round(time.time() - t_pipeline, 4)
     flat_measurements = _flatten_measurements(measurements_structured)
@@ -707,6 +760,17 @@ def run_geometry_pipeline(
         "runtime_seconds": total_runtime,
     }
 
+    _progress(
+        "complete",
+        "summary "
+        f"annulus={flat_measurements.get('annulus_diameter_mm')}mm "
+        f"sinus={flat_measurements.get('sinus_of_valsalva_diameter_mm')}mm "
+        f"stj={flat_measurements.get('stj_diameter_mm')}mm "
+        f"lca_h={flat_measurements.get('coronary_height_left_mm')}mm "
+        f"rca_h={flat_measurements.get('coronary_height_right_mm')}mm "
+        f"runtime_s={total_runtime}",
+    )
+
     return sanitize_for_json(payload), artifacts_manifest
 
 
@@ -757,13 +821,19 @@ def main() -> None:
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="aortic-pipeline-") as td:
         work_dir = Path(td)
+        _progress("nifti_load", f"preparing input from {in_path.name}")
         nifti_input, prep_meta = prepare_nifti_input(in_path, work_dir)
+        _progress(
+            "nifti_load",
+            f"prepared input_kind={prep_meta.get('input_kind', 'unknown')} nifti={nifti_input.name}",
+        )
         builder_meta: dict[str, Any] = {}
 
         if args.skip_segmentation:
             input_mask_path = Path(args.input_mask).resolve() if args.input_mask else None
             if input_mask_path and input_mask_path.exists():
                 shutil.copy2(input_mask_path, out_mask)
+                _progress("segmentation_mask", f"written external mask -> {out_mask.name}")
                 builder_meta = {
                     "segmentation_mode": "skipped_external_mask",
                     "input_mask": str(input_mask_path),
@@ -774,6 +844,7 @@ def main() -> None:
                 ct_nii = nib.load(str(nifti_input))
                 labels = build_synthetic_multiclass_for_skip(tuple(int(v) for v in ct_nii.shape[:3]))
                 nib.save(nib.Nifti1Image(labels.astype(np.uint8), ct_nii.affine), str(out_mask))
+                _progress("segmentation_mask", f"written synthetic mask -> {out_mask.name}")
                 builder_meta = {
                     "segmentation_mode": "skipped_synthetic_mask",
                     "reason": "skip_segmentation_without_input_mask",
@@ -799,7 +870,13 @@ def main() -> None:
                 "--quality",
                 args.quality,
             ]
+            cmd_str = " ".join(str(part) for part in cmd)
+            _progress("totalsegmentator", f"cmd={cmd_str}")
+            _progress("totalsegmentator", "running... this may take 5-15 min on first run (downloading weights ~2GB)")
             run_cmd(cmd)
+            _progress("totalsegmentator", "done")
+            if out_mask.exists():
+                _progress("segmentation_mask", f"written -> {out_mask.name}")
             builder_meta = parse_builder_meta(builder_meta_path)
         builder_meta.setdefault("device", args.device)
         builder_meta.setdefault("quality", args.quality)

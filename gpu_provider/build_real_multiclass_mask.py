@@ -15,6 +15,7 @@ Output labels:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -26,6 +27,12 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from scipy import ndimage
+
+
+def _progress(step: str, detail: str = "") -> None:
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    msg = f"[{ts}] [{step}] {detail}" if detail else f"[{ts}] [{step}]"
+    print(msg, flush=True)
 
 
 def run_cmd(cmd: list[str]) -> None:
@@ -288,28 +295,28 @@ def main() -> None:
             common_flags.extend(["--robust_crop", "--higher_order_resampling"])
 
         # Open-only task: no license required.
-        run_cmd(
-            [
-                totalseg_bin,
-                "-i",
-                str(input_path),
-                "-o",
-                str(seg_dir),
-                "--task",
-                "total",
-                "--roi_subset",
-                "aorta",
-                "heart",
-                "brachiocephalic_trunk",
-                "common_carotid_artery_right",
-                "common_carotid_artery_left",
-                "subclavian_artery_right",
-                "subclavian_artery_left",
-                "--device",
-                args.device,
-                *common_flags,
-            ]
-        )
+        totalseg_cmd = [
+            totalseg_bin,
+            "-i",
+            str(input_path),
+            "-o",
+            str(seg_dir),
+            "--task",
+            "total",
+            "--roi_subset",
+            "aorta",
+            "heart",
+            "brachiocephalic_trunk",
+            "common_carotid_artery_right",
+            "common_carotid_artery_left",
+            "subclavian_artery_right",
+            "subclavian_artery_left",
+            "--device",
+            args.device,
+            *common_flags,
+        ]
+        _progress("totalsegmentator", f"cmd={' '.join(str(part) for part in totalseg_cmd)}")
+        run_cmd(totalseg_cmd)
 
         aorta_nii = nib.load(str(seg_dir / "aorta.nii.gz"))
         aorta = aorta_nii.get_fdata() > 0.5
