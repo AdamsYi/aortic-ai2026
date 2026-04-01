@@ -31,6 +31,10 @@ GITHUB_FALLBACK_ZIP = (
     "https://github.com/wasserth/TotalSegmentator/releases/download/"
     "v2.0.0-weights/Totalsegmentator_dataset_small_v201.zip"
 )
+NIIVUE_CT_URLS = [
+    "https://raw.githubusercontent.com/neurolabusc/niivue-images/main/CT_Abdo.nii.gz",
+    "https://raw.githubusercontent.com/neurolabusc/niivue-images/main/CT_Philips.nii.gz",
+]
 WINDOWS_DEFAULT_DIR = Path(r"C:\AorticAI\gpu_provider\demo_data")
 TARGET_FILENAME = "demo_ct.nii.gz"
 TIMEOUT_SECONDS = 120
@@ -207,6 +211,17 @@ def try_download_github_archive() -> tuple[str, bytes] | None:
     return f"github:{source}", content
 
 
+def try_download_niivue_ct() -> tuple[str, bytes] | None:
+    print("[niivue] Try small public CT fallbacks")
+    for url in NIIVUE_CT_URLS:
+        print(f"[niivue] Try: {url}")
+        direct = fetch_direct_url(url)
+        if direct is not None:
+            source, content = direct
+            return f"niivue:{source}", content
+    return None
+
+
 def save_output(target_dir: Path, content: bytes, source: str) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
     out = target_dir / TARGET_FILENAME
@@ -236,6 +251,8 @@ def main() -> int:
             print("未找到可用公开数据，请手动提供CT文件")
             return 1
 
+    if result is None:
+        result = try_download_niivue_ct()
     if result is None:
         result = try_download_zenodo_nifti_primary()
     if result is None:
