@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 import sys
 import zipfile
@@ -11,6 +12,29 @@ from typing import Any
 import nibabel as nib
 import numpy as np
 import requests
+
+# DNS fallback: if system DNS fails, resolve via nslookup with 8.8.8.8
+_orig_getaddrinfo = socket.getaddrinfo
+
+def _dns_fallback_getaddrinfo(host, port, *args, **kwargs):
+    try:
+        return _orig_getaddrinfo(host, port, *args, **kwargs)
+    except socket.gaierror:
+        try:
+            r = subprocess.run(
+                ["nslookup", host, "8.8.8.8"],
+                capture_output=True, text=True, timeout=10
+            )
+            for line in r.stdout.splitlines():
+                if "Address:" in line and "8.8.8.8" not in line and "#" not in line:
+                    ip = line.split("Address:")[-1].strip()
+                    if ip:
+                        return _orig_getaddrinfo(ip, port, *args, **kwargs)
+        except Exception:
+            pass
+        raise
+
+socket.getaddrinfo = _dns_fallback_getaddrinfo
 
 TAVI_URL = "https://zenodo.org/records/15094600/files/tavi_data.zip"
 WIN_BASE = Path(r"C:\AorticAI\gpu_provider")
