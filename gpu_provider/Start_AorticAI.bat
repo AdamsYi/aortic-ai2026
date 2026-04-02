@@ -23,7 +23,7 @@ START "AorticAI Provider" /MIN cmd /k "cd /d C:\AorticAI\gpu_provider && set PRO
 timeout /t 5 /nobreak >nul
 
 echo [3/4] 正在连接云端通道（Cloudflare）...
-START "AorticAI Tunnel" /MIN cmd /k "set HTTPS_PROXY=http://127.0.0.1:7890 && cloudflared tunnel run --protocol http2"
+START "AorticAI Tunnel" /MIN cmd /k "set HTTPS_PROXY=http://127.0.0.1:10808 && cloudflared tunnel run --protocol http2"
 
 timeout /t 5 /nobreak >nul
 
