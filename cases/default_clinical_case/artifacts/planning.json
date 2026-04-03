@@ -1,564 +1,1580 @@
 {
-  "tavi": {
-    "valve_size_suggestion": {
-      "value": {
-        "recommended_device_mm": 26,
-        "area_derived_diameter_mm": 25.4,
-        "perimeter_mm": 79.8
-      },
-      "unit": "device",
-      "evidence": {
-        "method": "perimeter_based_sizing_lookup",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.9
-      },
-      "uncertainty": {
-        "flag": "NONE",
-        "message": "Valve sizing recommendation derived from annulus perimeter and area.",
-        "clinician_review_required": false
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "area_derived_valve_size": {
-      "value": {
-        "area_mm2": 507.0,
-        "derived_diameter_mm": 25.4,
-        "nearest_nominal_size_mm": 26
-      },
-      "unit": "mm",
-      "evidence": {
-        "method": "annulus_area_to_nominal_size_mapping",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.89
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Area-derived size is an estimate from annulus area and should be confirmed in final planning review.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "recommended_prosthesis": {
-      "value": {
-        "primary": {
-          "brand": "Edwards SAPIEN 3",
-          "size_mm": 26,
-          "type": "balloon-expandable"
-        },
-        "alternative": {
-          "brand": "Medtronic Evolut PRO+",
-          "size_mm": 26,
-          "type": "self-expanding"
-        }
-      },
-      "unit": "device",
-      "evidence": {
-        "method": "annulus_perimeter_based_device_selection",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.9
-      },
-      "uncertainty": {
-        "flag": "NONE",
-        "message": "Primary and alternative prostheses selected from annulus-driven IFU fit windows.",
-        "clinician_review_required": false
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "access_route_assessment": {
-      "value": {
-        "recommended": "transfemoral",
-        "alternatives": [
-          "transaortic"
-        ],
-        "rationale": "Root and ascending geometry are compatible with transfemoral-first strategy in this showcase bundle."
-      },
-      "unit": "route",
-      "evidence": {
-        "method": "aortic_access_pathway_review",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Access-route recommendation is derived without full iliofemoral volume coverage.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "access_route": {
-      "value": {
-        "recommended": "transfemoral",
-        "alternatives": [
-          "transaortic"
-        ],
-        "rationale": "No prohibitive root-level finding against transfemoral entry in this showcase case."
-      },
-      "unit": "route",
-      "evidence": {
-        "method": "aortic_access_pathway_review",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Route assessment remains review-required until full access-path imaging is available.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "coronary_obstruction_risk": {
-      "value": {
-        "category": "low",
-        "flag": false,
-        "rationale": "Measured coronary heights are above 10 mm review threshold in this showcase case."
-      },
-      "unit": "category",
-      "evidence": {
-        "method": "coronary_height_risk_banding",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.86
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Risk class is data-supported but remains review-required due to CTA ostial contour sensitivity.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "coronary_occlusion_risk": {
-      "value": {
-        "lca": {
-          "risk_level": "low",
-          "vh_distance_mm": 13.5,
-          "threshold_mm": 10,
-          "evidence": {
-            "method": "ostium_to_annulus_plane_distance",
-            "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-            "confidence": 0.86
-          }
-        },
-        "rca": {
-          "risk_level": "low",
-          "vh_distance_mm": 15.2,
-          "threshold_mm": 10,
-          "evidence": {
-            "method": "ostium_to_annulus_plane_distance",
-            "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-            "confidence": 0.86
-          }
-        }
-      },
-      "unit": "risk",
-      "evidence": {
-        "method": "coronary_height_risk_banding",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.86
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Coronary risk object derived from model-based coronary heights.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "optimal_projection_angle": {
-      "value": {
-        "lao_rao_deg": 10,
-        "cra_cau_deg": 6,
-        "basis": "annulus_plane_geometry"
-      },
-      "unit": "degrees",
-      "evidence": {
-        "method": "annulus_plane_projection_estimate",
-        "source_type": "guideline",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Projection angle remains a geometry-level recommendation and requires operator confirmation.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "implant_depth": {
-      "value": {
-        "value_mm": 4,
-        "range_mm": [
-          2,
-          6
-        ]
-      },
-      "unit": "mm",
-      "evidence": {
-        "method": "device_positioning_rule",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.85
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Implant depth is planning guidance and remains operator-adjustable.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "implant_depth_recommendation": {
-      "value": {
-        "value_mm": 4,
-        "range_mm": [
-          2,
-          6
-        ],
-        "evidence": {
-          "method": "device_positioning_rule",
-          "source_ref": "GE_TAVI_ANALYSIS",
-          "confidence": 0.85
-        }
-      },
-      "unit": "mm",
-      "evidence": {
-        "method": "device_positioning_rule",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.85
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Implant depth recommendation is model-guided and requires intra-procedural confirmation.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "annulus_rupture_risk": {
-      "value": "low",
-      "unit": "risk",
-      "evidence": {
-        "method": "annulus_calcium_risk_screen",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Rupture risk is low in this planning profile but requires procedural judgement.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "sizing_method": {
-      "value": "perimeter_based",
-      "unit": "method",
-      "evidence": {
-        "method": "annulus_perimeter_based_sizing",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.9
-      },
-      "uncertainty": {
-        "flag": "NONE",
-        "message": "Sizing method selected as perimeter-based according to reference workflow.",
-        "clinician_review_required": false
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "oversizing_ratio": {
-      "value": 1.08,
-      "unit": "ratio",
-      "evidence": {
-        "method": "prosthesis_to_annulus_ratio",
-        "source_type": "device_ifu",
-        "source_ref": "GE_TAVI_ANALYSIS",
-        "confidence": 0.87
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Oversizing ratio is estimated from annulus perimeter and nominal prosthesis size.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    }
-  },
   "vsrr": {
-    "commissural_geometry_status": {
-      "value": {
-        "status": "balanced",
-        "spacing_degrees": [
-          120,
-          120,
-          120
-        ]
-      },
-      "unit": "status",
-      "evidence": {
-        "method": "commissural_spacing",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.86
-      },
-      "uncertainty": {
-        "flag": "NONE",
-        "message": "Commissural geometry is balanced for tricuspid root reconstruction planning.",
-        "clinician_review_required": false
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "annulus_diameter_mm": 24.358578615228655,
+    "sinus_diameter_mm": 39.65986365529072,
+    "stj_diameter_mm": 24.8554767959698,
+    "lvot_diameter_mm": 24.358578615228655,
+    "recommended_graft_size_mm": 24.6,
+    "annulus_stj_mismatch_mm": -0.49689818074114456,
+    "coaptation_height_mm": 32.5749143133062,
+    "effective_height_mean_mm": 32.5749143133062,
+    "coaptation_reserve_mm": 23.574914313306202,
+    "recommended_graft_size_metadata": {
+      "method": "mean_of_annulus_and_stj_with_floor",
+      "evidence_rule": "research_use_geometry_proxy_for_root_reimplantation",
+      "source_fields": [
+        "measurements_regularized.annulus.equivalent_diameter_mm",
+        "measurements_regularized.stj.diameter_mm"
+      ]
     },
-    "leaflet_geometry_status": {
-      "value": {
-        "status": "detected",
-        "effective_height_mean_mm": 10.1,
-        "coaptation_height_mm": 10.4
-      },
-      "unit": "status",
-      "evidence": {
-        "method": "cta_leaflet_surface_proxy",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Leaflet geometry remains CTA-proxy derived and should be reviewed by surgeon.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "graft_sizing": {
-      "value": {
-        "recommended_graft_mm": 28
-      },
-      "unit": "mm",
-      "evidence": {
-        "method": "annulus_stj_geometry_rule",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.87
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Graft sizing is model-derived and should be confirmed with operative strategy.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "recommended_graft_diameter_mm": {
-      "value": 28,
-      "unit": "mm",
-      "evidence": {
-        "method": "annulus_stj_geometry_rule",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.87
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Recommended graft diameter follows model-based David procedure geometry.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "key_geometry": {
-      "value": {
-        "annulus_to_stj_height_mm": 18,
-        "stj_diameter_mm": 31,
-        "sinus_height_mm": 22
-      },
-      "unit": "geometry",
-      "evidence": {
-        "method": "root_axis_profile_measurement",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.86
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Key geometry values are extracted from CTA-derived root axis profile.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
-    },
-    "procedure_feasibility": {
-      "value": "feasible",
-      "unit": "status",
-      "evidence": {
-        "method": "vsrr_geometry_feasibility_review",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.85
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Feasibility is geometry-supported but remains surgeon decision dependent.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "coaptation_reserve_metadata": {
+      "method": "effective_height_minus_reference_threshold",
+      "evidence_rule": "effective_height_targeting_for_valve_repair",
+      "source_fields": [
+        "measurements_regularized.leaflet_geometry.effective_height_mean_mm"
+      ]
     }
   },
   "pears": {
-    "external_root_geometry_status": {
-      "value": {
-        "status": "derived",
-        "reference_diameter_mm": 35.6
-      },
-      "unit": "status",
-      "evidence": {
-        "method": "root_model_external_reference",
-        "source_type": "literature",
-        "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "External root geometry is derived from digital twin and needs procedure-level review.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "root_external_geometry": {
+      "annulus_reference_mm": 24.358578615228655,
+      "sinus_reference_mm": 39.65986365529072,
+      "stj_reference_mm": 24.8554767959698
     },
-    "support_region_status": {
-      "value": {
-        "status": "defined",
-        "support_segment_length_mm": 30.1
-      },
-      "unit": "status",
-      "evidence": {
-        "method": "support_segment_from_root_model",
-        "source_type": "literature",
-        "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Support region estimate is model-derived and should be validated intra-operatively.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "root_external_reference_diameter_mm": 39.65986365529072,
+    "support_segment_length_mm": 124.77186654548062,
+    "annulus_plane": {
+      "origin_world": [
+        -14.099311008963808,
+        -225.54218103894618,
+        -692.4200413192353
+      ],
+      "origin_voxel": [
+        282.99998811563046,
+        409.99998661934194,
+        167.00000000115762
+      ],
+      "normal_world": [
+        0.0773472936407926,
+        -0.23044442226900932,
+        0.9700065795712665
+      ],
+      "basis_u_world": [
+        -0.0,
+        0.9729212466253477,
+        0.23113685959833255
+      ],
+      "basis_v_world": [
+        -0.9970042107064769,
+        -0.017877810550562877,
+        0.07525282535209676
+      ],
+      "ring_points_world": [
+        [
+          -14.099311008963808,
+          -214.45360773233148,
+          -689.7857294256399
+        ],
+        [
+          -15.09542971896357,
+          -214.44937907131765,
+          -689.7052953756541
+        ],
+        [
+          -16.248866024313145,
+          -213.6844647106725,
+          -689.4316009181927
+        ],
+        [
+          -17.35010516071317,
+          -213.76139936951517,
+          -689.3620666436186
+        ],
+        [
+          -18.333107898248414,
+          -214.26681923393636,
+          -689.4037556260664
+        ],
+        [
+          -19.19174720021232,
+          -214.97652621115495,
+          -689.5038936974678
+        ],
+        [
+          -20.29884624530535,
+          -215.17481591830747,
+          -689.4627224737208
+        ],
+        [
+          -21.093954309209394,
+          -215.9195167016235,
+          -689.5762399355593
+        ],
+        [
+          -21.858117328772842,
+          -216.6580773027552,
+          -689.6907661995192
+        ],
+        [
+          -22.63448573849142,
+          -217.3662249961822,
+          -689.7970940254384
+        ],
+        [
+          -23.441060934815248,
+          -218.0603793672651,
+          -689.8976888012999
+        ],
+        [
+          -23.762774698413466,
+          -219.11247694525724,
+          -690.1219824650459
+        ],
+        [
+          -24.2602613361123,
+          -219.9996604945346,
+          -690.2930815677804
+        ],
+        [
+          -24.47756703551616,
+          -221.00571753269807,
+          -690.5147627704819
+        ],
+        [
+          -25.26453375250553,
+          -221.7767444582823,
+          -690.6351837151802
+        ],
+        [
+          -25.39094117496289,
+          -222.79215801096615,
+          -690.8663358766307
+        ],
+        [
+          -26.0478191638283,
+          -223.70048321757838,
+          -691.0297479050824
+        ],
+        [
+          -26.123938744217973,
+          -224.73119425253654,
+          -691.2685441878288
+        ],
+        [
+          -26.169870868685873,
+          -225.75862464078256,
+          -691.5089682031228
+        ],
+        [
+          -25.484999964020254,
+          -226.71840099333832,
+          -691.7915931087832
+        ],
+        [
+          -25.611670062809587,
+          -227.72952090381327,
+          -692.0217042843035
+        ],
+        [
+          -25.5762309780035,
+          -228.74892798165482,
+          -692.2667106558212
+        ],
+        [
+          -25.48097230321102,
+          -229.788792040025,
+          -692.5213469418653
+        ],
+        [
+          -25.02007566334958,
+          -230.70743377690482,
+          -692.776340028797
+        ],
+        [
+          -24.31573554450393,
+          -231.481353485697,
+          -693.0163634338686
+        ],
+        [
+          -23.622207736749722,
+          -232.2198773903297,
+          -693.2471156970422
+        ],
+        [
+          -23.34589631483889,
+          -233.27937626289128,
+          -693.5208535786824
+        ],
+        [
+          -22.60500318155344,
+          -233.99493549547816,
+          -693.7499269863986
+        ],
+        [
+          -21.21621037839267,
+          -233.94651272166257,
+          -693.8491640520463
+        ],
+        [
+          -20.527516047302612,
+          -234.61612054261192,
+          -694.063158507829
+        ],
+        [
+          -19.813901227555732,
+          -235.30352449742725,
+          -694.2833679236628
+        ],
+        [
+          -18.938771272438437,
+          -235.75652580855504,
+          -694.4607693585256
+        ],
+        [
+          -17.932410608602574,
+          -235.88788064623515,
+          -694.5722214514624
+        ],
+        [
+          -17.12489419317417,
+          -236.6153115051511,
+          -694.8094276706503
+        ],
+        [
+          -16.083967364107316,
+          -236.56143307081507,
+          -694.8796301722282
+        ],
+        [
+          -15.089666206498393,
+          -236.60631755997122,
+          -694.9695778958983
+        ],
+        [
+          -14.09931100896381,
+          -236.6307543455609,
+          -695.0543532128307
+        ],
+        [
+          -13.103192298964048,
+          -236.6349830065747,
+          -695.1347872628165
+        ],
+        [
+          -12.069371496167424,
+          -236.7400553591723,
+          -695.2421850691724
+        ],
+        [
+          -11.024079571662995,
+          -236.68672863397478,
+          -695.3128667083378
+        ],
+        [
+          -10.182790965284232,
+          -235.9725775987873,
+          -695.2102893362478
+        ],
+        [
+          -9.140792302551874,
+          -235.8299873347085,
+          -695.2595020390461
+        ],
+        [
+          -8.200855553214225,
+          -235.4060561564084,
+          -695.233738284205
+        ],
+        [
+          -7.431306934575537,
+          -234.7154815567132,
+          -695.1310414945319
+        ],
+        [
+          -6.682472057398631,
+          -234.03472021628045,
+          -695.029024348721
+        ],
+        [
+          -5.564136279436193,
+          -233.71813708171015,
+          -695.0429886130323
+        ],
+        [
+          -4.757561083112366,
+          -233.02398271062725,
+          -694.9423938371708
+        ],
+        [
+          -4.435847319514149,
+          -231.97188513263512,
+          -694.7181001734248
+        ],
+        [
+          -3.9383606818153147,
+          -231.08470158335777,
+          -694.5470010706903
+        ],
+        [
+          -3.721054982411456,
+          -230.0786445451943,
+          -694.3253198679888
+        ],
+        [
+          -2.934088265422089,
+          -229.30761761961006,
+          -694.2048989232904
+        ],
+        [
+          -2.8076808429647233,
+          -228.29220406692622,
+          -693.97374676184
+        ],
+        [
+          -2.1508028540993127,
+          -227.38387886031398,
+          -693.8103347333882
+        ],
+        [
+          -2.074683273709642,
+          -226.35316782535583,
+          -693.5715384506419
+        ],
+        [
+          -2.0287511492417423,
+          -225.3257374371098,
+          -693.3311144353479
+        ],
+        [
+          -2.012646949329378,
+          -224.29354553651024,
+          -693.0871807807642
+        ],
+        [
+          -1.9085787301450363,
+          -223.22595075367946,
+          -692.84185062234
+        ],
+        [
+          -1.756505838593375,
+          -222.09349856566016,
+          -692.5849401344462
+        ],
+        [
+          -2.467049657097121,
+          -221.2020686645577,
+          -692.3165051615181
+        ],
+        [
+          -2.6077476520303495,
+          -220.1069545716321,
+          -692.0451198439999
+        ],
+        [
+          -3.3614009963067275,
+          -219.29985046027753,
+          -691.7932806376276
+        ],
+        [
+          -3.7616433598519308,
+          -218.29314668358361,
+          -691.5222031631292
+        ],
+        [
+          -4.493046285233417,
+          -217.50401958996525,
+          -691.2764089808566
+        ],
+        [
+          -5.232129752003919,
+          -216.7301873333446,
+          -691.0336359541586
+        ],
+        [
+          -6.626705565784624,
+          -216.71779679258162,
+          -690.9194903408066
+        ],
+        [
+          -7.332880888395335,
+          -215.99080904573316,
+          -690.6904702227605
+        ],
+        [
+          -8.232883602362202,
+          -215.5214777864574,
+          -690.5072059554502
+        ],
+        [
+          -9.259850745489173,
+          -215.32783626933733,
+          -690.3793132799451
+        ],
+        [
+          -10.266211409325036,
+          -215.19648143165722,
+          -690.2678611870083
+        ],
+        [
+          -11.07372782475345,
+          -214.46905057274125,
+          -690.0306549678204
+        ],
+        [
+          -12.114654653820303,
+          -214.5229290070773,
+          -689.9604524662425
+        ],
+        [
+          -13.108955811429222,
+          -214.47804451792115,
+          -689.8705047425724
+        ]
+      ],
+      "ring_points_voxel": [
+        [
+          282.99998811563046,
+          394.40287251773,
+          167.87810417504576
+        ],
+        [
+          284.40112212530045,
+          394.3969245110293,
+          167.90491553143335
+        ],
+        [
+          286.02353802733063,
+          393.32100101473713,
+          167.99614703900514
+        ],
+        [
+          287.5725337356735,
+          393.42921679860376,
+          168.0193251360559
+        ],
+        [
+          288.9552189049538,
+          394.1401370474599,
+          168.00542880526015
+        ],
+        [
+          290.16297528573824,
+          395.1384062022289,
+          167.9720494401681
+        ],
+        [
+          291.72021350301196,
+          395.41731919690505,
+          167.98577318468912
+        ],
+        [
+          292.83860726322865,
+          396.4648104086024,
+          167.94793402172135
+        ],
+        [
+          293.91347392810906,
+          397.50366488052384,
+          167.90975859129966
+        ],
+        [
+          295.0055086143066,
+          398.49974075699254,
+          167.87431597420976
+        ],
+        [
+          296.1400319673775,
+          399.4761337185158,
+          167.84078437426137
+        ],
+        [
+          296.59255242606514,
+          400.95600723481243,
+          167.7660198018541
+        ],
+        [
+          297.2923138505206,
+          402.2039137656641,
+          167.70898675401153
+        ],
+        [
+          297.5979746145173,
+          403.6190269622017,
+          167.63509300216006
+        ],
+        [
+          298.704916809843,
+          404.70354835203443,
+          167.59495267769043
+        ],
+        [
+          298.882720656816,
+          406.1318223602052,
+          167.5179019388366
+        ],
+        [
+          299.8066809048904,
+          407.4094666068685,
+          167.4634312496992
+        ],
+        [
+          299.91375020477915,
+          408.85925795274375,
+          167.38383246980592
+        ],
+        [
+          299.9783580282065,
+          410.30443476258426,
+          167.3036911122674
+        ],
+        [
+          299.0150231293362,
+          411.65444985189345,
+          167.20948278791957
+        ],
+        [
+          299.1931964551058,
+          413.07668445124284,
+          167.13277904445854
+        ],
+        [
+          299.1433480720819,
+          414.5105757255694,
+          167.05111023448129
+        ],
+        [
+          299.00935784819796,
+          415.97324165382634,
+          166.9662314522299
+        ],
+        [
+          298.3610636734478,
+          417.26539706394306,
+          166.88123373632098
+        ],
+        [
+          297.3703435062803,
+          418.3539874235629,
+          166.80122591555508
+        ],
+        [
+          296.39483186460404,
+          419.3927902784309,
+          166.72430847615868
+        ],
+        [
+          296.0061740403778,
+          420.8830744068691,
+          166.6330624938572
+        ],
+        [
+          294.96403864410814,
+          421.8895753054528,
+          166.55670467308002
+        ],
+        [
+          293.01057184405784,
+          421.8214641510749,
+          166.5236256433108
+        ],
+        [
+          292.0418589387883,
+          422.7633300970256,
+          166.45229414104313
+        ],
+        [
+          291.03809303848504,
+          423.73022796753503,
+          166.3788909849312
+        ],
+        [
+          289.80714101370467,
+          424.3674166249456,
+          166.31975715921166
+        ],
+        [
+          288.39160073929816,
+          424.5521794735506,
+          166.28260645270865
+        ],
+        [
+          287.25575347364065,
+          425.5753789234543,
+          166.20353769412787
+        ],
+        [
+          285.791592659129,
+          425.49959387295974,
+          166.18013685468938
+        ],
+        [
+          284.3930152066681,
+          425.56272809946506,
+          166.15015427298428
+        ],
+        [
+          282.99998811563046,
+          425.5971007209538,
+          166.12189582726947
+        ],
+        [
+          281.59885410596047,
+          425.6030487276546,
+          166.09508447088186
+        ],
+        [
+          280.1446885811476,
+          425.7508428060336,
+          166.05928519356138
+        ],
+        [
+          278.67438785217433,
+          425.67583378597556,
+          166.03572464155565
+        ],
+        [
+          277.49103684539983,
+          424.671313648569,
+          166.0699171070711
+        ],
+        [
+          276.0253683967213,
+          424.4707471232713,
+          166.0535128688939
+        ],
+        [
+          274.70325956248814,
+          423.87444832302504,
+          166.0621007892218
+        ],
+        [
+          273.6208175494579,
+          422.9030906443329,
+          166.09633306060775
+        ],
+        [
+          272.5675113485937,
+          421.94553623141644,
+          166.13033878398565
+        ],
+        [
+          270.99446761695424,
+          421.5002324816912,
+          166.12568402810544
+        ],
+        [
+          269.85994426388334,
+          420.52383952016805,
+          166.15921562805383
+        ],
+        [
+          269.4074238051958,
+          419.04396600387145,
+          166.2339802004611
+        ],
+        [
+          268.70766238074026,
+          417.7960594730198,
+          166.29101324830367
+        ],
+        [
+          268.40200161674363,
+          416.38094627648206,
+          166.36490700015514
+        ],
+        [
+          267.29505942141793,
+          415.29642488664933,
+          166.4050473246248
+        ],
+        [
+          267.1172555744449,
+          413.8681508784787,
+          166.48209806347862
+        ],
+        [
+          266.1932953263705,
+          412.5905066318153,
+          166.53656875261603
+        ],
+        [
+          266.0862260264817,
+          411.14071528594013,
+          166.61616753250928
+        ],
+        [
+          266.02161820305435,
+          409.6955384760995,
+          166.69630889004782
+        ],
+        [
+          265.99896614163913,
+          408.24366415437703,
+          166.77762012762847
+        ],
+        [
+          265.85258447069856,
+          406.74199237193375,
+          166.85939686660032
+        ],
+        [
+          265.6386797441204,
+          405.1490925909835,
+          166.94503371631566
+        ],
+        [
+          266.63812599432345,
+          403.8952131696526,
+          167.03451206195834
+        ],
+        [
+          266.83603086631746,
+          402.3548329070759,
+          167.12497385603217
+        ],
+        [
+          267.89611469123366,
+          401.2195655856102,
+          167.20892027817067
+        ],
+        [
+          268.45909296083573,
+          399.8035426909198,
+          167.2992794578801
+        ],
+        [
+          269.4878794932404,
+          398.6935617240721,
+          167.38121087150495
+        ],
+        [
+          270.527469424522,
+          397.6050943741001,
+          167.46213523303146
+        ],
+        [
+          272.4890705691806,
+          397.58766592115876,
+          167.50018377988695
+        ],
+        [
+          273.4823721218638,
+          396.5650897497676,
+          167.57652383743655
+        ],
+        [
+          274.74831000524574,
+          395.90493149496206,
+          167.63761194110452
+        ],
+        [
+          276.19283521755625,
+          395.6325566137382,
+          167.68024284310354
+        ],
+        [
+          277.6083754919627,
+          395.44779376513327,
+          167.71739354960658
+        ],
+        [
+          278.74422275762026,
+          394.42459431522946,
+          167.79646230818733
+        ],
+        [
+          280.2083835721319,
+          394.50037936572414,
+          167.81986314762582
+        ],
+        [
+          281.6069610245928,
+          394.4372451392188,
+          167.84984572933092
+        ]
+      ],
+      "hinge_points_world": [
+        [
+          -14.099311008963808,
+          -214.45360773233148,
+          -689.7857294256399
+        ],
+        [
+          -15.09542971896357,
+          -214.44937907131765,
+          -689.7052953756541
+        ],
+        [
+          -16.248866024313145,
+          -213.6844647106725,
+          -689.4316009181927
+        ],
+        [
+          -17.35010516071317,
+          -213.76139936951517,
+          -689.3620666436186
+        ],
+        [
+          -18.333107898248414,
+          -214.26681923393636,
+          -689.4037556260664
+        ],
+        [
+          -19.19174720021232,
+          -214.97652621115495,
+          -689.5038936974678
+        ],
+        [
+          -20.29884624530535,
+          -215.17481591830747,
+          -689.4627224737208
+        ],
+        [
+          -21.093954309209394,
+          -215.9195167016235,
+          -689.5762399355593
+        ],
+        [
+          -21.858117328772842,
+          -216.6580773027552,
+          -689.6907661995192
+        ],
+        [
+          -22.63448573849142,
+          -217.3662249961822,
+          -689.7970940254384
+        ],
+        [
+          -23.441060934815248,
+          -218.0603793672651,
+          -689.8976888012999
+        ],
+        [
+          -23.762774698413466,
+          -219.11247694525724,
+          -690.1219824650459
+        ],
+        [
+          -24.2602613361123,
+          -219.9996604945346,
+          -690.2930815677804
+        ],
+        [
+          -24.47756703551616,
+          -221.00571753269807,
+          -690.5147627704819
+        ],
+        [
+          -25.26453375250553,
+          -221.7767444582823,
+          -690.6351837151802
+        ],
+        [
+          -25.39094117496289,
+          -222.79215801096615,
+          -690.8663358766307
+        ],
+        [
+          -26.0478191638283,
+          -223.70048321757838,
+          -691.0297479050824
+        ],
+        [
+          -26.123938744217973,
+          -224.73119425253654,
+          -691.2685441878288
+        ],
+        [
+          -26.169870868685873,
+          -225.75862464078256,
+          -691.5089682031228
+        ],
+        [
+          -25.484999964020254,
+          -226.71840099333832,
+          -691.7915931087832
+        ],
+        [
+          -25.611670062809587,
+          -227.72952090381327,
+          -692.0217042843035
+        ],
+        [
+          -25.5762309780035,
+          -228.74892798165482,
+          -692.2667106558212
+        ],
+        [
+          -25.48097230321102,
+          -229.788792040025,
+          -692.5213469418653
+        ],
+        [
+          -25.02007566334958,
+          -230.70743377690482,
+          -692.776340028797
+        ],
+        [
+          -24.31573554450393,
+          -231.481353485697,
+          -693.0163634338686
+        ],
+        [
+          -23.622207736749722,
+          -232.2198773903297,
+          -693.2471156970422
+        ],
+        [
+          -23.34589631483889,
+          -233.27937626289128,
+          -693.5208535786824
+        ],
+        [
+          -22.60500318155344,
+          -233.99493549547816,
+          -693.7499269863986
+        ],
+        [
+          -21.21621037839267,
+          -233.94651272166257,
+          -693.8491640520463
+        ],
+        [
+          -20.527516047302612,
+          -234.61612054261192,
+          -694.063158507829
+        ],
+        [
+          -19.813901227555732,
+          -235.30352449742725,
+          -694.2833679236628
+        ],
+        [
+          -18.938771272438437,
+          -235.75652580855504,
+          -694.4607693585256
+        ],
+        [
+          -17.932410608602574,
+          -235.88788064623515,
+          -694.5722214514624
+        ],
+        [
+          -17.12489419317417,
+          -236.6153115051511,
+          -694.8094276706503
+        ],
+        [
+          -16.083967364107316,
+          -236.56143307081507,
+          -694.8796301722282
+        ],
+        [
+          -15.089666206498393,
+          -236.60631755997122,
+          -694.9695778958983
+        ],
+        [
+          -14.09931100896381,
+          -236.6307543455609,
+          -695.0543532128307
+        ],
+        [
+          -13.103192298964048,
+          -236.6349830065747,
+          -695.1347872628165
+        ],
+        [
+          -12.069371496167424,
+          -236.7400553591723,
+          -695.2421850691724
+        ],
+        [
+          -11.024079571662995,
+          -236.68672863397478,
+          -695.3128667083378
+        ],
+        [
+          -10.182790965284232,
+          -235.9725775987873,
+          -695.2102893362478
+        ],
+        [
+          -9.140792302551874,
+          -235.8299873347085,
+          -695.2595020390461
+        ],
+        [
+          -8.200855553214225,
+          -235.4060561564084,
+          -695.233738284205
+        ],
+        [
+          -7.431306934575537,
+          -234.7154815567132,
+          -695.1310414945319
+        ],
+        [
+          -6.682472057398631,
+          -234.03472021628045,
+          -695.029024348721
+        ],
+        [
+          -5.564136279436193,
+          -233.71813708171015,
+          -695.0429886130323
+        ],
+        [
+          -4.757561083112366,
+          -233.02398271062725,
+          -694.9423938371708
+        ],
+        [
+          -4.435847319514149,
+          -231.97188513263512,
+          -694.7181001734248
+        ],
+        [
+          -3.9383606818153147,
+          -231.08470158335777,
+          -694.5470010706903
+        ],
+        [
+          -3.721054982411456,
+          -230.0786445451943,
+          -694.3253198679888
+        ],
+        [
+          -2.934088265422089,
+          -229.30761761961006,
+          -694.2048989232904
+        ],
+        [
+          -2.8076808429647233,
+          -228.29220406692622,
+          -693.97374676184
+        ],
+        [
+          -2.1508028540993127,
+          -227.38387886031398,
+          -693.8103347333882
+        ],
+        [
+          -2.074683273709642,
+          -226.35316782535583,
+          -693.5715384506419
+        ],
+        [
+          -2.0287511492417423,
+          -225.3257374371098,
+          -693.3311144353479
+        ],
+        [
+          -2.012646949329378,
+          -224.29354553651024,
+          -693.0871807807642
+        ],
+        [
+          -1.9085787301450363,
+          -223.22595075367946,
+          -692.84185062234
+        ],
+        [
+          -1.756505838593375,
+          -222.09349856566016,
+          -692.5849401344462
+        ],
+        [
+          -2.467049657097121,
+          -221.2020686645577,
+          -692.3165051615181
+        ],
+        [
+          -2.6077476520303495,
+          -220.1069545716321,
+          -692.0451198439999
+        ],
+        [
+          -3.3614009963067275,
+          -219.29985046027753,
+          -691.7932806376276
+        ],
+        [
+          -3.7616433598519308,
+          -218.29314668358361,
+          -691.5222031631292
+        ],
+        [
+          -4.493046285233417,
+          -217.50401958996525,
+          -691.2764089808566
+        ],
+        [
+          -5.232129752003919,
+          -216.7301873333446,
+          -691.0336359541586
+        ],
+        [
+          -6.626705565784624,
+          -216.71779679258162,
+          -690.9194903408066
+        ],
+        [
+          -7.332880888395335,
+          -215.99080904573316,
+          -690.6904702227605
+        ],
+        [
+          -8.232883602362202,
+          -215.5214777864574,
+          -690.5072059554502
+        ],
+        [
+          -9.259850745489173,
+          -215.32783626933733,
+          -690.3793132799451
+        ],
+        [
+          -10.266211409325036,
+          -215.19648143165722,
+          -690.2678611870083
+        ],
+        [
+          -11.07372782475345,
+          -214.46905057274125,
+          -690.0306549678204
+        ],
+        [
+          -12.114654653820303,
+          -214.5229290070773,
+          -689.9604524662425
+        ],
+        [
+          -13.108955811429222,
+          -214.47804451792115,
+          -689.8705047425724
+        ]
+      ],
+      "hinge_points_voxel": [
+        [
+          282.99998811563046,
+          394.40287251773,
+          167.87810417504576
+        ],
+        [
+          284.40112212530045,
+          394.3969245110293,
+          167.90491553143335
+        ],
+        [
+          286.02353802733063,
+          393.32100101473713,
+          167.99614703900514
+        ],
+        [
+          287.5725337356735,
+          393.42921679860376,
+          168.0193251360559
+        ],
+        [
+          288.9552189049538,
+          394.1401370474599,
+          168.00542880526015
+        ],
+        [
+          290.16297528573824,
+          395.1384062022289,
+          167.9720494401681
+        ],
+        [
+          291.72021350301196,
+          395.41731919690505,
+          167.98577318468912
+        ],
+        [
+          292.83860726322865,
+          396.4648104086024,
+          167.94793402172135
+        ],
+        [
+          293.91347392810906,
+          397.50366488052384,
+          167.90975859129966
+        ],
+        [
+          295.0055086143066,
+          398.49974075699254,
+          167.87431597420976
+        ],
+        [
+          296.1400319673775,
+          399.4761337185158,
+          167.84078437426137
+        ],
+        [
+          296.59255242606514,
+          400.95600723481243,
+          167.7660198018541
+        ],
+        [
+          297.2923138505206,
+          402.2039137656641,
+          167.70898675401153
+        ],
+        [
+          297.5979746145173,
+          403.6190269622017,
+          167.63509300216006
+        ],
+        [
+          298.704916809843,
+          404.70354835203443,
+          167.59495267769043
+        ],
+        [
+          298.882720656816,
+          406.1318223602052,
+          167.5179019388366
+        ],
+        [
+          299.8066809048904,
+          407.4094666068685,
+          167.4634312496992
+        ],
+        [
+          299.91375020477915,
+          408.85925795274375,
+          167.38383246980592
+        ],
+        [
+          299.9783580282065,
+          410.30443476258426,
+          167.3036911122674
+        ],
+        [
+          299.0150231293362,
+          411.65444985189345,
+          167.20948278791957
+        ],
+        [
+          299.1931964551058,
+          413.07668445124284,
+          167.13277904445854
+        ],
+        [
+          299.1433480720819,
+          414.5105757255694,
+          167.05111023448129
+        ],
+        [
+          299.00935784819796,
+          415.97324165382634,
+          166.9662314522299
+        ],
+        [
+          298.3610636734478,
+          417.26539706394306,
+          166.88123373632098
+        ],
+        [
+          297.3703435062803,
+          418.3539874235629,
+          166.80122591555508
+        ],
+        [
+          296.39483186460404,
+          419.3927902784309,
+          166.72430847615868
+        ],
+        [
+          296.0061740403778,
+          420.8830744068691,
+          166.6330624938572
+        ],
+        [
+          294.96403864410814,
+          421.8895753054528,
+          166.55670467308002
+        ],
+        [
+          293.01057184405784,
+          421.8214641510749,
+          166.5236256433108
+        ],
+        [
+          292.0418589387883,
+          422.7633300970256,
+          166.45229414104313
+        ],
+        [
+          291.03809303848504,
+          423.73022796753503,
+          166.3788909849312
+        ],
+        [
+          289.80714101370467,
+          424.3674166249456,
+          166.31975715921166
+        ],
+        [
+          288.39160073929816,
+          424.5521794735506,
+          166.28260645270865
+        ],
+        [
+          287.25575347364065,
+          425.5753789234543,
+          166.20353769412787
+        ],
+        [
+          285.791592659129,
+          425.49959387295974,
+          166.18013685468938
+        ],
+        [
+          284.3930152066681,
+          425.56272809946506,
+          166.15015427298428
+        ],
+        [
+          282.99998811563046,
+          425.5971007209538,
+          166.12189582726947
+        ],
+        [
+          281.59885410596047,
+          425.6030487276546,
+          166.09508447088186
+        ],
+        [
+          280.1446885811476,
+          425.7508428060336,
+          166.05928519356138
+        ],
+        [
+          278.67438785217433,
+          425.67583378597556,
+          166.03572464155565
+        ],
+        [
+          277.49103684539983,
+          424.671313648569,
+          166.0699171070711
+        ],
+        [
+          276.0253683967213,
+          424.4707471232713,
+          166.0535128688939
+        ],
+        [
+          274.70325956248814,
+          423.87444832302504,
+          166.0621007892218
+        ],
+        [
+          273.6208175494579,
+          422.9030906443329,
+          166.09633306060775
+        ],
+        [
+          272.5675113485937,
+          421.94553623141644,
+          166.13033878398565
+        ],
+        [
+          270.99446761695424,
+          421.5002324816912,
+          166.12568402810544
+        ],
+        [
+          269.85994426388334,
+          420.52383952016805,
+          166.15921562805383
+        ],
+        [
+          269.4074238051958,
+          419.04396600387145,
+          166.2339802004611
+        ],
+        [
+          268.70766238074026,
+          417.7960594730198,
+          166.29101324830367
+        ],
+        [
+          268.40200161674363,
+          416.38094627648206,
+          166.36490700015514
+        ],
+        [
+          267.29505942141793,
+          415.29642488664933,
+          166.4050473246248
+        ],
+        [
+          267.1172555744449,
+          413.8681508784787,
+          166.48209806347862
+        ],
+        [
+          266.1932953263705,
+          412.5905066318153,
+          166.53656875261603
+        ],
+        [
+          266.0862260264817,
+          411.14071528594013,
+          166.61616753250928
+        ],
+        [
+          266.02161820305435,
+          409.6955384760995,
+          166.69630889004782
+        ],
+        [
+          265.99896614163913,
+          408.24366415437703,
+          166.77762012762847
+        ],
+        [
+          265.85258447069856,
+          406.74199237193375,
+          166.85939686660032
+        ],
+        [
+          265.6386797441204,
+          405.1490925909835,
+          166.94503371631566
+        ],
+        [
+          266.63812599432345,
+          403.8952131696526,
+          167.03451206195834
+        ],
+        [
+          266.83603086631746,
+          402.3548329070759,
+          167.12497385603217
+        ],
+        [
+          267.89611469123366,
+          401.2195655856102,
+          167.20892027817067
+        ],
+        [
+          268.45909296083573,
+          399.8035426909198,
+          167.2992794578801
+        ],
+        [
+          269.4878794932404,
+          398.6935617240721,
+          167.38121087150495
+        ],
+        [
+          270.527469424522,
+          397.6050943741001,
+          167.46213523303146
+        ],
+        [
+          272.4890705691806,
+          397.58766592115876,
+          167.50018377988695
+        ],
+        [
+          273.4823721218638,
+          396.5650897497676,
+          167.57652383743655
+        ],
+        [
+          274.74831000524574,
+          395.90493149496206,
+          167.63761194110452
+        ],
+        [
+          276.19283521755625,
+          395.6325566137382,
+          167.68024284310354
+        ],
+        [
+          277.6083754919627,
+          395.44779376513327,
+          167.71739354960658
+        ],
+        [
+          278.74422275762026,
+          394.42459431522946,
+          167.79646230818733
+        ],
+        [
+          280.2083835721319,
+          394.50037936572414,
+          167.81986314762582
+        ],
+        [
+          281.6069610245928,
+          394.4372451392188,
+          167.84984572933092
+        ]
+      ],
+      "method": "radius_minimum_fallback",
+      "confidence": 0.35,
+      "hinge_point_count": 0,
+      "status": "fallback"
     },
-    "external_support_size": {
-      "value": "medium",
-      "unit": "size",
-      "evidence": {
-        "method": "mesh_sizing_rule",
-        "source_type": "literature",
-        "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.84
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Support size is estimated from sinus and STJ envelope.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "root_external_geometry_metadata": {
+      "method": "inner_root_geometry_proxy",
+      "evidence_rule": "upgrade_to_outer_wall_geometry_before_device_design_use",
+      "source_fields": [
+        "measurements_regularized.annulus.equivalent_diameter_mm",
+        "measurements_regularized.sinus_of_valsalva.max_diameter_mm",
+        "measurements_regularized.stj.diameter_mm"
+      ]
     },
-    "root_compliance_estimate": {
-      "value": "preserved",
-      "unit": "status",
-      "evidence": {
-        "method": "root_shape_compliance_proxy",
-        "source_type": "literature",
-        "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.82
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Compliance estimate is inferred from static CTA morphology and needs review.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "device_mesh_export_metadata": {
+      "method": "surface_mesh_export_from_aortic_root_stl",
+      "evidence_rule": "research_use_mesh_export_requires_outer_wall_and_coronary_window_planning",
+      "source_fields": [
+        "aortic_root_stl",
+        "annulus_plane",
+        "support_segment_length_mm"
+      ]
+    }
+  },
+  "tavi": {
+    "annulus_area_mm2": 466.0084228515625,
+    "annulus_perimeter_mm": 76.6198345421208,
+    "annulus_diameter_short_mm": 23.940849086414786,
+    "annulus_diameter_long_mm": 24.83277478097499,
+    "coronary_height_left_mm": null,
+    "coronary_height_right_mm": null,
+    "sinus_width_mm": 39.65986365529072,
+    "stj_diameter_mm": 24.8554767959698,
+    "area_derived_valve_size": {
+      "reference_nominal_sizes_mm": [
+        20,
+        23,
+        26,
+        29
+      ],
+      "nearest_nominal_size_mm": 23,
+      "area_derived_diameter_mm": 24.358578615228655,
+      "method": "nearest_reference_nominal_size_non_vendor_specific"
     },
-    "max_sinus_diameter_mm": {
-      "value": 36,
-      "unit": "mm",
-      "evidence": {
-        "method": "sinus_lobe_envelope_measurement",
-        "source_type": "literature",
-        "source_ref": "PEARS_EXOVASC_LIT",
-        "confidence": 0.85
-      },
-      "uncertainty": {
-        "flag": "LOW_CONFIDENCE",
-        "message": "Maximum sinus diameter for PEARS support sizing extracted from root model.",
-        "clinician_review_required": true
-      },
-      "provenance": {
-        "source": "reference_estimate_not_from_ct_pipeline",
-        "note": "临床参考值，非真实CT管线输出，需真实病例替换"
-      }
+    "coronary_risk_flag": true,
+    "valve_calcium_burden": {
+      "threshold_hu": 130.0,
+      "calc_voxels": 189401,
+      "calc_volume_ml": 287.18798346995067,
+      "method": "contrast_ct_hu_threshold_proxy"
+    },
+    "area_derived_valve_size_metadata": {
+      "method": "nearest_reference_nominal_size_non_vendor_specific",
+      "evidence_rule": "annulus_area_and_perimeter_drive_valve_sizing_but_vendor_table_required_for_clinical_use",
+      "source_fields": [
+        "measurements_regularized.annulus.area_mm2",
+        "measurements_regularized.annulus.perimeter_mm"
+      ]
+    },
+    "coronary_risk_flag_metadata": {
+      "method": "coronary_height_threshold_logic",
+      "evidence_rule": "coronary_obstruction_risk_requires_height_plus_sinus_plus_virtual_valve_clearance",
+      "source_fields": [
+        "measurements_regularized.coronary_heights_mm.left",
+        "measurements_regularized.coronary_heights_mm.right",
+        "measurements_regularized.sinus_of_valsalva.max_diameter_mm",
+        "measurements_regularized.stj.diameter_mm"
+      ]
     }
   }
 }

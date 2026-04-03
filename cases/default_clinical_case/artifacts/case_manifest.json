@@ -11,14 +11,14 @@
   },
   "placeholder": false,
   "not_real_cta": false,
-  "case_type": "reference_case",
-  "data_source": "clinically_plausible_reference_not_from_real_ct",
-  "clinical_use": "demonstration_only",
-  "note": "此病例为参考示范病例，测量值基于文献正常参考范围，非真实CT管线输出。真实临床使用需通过上传真实CT获得。",
+  "case_type": "real_pipeline_case",
+  "data_source": "real_ct_pipeline_output",
+  "clinical_use": "showcase_real_measurements",
+  "note": "此病例为真实CT管线输出，测量值来自自动化解剖模型。",
   "build_version": "showcase-real-source",
-  "last_modified": "2026-03-31T00:00:00Z",
+  "last_modified": "2026-04-03T12:05:22Z",
   "scan_date": "2026-02-14",
-  "pipeline_version": "showcase_pipeline_v2",
+  "pipeline_version": "aortic_geometry_pipeline_v3",
   "artifact_index": {
     "case_manifest": "artifacts/case_manifest.json",
     "planning": "artifacts/planning.json",
@@ -195,6 +195,7 @@
       ],
       "not_assessable": [],
       "failed": []
-    }
+    },
+    "pipeline_risk_flags": 3
   }
 }
