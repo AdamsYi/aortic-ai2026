@@ -436,10 +436,20 @@ export async function buildDefaultCaseWorkstationPayload(store: DefaultCaseStore
     job: { id: manifest.case_id, status: "succeeded", mode: "default_case_bundle" },
     study_meta: {
       id: manifest.case_id,
-      source_dataset: "supervisely-demo-volumes-CTACardio",
-      phase: "root_roi_showcase",
+      source_dataset: typeof manifest.source_dataset === "string" ? manifest.source_dataset : "AVT-Dongyang-D1",
+      phase: typeof manifest.phase === "string" ? manifest.phase : "real_pipeline_output",
     },
-    pipeline_run: resolvePipelineRun(null, null, buildVersion),
+    pipeline_run: resolvePipelineRun(
+      {
+        inference_mode: "default_case_bundle",
+        provider_runtime: "gpu_provider_win",
+        pipeline_version: typeof manifest.pipeline_version === "string" ? manifest.pipeline_version : "aortic_geometry_pipeline_v3",
+        build_version: buildVersion,
+        status: "succeeded",
+      },
+      null,
+      buildVersion,
+    ),
     links,
     downloads,
     volume_source: {
