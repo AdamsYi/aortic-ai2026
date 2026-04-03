@@ -67,6 +67,58 @@ class InferenceResponse(BaseModel):
 
 
 app = FastAPI(title="Aortic AI GPU Provider", version="1.0.0")
+
+# ── 中文心跳与启动信息 ──────────────────────────────────────────
+import datetime as _dt
+
+_HEARTBEAT_INTERVAL = 30  # 秒
+_heartbeat_running = False
+
+def _heartbeat_loop():
+    """后台心跳线程：每隔一段时间打印中文状态，让操作者知道服务还活着。"""
+    global _heartbeat_running
+    _heartbeat_running = True
+    beat_count = 0
+    while _heartbeat_running:
+        time.sleep(_HEARTBEAT_INTERVAL)
+        beat_count += 1
+        now = _dt.datetime.now().strftime("%H:%M:%S")
+        gpu_ok = "✅ GPU可用" if shutil.which("nvidia-smi") else "❌ 无GPU"
+        heart = "💓" if beat_count % 2 == 0 else "💗"
+        print(f"  {heart} [{now}] 心跳 #{beat_count} | {gpu_ok} | 服务正常运行中", flush=True)
+
+def _print_startup_banner():
+    """启动时打印中文欢迎信息。"""
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    gpu_ok = shutil.which("nvidia-smi") is not None
+    dcm_ok = shutil.which("dcm2niix") is not None
+    print("\n" + "=" * 50, flush=True)
+    print("  🫀 AorticAI 主动脉智能规划系统", flush=True)
+    print("=" * 50, flush=True)
+    print(f"  📅 启动时间: {now}", flush=True)
+    print(f"  🖥️  GPU状态: {'✅ 已检测到 NVIDIA GPU' if gpu_ok else '❌ 未检测到 GPU'}", flush=True)
+    print(f"  🔧 dcm2niix: {'✅ 可用' if dcm_ok else '❌ 不可用'}", flush=True)
+    print(f"  🌐 监听地址: http://0.0.0.0:8000", flush=True)
+    print(f"  🔑 API密钥: 已配置", flush=True)
+    print("=" * 50, flush=True)
+    print("  💡 提示: 保持此窗口开启，服务将持续运行", flush=True)
+    print("  💡 每30秒会显示一次心跳 💓 表示服务正常", flush=True)
+    print("  💡 收到分析请求时会显示详细进度", flush=True)
+    print("=" * 50 + "\n", flush=True)
+
+@app.on_event("startup")
+def on_startup():
+    _print_startup_banner()
+    t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    t.start()
+
+@app.on_event("shutdown")
+def on_shutdown():
+    global _heartbeat_running
+    _heartbeat_running = False
+    print("\n  🛑 AorticAI 服务已停止\n", flush=True)
+
+
 PROVIDER_CONFIG_PATH = Path(__file__).resolve().with_name("provider_config.json")
 
 

@@ -71,9 +71,25 @@ except Exception:  # pragma: no cover
     pdf_canvas = None
 
 
+# Pipeline 步骤的中文描述映射
+_STEP_CN = {
+    "nifti_load": "📂 加载CT数据",
+    "lumen_extraction": "🔬 提取血管腔",
+    "stl_export": "🏗️ 生成3D模型",
+    "centerline": "📏 计算中心线",
+    "landmark_detection": "📍 检测解剖标志点",
+    "root_model": "🫀 构建主动脉根部模型",
+    "measurements": "📐 计算临床测量值",
+    "planning": "📋 生成手术规划",
+    "pdf_report": "📄 生成PDF报告",
+    "totalsegmentator": "🧠 AI自动分割中",
+    "segmentation_mask": "🎭 处理分割结果",
+}
+
 def _progress(step: str, detail: str = "") -> None:
     ts = datetime.datetime.now().strftime("%H:%M:%S")
-    msg = f"[{ts}] [{step}] {detail}" if detail else f"[{ts}] [{step}]"
+    cn = _STEP_CN.get(step, step)
+    msg = f"  [{ts}] {cn}" + (f" — {detail}" if detail else "")
     print(msg, flush=True)
 
 
