@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { __testables } from "../src/index";
 
 const {
+  deriveCaseResultPayloads,
   evaluateCaseDisplayReadiness,
   normalizeCaseResultPayloads,
+  summarizePlanningSection,
 } = __testables;
 
 test("display-ready case requires measurements, planning, and all required clinical artifacts", () => {
@@ -60,4 +62,46 @@ test("case-result normalization still derives planning from measurements payload
   assert.ok(normalized.measurements);
   assert.ok(normalized.planning);
   assert.equal((normalized.planning?.tavi as Record<string, unknown>)?.valve_size_suggestion ? true : false, true);
+});
+
+test("case-result derivation backfills planning from measurements artifact when persisted row is stale", () => {
+  const derived = deriveCaseResultPayloads({
+    existingMeasurements: {
+      annulus: { equivalent_diameter_mm: 24.8 },
+    },
+    existingPlanning: null,
+    resultJson: {
+      measurements: {
+        annulus: { equivalent_diameter_mm: 24.8 },
+      },
+    },
+    measurementsArtifactJson: {
+      planning_metrics: {
+        tavi: {
+          area_derived_valve_size: { nearest_nominal_size_mm: 26 },
+        },
+        vsrr: {},
+        pears: {},
+      },
+    },
+  });
+
+  assert.ok(derived.measurements);
+  assert.ok(derived.planning);
+  assert.equal(
+    ((derived.planning?.tavi as Record<string, unknown>)?.area_derived_valve_size as Record<string, unknown>)?.nearest_nominal_size_mm,
+    26
+  );
+});
+
+test("planning summary marks raw planning metrics as review_required instead of unavailable", () => {
+  const status = summarizePlanningSection({
+    annulus_area_mm2: 570.8,
+    coronary_risk_flag: true,
+    area_derived_valve_size: {
+      nearest_nominal_size_mm: 26,
+    },
+  });
+
+  assert.equal(status, "review_required");
 });

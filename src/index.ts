@@ -918,6 +918,10 @@ function summarizePlanningSection(section: Record<string, unknown> | null): stri
   if (!section) return "unavailable";
   const entries = Object.values(section).map((value) => pickObject(value));
   if (!entries.length) return "unavailable";
+  const hasEnvelopeEntries = entries.some((envelope) => Boolean(envelope && ("value" in envelope || "uncertainty" in envelope)));
+  if (!hasEnvelopeEntries) {
+    return hasMeaningfulPlanningSignal(section) ? "review_required" : "unavailable";
+  }
   let hasValue = false;
   let requiresReview = false;
   for (const envelope of entries) {
@@ -930,6 +934,18 @@ function summarizePlanningSection(section: Record<string, unknown> | null): stri
   }
   if (!hasValue) return "unavailable";
   return requiresReview ? "review_required" : "available";
+}
+
+function hasMeaningfulPlanningSignal(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some((item) => hasMeaningfulPlanningSignal(item));
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) => hasMeaningfulPlanningSignal(item));
+  }
+  return false;
 }
 
 function deriveLegacyQualityGates(measurementsJson: Record<string, unknown> | null): Record<string, unknown> {
@@ -1866,7 +1882,7 @@ async function handleSimpleJobCallback(request: Request, jobId: string, payload:
   }
 
   const resultCaseId = nullableString(payload?.result_case_id) || jobId;
-  const caseResult = await getCaseResultRow(env, resultCaseId);
+  const caseResult = await hydrateCaseResultRow(env, resultCaseId, jobId);
   const readiness = evaluateCaseDisplayReadiness({
     measurements: caseResult?.measurements_json ?? null,
     planning: caseResult?.planning_json ?? null,
@@ -1951,7 +1967,7 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
       if (!head?.size) continue;
       const caseId = nullableString(candidate.result_case_id) || String(candidate.id || "").trim();
       if (!caseId) continue;
-      const caseResult = await getCaseResultRow(env, caseId);
+      const caseResult = await hydrateCaseResultRow(env, caseId, String(candidate.id || "").trim());
       const artifactTypes = await getJobArtifactTypeSet(env, String(candidate.id || "").trim());
       const readiness = evaluateCaseDisplayReadiness({
         measurements: caseResult?.measurements_json ?? null,
@@ -1978,7 +1994,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
   }
 
   let resolvedCaseId = jobId;
-  let caseResultRow = await getCaseResultRow(env, jobId);
+  let caseResultRow = await hydrateCaseResultRow(env, jobId, jobId);
   let job = await env.DB.prepare(
     `SELECT id, study_id, job_type, status, model_tag, error_message, result_case_id, created_at, started_at, finished_at, updated_at
      FROM jobs WHERE id = ?1`
@@ -2007,7 +2023,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
   if (!caseResultRow) {
     const rowCaseId = nullableString(job.result_case_id);
     if (rowCaseId) {
-      caseResultRow = await getCaseResultRow(env, rowCaseId);
+      caseResultRow = await hydrateCaseResultRow(env, rowCaseId, String(job.id));
       if (caseResultRow?.case_id) resolvedCaseId = caseResultRow.case_id;
     }
   } else {
@@ -2627,19 +2643,102 @@ function normalizeCaseResultPayloads(resultJson: Record<string, unknown> | null)
   measurements: Record<string, unknown> | null;
   planning: Record<string, unknown> | null;
 } {
-  if (!resultJson) {
-    return { measurements: null, planning: null };
-  }
-  const measurements =
-    pickObject(resultJson.measurements)
-    || pickObject(resultJson.measurements_structured)
-    || null;
-  const planning =
-    pickObject(resultJson.planning)
-    || pickObject(resultJson.planning_metrics)
+  return deriveCaseResultPayloads({
+    resultJson,
+  });
+}
+
+function normalizeMeasurementsPayload(input: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!input) return null;
+  return (
+    pickObject(input.measurements)
+    || pickObject(input.measurements_regularized)
+    || pickObject(input.measurements_structured)
+    || pickObject(input.measurements_structured_regularized)
+    || (pickObject(input.annulus) || pickObject(input.sinus_of_valsalva) || pickObject(input.stj) ? input : null)
+  );
+}
+
+function normalizePlanningPayload(input: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!input) return null;
+  const measurements = normalizeMeasurementsPayload(input);
+  return (
+    pickObject(input.planning)
+    || pickObject(input.planning_metrics)
     || pickObject(measurements?.planning)
+    || pickObject(measurements?.planning_metrics)
+    || null
+  );
+}
+
+function deriveCaseResultPayloads(input: {
+  existingMeasurements?: Record<string, unknown> | null;
+  existingPlanning?: Record<string, unknown> | null;
+  resultJson?: Record<string, unknown> | null;
+  measurementsArtifactJson?: Record<string, unknown> | null;
+}): {
+  measurements: Record<string, unknown> | null;
+  planning: Record<string, unknown> | null;
+} {
+  const resultMeasurements = normalizeMeasurementsPayload(input.resultJson || null);
+  const artifactMeasurements = normalizeMeasurementsPayload(input.measurementsArtifactJson || null);
+  const measurements = input.existingMeasurements || resultMeasurements || artifactMeasurements || null;
+  const planning =
+    input.existingPlanning
+    || normalizePlanningPayload(input.resultJson || null)
+    || normalizePlanningPayload(input.measurementsArtifactJson || null)
+    || normalizePlanningPayload(measurements)
     || null;
   return { measurements, planning };
+}
+
+async function hydrateCaseResultRow(
+  env: Env,
+  caseId: string,
+  jobIdHint?: string | null,
+  existingRow?: CaseResultRow | null
+): Promise<CaseResultRow | null> {
+  if (!caseId) return null;
+  const row = typeof existingRow === "undefined" ? await getCaseResultRow(env, caseId) : existingRow;
+  const existingMeasurements = parseJsonColumn(row?.measurements_json);
+  const existingPlanning = parseJsonColumn(row?.planning_json);
+  if (existingMeasurements && existingPlanning) return row || null;
+
+  const jobId = nullableString(jobIdHint) || nullableString(row?.job_id) || caseId;
+  if (!jobId) return row || null;
+
+  const [resultJson, measurementsArtifactJson] = await Promise.all([
+    readArtifactJson(env, jobId, "result_json"),
+    readArtifactJson(env, jobId, "measurements_json"),
+  ]);
+
+  const derived = deriveCaseResultPayloads({
+    existingMeasurements,
+    existingPlanning,
+    resultJson,
+    measurementsArtifactJson,
+  });
+
+  const shouldPersist =
+    (!existingMeasurements && Boolean(derived.measurements))
+    || (!existingPlanning && Boolean(derived.planning));
+
+  if (!shouldPersist) return row || null;
+
+  await upsertCaseResult(env, {
+    case_id: row?.case_id || caseId,
+    job_id: row?.job_id || jobId,
+    measurements: derived.measurements,
+    planning: derived.planning,
+  });
+
+  return {
+    case_id: row?.case_id || caseId,
+    job_id: row?.job_id || jobId,
+    measurements_json: stringifyJsonColumn(derived.measurements),
+    planning_json: stringifyJsonColumn(derived.planning),
+    created_at: row?.created_at || Date.now(),
+  };
 }
 
 async function getCaseResultRow(env: Env, caseId: string): Promise<CaseResultRow | null> {
@@ -2811,7 +2910,7 @@ async function handleCaseResultArtifact(caseId: string, rawName: string, env: En
     return json({ error: "artifact_not_found" }, 404);
   }
 
-  const row = await getCaseResultRow(env, caseId);
+  const row = await hydrateCaseResultRow(env, caseId);
   if (!row) return json({ error: "case_not_found" }, 404);
   if (normalized === "measurements" || normalized === "measurements.json") {
     return json(parseJsonColumn(row.measurements_json) || {});
@@ -2827,16 +2926,17 @@ function buildCaseResultLinks(caseId: string): Record<string, string> {
 }
 
 async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersion: string): Promise<Record<string, unknown>> {
-  const artifactTypes = await getJobArtifactTypeSet(env, row.job_id);
+  const hydratedRow = await hydrateCaseResultRow(env, row.case_id, row.job_id, row) || row;
+  const artifactTypes = await getJobArtifactTypeSet(env, hydratedRow.job_id);
   const readiness = evaluateCaseDisplayReadiness({
-    measurements: row.measurements_json,
-    planning: row.planning_json,
+    measurements: hydratedRow.measurements_json,
+    planning: hydratedRow.planning_json,
     artifactTypes,
   });
   return {
-    id: row.case_id,
-    job_id: row.job_id,
-    case_id: row.case_id,
+    id: hydratedRow.case_id,
+    job_id: hydratedRow.job_id,
+    case_id: hydratedRow.case_id,
     display_name: {
       "zh-CN": `结果病例 ${row.case_id}`,
       en: `Result Case ${row.case_id}`,
@@ -2857,7 +2957,7 @@ async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersi
     capabilities: {},
     planning_summary: {},
     quality_gates_summary: {},
-    links: buildCaseResultLinks(row.case_id),
+    links: buildCaseResultLinks(hydratedRow.case_id),
   };
 }
 
@@ -3611,7 +3711,11 @@ async function applyInferenceOutputToJob(
   }
 
   if (safeResultJson) {
-    const normalizedCaseResult = normalizeCaseResultPayloads(safeResultJson);
+    const measurementsArtifactJson = await readArtifactJson(env, jobId, "measurements_json");
+    const normalizedCaseResult = deriveCaseResultPayloads({
+      resultJson: safeResultJson,
+      measurementsArtifactJson,
+    });
     await upsertCaseResult(env, {
       case_id: resultCaseId,
       job_id: jobId,
@@ -7597,6 +7701,8 @@ function renderLegacyDemoHtml(buildVersion: string): string {
 }
 
 export const __testables = {
+  deriveCaseResultPayloads,
   evaluateCaseDisplayReadiness,
   normalizeCaseResultPayloads,
+  summarizePlanningSection,
 };
