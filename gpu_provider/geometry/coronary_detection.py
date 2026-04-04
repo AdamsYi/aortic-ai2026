@@ -138,6 +138,24 @@ def detect_coronary_ostia(
     shell_inner_crop = shell_inner[xs, ys, zs]
     shell_outer_crop = shell_outer[xs, ys, zs]
     roi_crop = roi_crop[xs, ys, zs]
+
+    # Resample to near-isotropic spacing so Frangi and binary morphology work correctly.
+    # Anisotropic CTs (e.g. z_spacing=3mm, xy=0.7mm) cause Frangi to miss sub-voxel vessels
+    # and binary_opening(2,2,2) destroys 1-voxel-thin features in the coarse axis.
+    _target_sp = float(min(spacing_mm[0], spacing_mm[1], 1.5))
+    _zf = tuple(float(s) / _target_sp for s in spacing_mm)
+    _needs_resample = _zf[2] > 1.25
+    if _needs_resample:
+        try:
+            from scipy.ndimage import zoom as _sp_zoom
+            ct_crop = _sp_zoom(ct_crop.astype(np.float32), _zf, order=1, prefilter=False)
+            shell_inner_crop = (_sp_zoom(shell_inner_crop.astype(np.float32), _zf, order=0, prefilter=False) > 0.5)
+            shell_outer_crop = (_sp_zoom(shell_outer_crop.astype(np.float32), _zf, order=0, prefilter=False) > 0.5)
+            roi_crop = (_sp_zoom(roi_crop.astype(np.float32), _zf, order=0, prefilter=False) > 0.5)
+        except Exception:
+            _needs_resample = False
+            _zf = (1.0, 1.0, 1.0)
+
     vesselness_crop = _frangi_volume(ct_crop)
     cand_crop = roi_crop & shell_outer_crop & (ct_crop >= 140.0)
     if np.any(cand_crop):
@@ -171,28 +189,30 @@ def detect_coronary_ostia(
         if pts.shape[0] < 10:
             continue
         wall_pts = pts[shell_inner_crop[pts[:, 0], pts[:, 1], pts[:, 2]]]
-        local_pts = pts
-        pts = pts + np.array([int(min_xyz[0]) + x0, int(min_xyz[1]) + y0, int(min_xyz[2]) + z0], dtype=np.int32)
-        world = nib.affines.apply_affine(affine, pts.astype(np.float64))
+        local_pts = pts  # stays in iso-crop space for vesselness indexing
+        # Convert iso-crop coords → original voxel space
+        _inv_zf = np.array([1.0 / z for z in _zf], dtype=np.float64) if _needs_resample else np.ones(3, dtype=np.float64)
+        _offset = np.array([int(min_xyz[0]) + x0, int(min_xyz[1]) + y0, int(min_xyz[2]) + z0], dtype=np.float64)
+        pts_orig = (pts.astype(np.float64) * _inv_zf + _offset).astype(np.int64)
+        world = nib.affines.apply_affine(affine, pts_orig.astype(np.float64))
         plane_h = np.asarray([plane_signed_distance(p, annulus_origin, annulus_normal) for p in world], dtype=np.float64)
         if float(np.max(plane_h)) < 0.5:
             continue
-        local_pts = pts - np.array([x0 + int(min_xyz[0]), y0 + int(min_xyz[1]), z0 + int(min_xyz[2])], dtype=np.int32)
         score = vesselness_crop[local_pts[:, 0], local_pts[:, 1], local_pts[:, 2]]
         if wall_pts.shape[0] > 0:
             wall_scores = vesselness_crop[wall_pts[:, 0], wall_pts[:, 1], wall_pts[:, 2]]
             wall_best_local = wall_pts[int(np.argmax(wall_scores))]
-            best_local = wall_best_local
-            best_global = best_local + np.array([x0 + int(min_xyz[0]), y0 + int(min_xyz[1]), z0 + int(min_xyz[2])], dtype=np.int32)
+            best_global = (wall_best_local.astype(np.float64) * _inv_zf + _offset).astype(np.int64)
             ostium_world = nib.affines.apply_affine(affine, best_global.astype(np.float64))
             ostium_voxel = best_global.astype(np.float64)
             best_score = float(np.max(wall_scores)) if wall_scores.size else 0.0
         else:
             best_idx = int(np.argmax(score)) if score.size else 0
-            best_global = pts[best_idx]
+            best_global = pts_orig[best_idx]
             ostium_world = world[best_idx]
             ostium_voxel = best_global.astype(np.float64)
             best_score = float(score[best_idx]) if score.size else 0.0
+        pts = pts_orig  # use original-space coords for voxel count reporting
         height_mm = float(max(0.0, plane_signed_distance(ostium_world, annulus_origin, annulus_normal)))
         lateral = float(np.dot(ostium_world - annulus_origin, annulus_u))
         skeleton_len = _component_skeleton_length(lab == cid)
