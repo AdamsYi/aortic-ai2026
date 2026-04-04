@@ -64,7 +64,19 @@ function buildLegacyPlaceholderPlanning() {
 
 async function readDistFile(assetPath: string, encoding?: BufferEncoding) {
   const normalized = assetPath.replace(/^\//, "");
-  return readFile(path.join(distRoot, normalized), encoding as BufferEncoding | undefined);
+  const primaryPath = path.join(distRoot, normalized);
+  try {
+    return await readFile(primaryPath, encoding as BufferEncoding | undefined);
+  } catch (error) {
+    if (
+      normalized.includes("default-case/imaging_hidden/")
+      && (normalized.endsWith(".nii.gz") || normalized.endsWith(".nii"))
+    ) {
+      const fallbackPath = path.join(distRoot, `${normalized}.bin`);
+      return readFile(fallbackPath, encoding as BufferEncoding | undefined);
+    }
+    throw error;
+  }
 }
 
 function renderDemoHtml(): string {

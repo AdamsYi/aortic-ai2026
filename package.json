@@ -19,7 +19,7 @@
     "e2e:user": "node scripts/e2e_user_flow.mjs",
     "acceptance:online": "node scripts/run_online_workstation_acceptance.mjs",
     "test:schema": "node --import tsx --test tests/schema_validation.test.ts",
-    "test:unit": "node --import tsx --test tests/default_case_api.test.ts tests/legacy_pipeline_run.test.ts tests/legacy_viewer_baseline.test.ts tests/failure_modes.test.ts tests/build_version_hash.test.ts tests/security_headers.test.ts tests/performance_smoke.test.ts",
+    "test:unit": "node --import tsx --test tests/default_case_api.test.ts tests/legacy_pipeline_run.test.ts tests/legacy_viewer_baseline.test.ts tests/failure_modes.test.ts tests/build_version_hash.test.ts tests/security_headers.test.ts tests/performance_smoke.test.ts tests/case_result_truth.test.ts",
     "test:e2e": "playwright test",
     "test": "npm run test:schema && npm run test:unit && npm run test:e2e"
   },

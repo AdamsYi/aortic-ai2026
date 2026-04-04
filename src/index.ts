@@ -1201,10 +1201,12 @@ export default {
         const defaultListResponse = await handleDefaultCaseList(getDefaultCaseStore(env, request), getBuildVersion());
         const defaultListPayload = await defaultListResponse.clone().json() as { cases?: Array<Record<string, unknown>> };
         const defaultCases = Array.isArray(defaultListPayload.cases) ? defaultListPayload.cases : [];
-        const extraCases = (await listCaseResultRows(env))
+        const caseResultRows = (await listCaseResultRows(env))
           .filter((row) => row.case_id && row.case_id !== DEFAULT_CASE_ID)
-          .filter((row) => !defaultCases.some((entry) => String(entry.case_id || entry.id || "") === row.case_id))
-          .map((row) => buildCaseResultListEntry(row, getBuildVersion()));
+          .filter((row) => !defaultCases.some((entry) => String(entry.case_id || entry.id || "") === row.case_id));
+        const extraCases = await Promise.all(
+          caseResultRows.map((row) => buildCaseResultListEntry(env, row, getBuildVersion()))
+        );
         const cases = [...defaultCases, ...extraCases];
         return respond(json({ cases, total: cases.length }));
       }
@@ -1863,13 +1865,21 @@ async function handleSimpleJobCallback(request: Request, jobId: string, payload:
     return json({ ok: true, job_id: jobId, status: "failed" });
   }
 
+  const resultCaseId = nullableString(payload?.result_case_id) || jobId;
+  const caseResult = await getCaseResultRow(env, resultCaseId);
+  const readiness = evaluateCaseDisplayReadiness({
+    measurements: caseResult?.measurements_json ?? null,
+    planning: caseResult?.planning_json ?? null,
+    artifactTypes: await getJobArtifactTypeSet(env, jobId),
+  });
+
   await env.DB.prepare(`UPDATE jobs SET status = 'succeeded', finished_at = ?2, error_message = NULL WHERE id = ?1`)
     .bind(jobId, new Date().toISOString())
     .run();
   await tryUpdateJobExtendedFields(env, jobId, {
     progress: 100,
-    stage: "completed",
-    result_case_id: nullableString(payload?.result_case_id) || jobId,
+    stage: readiness.display_ready ? "completed" : "completed_incomplete",
+    result_case_id: resultCaseId,
     updated_at: new Date().toISOString(),
   });
   return json({ ok: true, job_id: jobId, status: "succeeded" });
@@ -1897,12 +1907,11 @@ async function streamJobInputForProvider(request: Request, jobId: string, env: E
 
 async function getLatestDemoCase(env: Env, request: Request): Promise<Response> {
   try {
-    const legacy = await getLatestDemoCaseLegacy(env, request);
-    if (legacy.ok) return legacy;
-  } catch {
-    // Fall back to bundled showcase case if legacy lookup fails.
+    return await getLatestDemoCaseLegacy(env, request);
+  } catch (error) {
+    console.error("latest-case lookup failed", error instanceof Error ? error.message : String(error));
+    return json({ error: "latest_case_lookup_failed" }, 503);
   }
-  return handleDefaultCaseSummary(getDefaultCaseStore(env, request), getBuildVersion());
 }
 
 async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Response> {
@@ -1919,15 +1928,7 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
        EXISTS(
          SELECT 1 FROM artifacts a
          WHERE a.job_id = j.id AND a.artifact_type IN ('segmentation_mask_nifti', 'mask_output', 'mask_multiclass')
-       ) AS has_seg,
-       EXISTS(
-         SELECT 1 FROM artifacts a
-         WHERE a.job_id = j.id AND a.artifact_type = 'measurements_json'
-       ) AS has_measurements,
-       EXISTS(
-         SELECT 1 FROM artifacts a
-         WHERE a.job_id = j.id AND a.artifact_type = 'aortic_root_stl'
-       ) AS has_stl
+       ) AS has_seg
      FROM jobs j
      WHERE j.status = 'succeeded'
      ORDER BY
@@ -1936,85 +1937,38 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
   ).all<Record<string, unknown>>();
 
   const candidates = Array.isArray(jobRows.results) ? jobRows.results : [];
-  let job: Record<string, unknown> | null = null;
-  let preferredStudy: { id: string; image_key: string; source_dataset: string | null; phase: string | null } | null = null;
 
   for (const candidate of candidates) {
-    const studyId = String(candidate.study_id || "");
-    if (!studyId) continue;
-    const candidateStudy = await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
-      .bind(studyId)
-      .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>();
-    const imageKey = String(candidateStudy?.image_key || "").trim();
-    if (!imageKey) continue;
-    const head = await env.R2_RAW.head(imageKey);
-    if (!head?.size) continue;
-    const hasStructuredOutputs = Boolean(candidate.has_measurements || nullableString(candidate.result_case_id));
-    if (!hasStructuredOutputs) continue;
-    job = candidate;
-    preferredStudy = candidateStudy;
-    break;
-  }
-
-  if (!job && candidates.length) {
-    job = candidates[0];
-    const fallbackStudyId = String(job.study_id || "");
-    preferredStudy = fallbackStudyId
-      ? await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
-          .bind(fallbackStudyId)
-          .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>()
-      : null;
-  }
-
-  if (!job) {
-    return json({ error: "no_succeeded_case_yet" }, 404);
-  }
-
-  const jobId = String(job.id);
-  const studyId = String(job.study_id);
-  const rawStudyId = preferredStudy?.id || studyId;
-
-  const artifacts = await env.DB.prepare(
-    `SELECT id, artifact_type, bucket, object_key, sha256, bytes, created_at
-     FROM artifacts WHERE job_id = ?1 ORDER BY created_at ASC`
-  )
-    .bind(jobId)
-    .all();
-
-  const metrics = await env.DB.prepare(
-    `SELECT id, metric_name, metric_value, unit, created_at
-     FROM metrics WHERE job_id = ?1 ORDER BY created_at ASC`
-  )
-    .bind(jobId)
-    .all();
-
-  let imageBytes: number | null = null;
-  if (preferredStudy?.image_key) {
-    const head = await env.R2_RAW.head(preferredStudy.image_key);
-    imageBytes = head?.size ?? null;
-  }
-
-  const resultArtifact = (artifacts.results as Array<Record<string, unknown>>).find(
-    (a) => String(a.artifact_type || "") === "result_json"
-  );
-  const resultObjectKey = typeof resultArtifact?.object_key === "string" ? resultArtifact.object_key : null;
-  let resultPayload: Record<string, unknown> | null = null;
-  if (resultObjectKey) {
-    const resultObj = await env.R2_MASK.get(resultObjectKey);
-    if (resultObj) {
-      const text = await resultObj.text();
-      resultPayload = safeJsonObject(text);
+    try {
+      const studyId = String(candidate.study_id || "");
+      if (!studyId) continue;
+      const candidateStudy = await env.DB.prepare(`SELECT id, image_key, source_dataset, phase FROM studies WHERE id = ?1`)
+        .bind(studyId)
+        .first<{ id: string; image_key: string; source_dataset: string | null; phase: string | null }>();
+      const imageKey = String(candidateStudy?.image_key || "").trim();
+      if (!imageKey) continue;
+      const head = await env.R2_RAW.head(imageKey);
+      if (!head?.size) continue;
+      const caseId = nullableString(candidate.result_case_id) || String(candidate.id || "").trim();
+      if (!caseId) continue;
+      const caseResult = await getCaseResultRow(env, caseId);
+      const artifactTypes = await getJobArtifactTypeSet(env, String(candidate.id || "").trim());
+      const readiness = evaluateCaseDisplayReadiness({
+        measurements: caseResult?.measurements_json ?? null,
+        planning: caseResult?.planning_json ?? null,
+        artifactTypes,
+      });
+      if (!readiness.display_ready) continue;
+      const workstationResponse = await getWorkstationCase(String(candidate.id || "").trim(), env, request);
+      if (!workstationResponse.ok) continue;
+      const workstationPayload = await workstationResponse.clone().json() as Record<string, unknown>;
+      return json(buildLatestCaseSummaryFromWorkstationPayload(workstationPayload));
+    } catch {
+      continue;
     }
   }
 
-  void metrics;
-  void imageBytes;
-  void rawStudyId;
-  void preferredStudy;
-  const workstationResponse = await getWorkstationCase(jobId, env, request);
-  if (!workstationResponse.ok) return workstationResponse;
-  const workstationPayload = await workstationResponse.clone().json() as Record<string, unknown>;
-  return json(buildLatestCaseSummaryFromWorkstationPayload(workstationPayload));
+  return json({ error: "no_display_ready_case_yet" }, 404);
 }
 
 async function getWorkstationCase(jobId: string, env: Env, request: Request): Promise<Response> {
@@ -2600,6 +2554,65 @@ type CaseResultRow = {
   created_at: number | null;
 };
 
+type CaseDisplayReadiness = {
+  display_ready: boolean;
+  completion_state: "display_ready" | "incomplete_case_result";
+  missing_requirements: string[];
+  has_measurements: boolean;
+  has_planning: boolean;
+  has_centerline: boolean;
+  has_root_model: boolean;
+  has_leaflet_model: boolean;
+  has_root_stl: boolean;
+  has_report_pdf: boolean;
+};
+
+function parseCaseResultObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "string") return parseJsonColumn(value);
+  return pickObject(value);
+}
+
+function evaluateCaseDisplayReadiness(input: {
+  measurements: unknown;
+  planning: unknown;
+  artifactTypes?: Iterable<string> | null;
+}): CaseDisplayReadiness {
+  const measurements = parseCaseResultObject(input.measurements);
+  const planning = parseCaseResultObject(input.planning);
+  const artifactTypes = new Set(Array.from(input.artifactTypes || []).map((entry) => String(entry || "").trim()).filter(Boolean));
+
+  const hasMeasurements = Boolean(measurements);
+  const hasPlanning = Boolean(planning);
+  const hasCenterline = artifactTypes.has("centerline_json");
+  const hasRootModel = artifactTypes.has("aortic_root_model_json");
+  const hasLeafletModel = artifactTypes.has("leaflet_model_json");
+  const hasRootStl = artifactTypes.has("aortic_root_stl");
+  const hasReportPdf = artifactTypes.has("planning_report_pdf");
+
+  const missingRequirements = [
+    ...(hasMeasurements ? [] : ["measurements_json"]),
+    ...(hasPlanning ? [] : ["planning_json"]),
+    ...(hasCenterline ? [] : ["centerline_json"]),
+    ...(hasRootModel ? [] : ["aortic_root_model_json"]),
+    ...(hasLeafletModel ? [] : ["leaflet_model_json"]),
+    ...(hasRootStl ? [] : ["aortic_root_stl"]),
+    ...(hasReportPdf ? [] : ["planning_report_pdf"]),
+  ];
+
+  return {
+    display_ready: missingRequirements.length === 0,
+    completion_state: missingRequirements.length === 0 ? "display_ready" : "incomplete_case_result",
+    missing_requirements: missingRequirements,
+    has_measurements: hasMeasurements,
+    has_planning: hasPlanning,
+    has_centerline: hasCenterline,
+    has_root_model: hasRootModel,
+    has_leaflet_model: hasLeafletModel,
+    has_root_stl: hasRootStl,
+    has_report_pdf: hasReportPdf,
+  };
+}
+
 function stringifyJsonColumn(value: unknown): string | null {
   if (value == null) return null;
   return JSON.stringify(value);
@@ -2654,6 +2667,26 @@ async function listCaseResultRows(env: Env): Promise<CaseResultRow[]> {
     return Array.isArray(rows.results) ? rows.results : [];
   } catch {
     return [];
+  }
+}
+
+async function getJobArtifactTypeSet(env: Env, jobId: string | null): Promise<Set<string>> {
+  if (!jobId) return new Set();
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT artifact_type
+       FROM artifacts
+       WHERE job_id = ?1`
+    )
+      .bind(jobId)
+      .all<{ artifact_type: string | null }>();
+    return new Set(
+      (Array.isArray(rows.results) ? rows.results : [])
+        .map((row) => String(row.artifact_type || "").trim())
+        .filter(Boolean)
+    );
+  } catch {
+    return new Set();
   }
 }
 
@@ -2793,7 +2826,13 @@ function buildCaseResultLinks(caseId: string): Record<string, string> {
   };
 }
 
-function buildCaseResultListEntry(row: CaseResultRow, buildVersion: string): Record<string, unknown> {
+async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersion: string): Promise<Record<string, unknown>> {
+  const artifactTypes = await getJobArtifactTypeSet(env, row.job_id);
+  const readiness = evaluateCaseDisplayReadiness({
+    measurements: row.measurements_json,
+    planning: row.planning_json,
+    artifactTypes,
+  });
   return {
     id: row.case_id,
     job_id: row.job_id,
@@ -2805,13 +2844,16 @@ function buildCaseResultListEntry(row: CaseResultRow, buildVersion: string): Rec
     case_role: ["latest", "derived_result"],
     placeholder: false,
     not_real_cta: false,
-    status: "completed",
+    status: readiness.display_ready ? "completed" : "incomplete",
     scan_date: null,
     pipeline_version: null,
     build_version: buildVersion,
-    has_planning: Boolean(row.planning_json),
-    has_measurements: Boolean(row.measurements_json),
-    has_meshes: false,
+    has_planning: readiness.has_planning,
+    has_measurements: readiness.has_measurements,
+    has_meshes: readiness.has_root_stl,
+    display_ready: readiness.display_ready,
+    completion_state: readiness.completion_state,
+    missing_requirements: readiness.missing_requirements,
     capabilities: {},
     planning_summary: {},
     quality_gates_summary: {},
@@ -3486,6 +3528,7 @@ async function applyInferenceOutputToJob(
   const hasResultJson = payload.result_json && typeof payload.result_json === "object";
   let safeResultJson: Record<string, unknown> | null = null;
   const resultCaseId = nullableString(payload.result_case_id) || jobId;
+  const writtenArtifactTypes = new Set<string>();
 
   if (hasResultJson) {
     safeResultJson = sanitizePublicResultJson(payload.result_json as Record<string, unknown>) || {};
@@ -3535,6 +3578,8 @@ async function applyInferenceOutputToJob(
       maskBytes,
       payload.mask_content_type || "application/octet-stream"
     );
+    writtenArtifactTypes.add("mask_output");
+    writtenArtifactTypes.add("segmentation_mask_nifti");
   }
 
   if (Array.isArray(payload.artifacts)) {
@@ -3552,6 +3597,7 @@ async function applyInferenceOutputToJob(
         bytes,
         artifact.content_type || "application/octet-stream"
       );
+      writtenArtifactTypes.add(artifactType);
     }
   }
 
@@ -3572,6 +3618,32 @@ async function applyInferenceOutputToJob(
       measurements: normalizedCaseResult.measurements,
       planning: normalizedCaseResult.planning,
     });
+
+    const readiness = evaluateCaseDisplayReadiness({
+      measurements: normalizedCaseResult.measurements,
+      planning: normalizedCaseResult.planning,
+      artifactTypes: writtenArtifactTypes,
+    });
+
+    await env.DB.prepare(`UPDATE jobs SET status = 'succeeded', finished_at = ?2, error_message = NULL WHERE id = ?1`)
+      .bind(jobId, new Date().toISOString())
+      .run();
+    await tryUpdateJobExtendedFields(env, jobId, {
+      progress: 100,
+      stage: readiness.display_ready ? "completed" : "completed_incomplete",
+      result_case_id: resultCaseId,
+      updated_at: new Date().toISOString(),
+    });
+  } else {
+    await env.DB.prepare(`UPDATE jobs SET status = 'succeeded', finished_at = ?2, error_message = NULL WHERE id = ?1`)
+      .bind(jobId, new Date().toISOString())
+      .run();
+    await tryUpdateJobExtendedFields(env, jobId, {
+      progress: 100,
+      stage: "completed_incomplete",
+      result_case_id: resultCaseId,
+      updated_at: new Date().toISOString(),
+    });
   }
 
   if (Array.isArray(payload.metrics)) {
@@ -3587,15 +3659,6 @@ async function applyInferenceOutputToJob(
     }
   }
 
-  await env.DB.prepare(`UPDATE jobs SET status = 'succeeded', finished_at = ?2, error_message = NULL WHERE id = ?1`)
-    .bind(jobId, new Date().toISOString())
-    .run();
-  await tryUpdateJobExtendedFields(env, jobId, {
-    progress: 100,
-    stage: "completed",
-    result_case_id: resultCaseId,
-    updated_at: new Date().toISOString(),
-  });
 }
 
 async function markJobFailed(env: Env, jobId: string, message: string): Promise<void> {
@@ -7532,3 +7595,8 @@ function renderLegacyDemoHtml(buildVersion: string): string {
     `<head>\n  <meta name="aortic-build-version" content="${buildVersion}" />`
   );
 }
+
+export const __testables = {
+  evaluateCaseDisplayReadiness,
+  normalizeCaseResultPayloads,
+};
