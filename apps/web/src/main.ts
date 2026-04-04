@@ -133,6 +133,9 @@ type ModelLandmarksSummary = {
 
 type WorkstationCasePayload = {
   case_id?: string;
+  display_ready?: boolean;
+  completion_state?: string | null;
+  missing_requirements?: string[] | null;
   display_name?: Record<string, string> | string | null;
   case_role?: string[] | null;
   placeholder?: boolean;
@@ -552,8 +555,8 @@ function renderShell(): void {
             <span class="gpu-dot gpu-offline" id="gpu-status-dot"></span>
             <span id="gpu-status-text">GPU offline</span>
           </div>
-          <a id="load-showcase" class="case-mode-button" href="/demo" data-i18n="action.open_showcase">Showcase</a>
-          <a id="load-latest" class="case-mode-button" href="/demo?case=latest" data-i18n="action.load_case">Latest Case</a>
+          <a id="load-showcase" class="case-mode-button" href="/demo?case=showcase" data-i18n="action.open_showcase">Reference</a>
+          <a id="load-latest" class="case-mode-button" href="/demo" data-i18n="action.load_case">Real Default</a>
           <button id="submit-case" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
           <button id="run-annotation" class="primary-action-button" data-i18n="action.run_annotation">Run Auto Annotation</button>
           <button id="open-report" data-i18n="action.open_report">Report</button>
@@ -2042,13 +2045,14 @@ function handleGlobalShortcuts(event: KeyboardEvent): void {
 
 function requestedCaseMode(): CaseMode {
   const current = new URL(window.location.href);
-  if (current.searchParams.get('case') === 'latest') return 'latest';
-  return 'showcase';
+  const explicit = (current.searchParams.get('case') || '').trim().toLowerCase();
+  if (explicit === 'showcase' || explicit === 'reference') return 'showcase';
+  return 'latest';
 }
 
 function updateCaseModeUrl(mode: CaseMode, replace = false): void {
   const current = new URL(window.location.href);
-  if (mode === 'latest') current.searchParams.set('case', 'latest');
+  if (mode === 'showcase') current.searchParams.set('case', 'showcase');
   else current.searchParams.delete('case');
   const next = `${current.pathname}${current.search}${current.hash}`;
   if (replace) window.history.replaceState({ caseMode: mode }, '', next);
@@ -2061,7 +2065,11 @@ function setReportDrawerOpen(open: boolean): void {
 }
 
 function updateReportLinks(casePayload: WorkstationCasePayload | null): void {
-  const reportHref = casePayload?.links?.report_pdf || defaultCaseReportUrl('report.pdf');
+  const reportHref =
+    casePayload?.links?.report_pdf
+    || casePayload?.links?.planning_report_pdf
+    || normalizeDownloadEntry(casePayload?.downloads?.pdf, 'PDF report')?.href
+    || defaultCaseReportUrl('report.pdf');
   if (DOM.reportFrame && DOM.reportFrame.src !== resolveAbsoluteUrl(reportHref)) {
     DOM.reportFrame.src = resolveAbsoluteUrl(reportHref);
   }
@@ -2101,6 +2109,14 @@ async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boole
   setStatus('Resolving latest processed CTA case...');
   if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Case Auto Annotation · loading...';
   if (DOM.mprStatus) DOM.mprStatus.textContent = 'Looking up the latest processed CTA case...';
+  if (DOM.annotationStatus) DOM.annotationStatus.textContent = 'Loading latest real case...';
+  if (DOM.annotationDetail) {
+    DOM.annotationDetail.textContent = 'Resolving case context before checking the current auto annotation state.';
+  }
+  if (DOM.annotationButton) {
+    DOM.annotationButton.disabled = true;
+    DOM.annotationButton.textContent = t('action.run_annotation');
+  }
   try {
     const latest = await fetchJson<Record<string, unknown>>('/demo/latest-case');
     const resolvedJobId = String(latest.id || latest.job_id || '').trim();
@@ -2991,10 +3007,12 @@ function maybeAutoRunAnnotation(casePayload: WorkstationCasePayload | null): voi
     DOM.caseMeta.textContent = `${DOM.caseMeta.textContent || 'Latest Real Case'} · Latest Case Auto Annotation`;
   }
   if (autoAnnotationRequestedForStudy === studyId) return;
+  const alreadyDisplayReady = casePayload.display_ready === true
+    || (Array.isArray(casePayload.missing_requirements) && casePayload.missing_requirements.length === 0 && casePayload.completion_state === 'display_ready');
   const pipeline = pickObject(casePayload.pipeline_run);
   const alreadyAnnotated = (casePayload.case_role || []).includes('annotated')
     || (pipeline?.inferred === false && String(pipeline?.inference_mode || '').toLowerCase().includes('segmentation'));
-  if (alreadyAnnotated) {
+  if (alreadyDisplayReady || alreadyAnnotated) {
     autoAnnotationRequestedForStudy = studyId;
     return;
   }
@@ -3408,13 +3426,7 @@ function renderMeasurementsPanel(casePayload: WorkstationCasePayload): void {
     DOM.measurementGrid.innerHTML = '<div class="muted">⚠ Data unavailable</div>';
     return;
   }
-  const artifactRoot = pickObject(defaultMeasurementsArtifact)?.measurements
-    ? pickObject(defaultMeasurementsArtifact)
-    : null;
-  const measurementRoot = pickObject(artifactRoot?.measurements)
-    || pickObject(pickObject(casePayload.measurements)?.measurements)
-    || pickObject(casePayload.measurements)
-    || {};
+  const measurementMap = currentMeasurementsEnvelopeMap(casePayload);
   const sections: Array<{ key: string; titleKey: string; entries: string[] }> = [
     {
       key: 'annulus',
@@ -3444,7 +3456,7 @@ function renderMeasurementsPanel(casePayload: WorkstationCasePayload): void {
   ];
   const html = sections.map((section) => {
     const rows = section.entries
-      .map((fieldKey) => measurementPanelRow(fieldKey, measurementRoot[fieldKey]))
+      .map((fieldKey) => measurementPanelRow(fieldKey, measurementMap[fieldKey]))
       .filter(Boolean) as string[];
     if (!rows.length) return '';
     return `
@@ -3607,6 +3619,58 @@ function currentMeasurementsEnvelopeMap(casePayload: WorkstationCasePayload | nu
     || pickObject(pickObject(casePayload.measurements)?.measurements)
     || pickObject(casePayload.measurements)
     || {};
+  const populatedEnvelopeEntries = Object.values(measurementRoot).some((entry) => {
+    const record = pickObject(entry);
+    return Boolean(record && ('value' in record || 'uncertainty' in record));
+  });
+  if (!populatedEnvelopeEntries) {
+    const groupedRoot =
+      pickObject(pickObject(casePayload.measurements)?.measurements_regularized)
+      || pickObject(pickObject(casePayload.measurements)?.measurements)
+      || pickObject(pickObject(casePayload.measurements)?.measurements_raw)
+      || pickObject(casePayload.measurements);
+    const contractRoot = pickObject(pickObject(casePayload.measurements)?.measurement_contract) || {};
+    if (groupedRoot) {
+      const buildEnvelope = (
+        value: unknown,
+        unit: string,
+        method: string,
+        unavailableMessage: string,
+        reviewRequired = false
+      ): Record<string, unknown> => {
+        const numeric = typeof value === 'number' && Number.isFinite(value) ? value : null;
+        return {
+          value: numeric,
+          unit,
+          evidence: {
+            method,
+            source_type: 'algorithm',
+            source_ref: 'REAL_CT_PIPELINE_OUTPUT',
+            confidence: numeric == null ? 0.35 : 0.82,
+          },
+          uncertainty: {
+            flag: numeric == null ? 'NOT_AVAILABLE' : reviewRequired ? 'LOW_CONFIDENCE' : 'NONE',
+            message: numeric == null ? unavailableMessage : 'Real CT pipeline result.',
+            clinician_review_required: numeric == null || reviewRequired,
+          },
+        };
+      };
+      return {
+        annulus_equivalent_diameter_mm: buildEnvelope(groupedRoot.annulus?.equivalent_diameter_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus equivalent diameter is not available in this case.'),
+        annulus_short_diameter_mm: buildEnvelope(groupedRoot.annulus?.diameter_short_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus short diameter is not available in this case.'),
+        annulus_long_diameter_mm: buildEnvelope(groupedRoot.annulus?.diameter_long_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus long diameter is not available in this case.'),
+        annulus_area_mm2: buildEnvelope(groupedRoot.annulus?.area_mm2, 'mm²', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus area is not available in this case.'),
+        annulus_perimeter_mm: buildEnvelope(groupedRoot.annulus?.perimeter_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus perimeter is not available in this case.'),
+        stj_diameter_mm: buildEnvelope(groupedRoot.stj?.diameter_mm, 'mm', String(pickObject(contractRoot.stj)?.method || 'stj_section'), 'STJ diameter is not available in this case.'),
+        sinus_diameter_mm: buildEnvelope(groupedRoot.sinus_of_valsalva?.max_diameter_mm ?? groupedRoot.sinus_of_valsalva?.equivalent_diameter_mm, 'mm', String(pickObject(contractRoot.sinus_of_valsalva)?.method || 'sinus_section'), 'Sinus diameter is not available in this case.'),
+        ascending_aorta_diameter_mm: buildEnvelope(groupedRoot.ascending_aorta?.diameter_mm, 'mm', String(pickObject(contractRoot.ascending_aorta)?.method || 'ascending_section'), 'Ascending aorta diameter is not available in this case.'),
+        coronary_height_left_mm: buildEnvelope(groupedRoot.coronary_heights_mm?.left, 'mm', String(pickObject(contractRoot.coronary_heights_mm)?.method || 'coronary_height'), 'Left coronary height is not available in this case.', true),
+        coronary_height_right_mm: buildEnvelope(groupedRoot.coronary_heights_mm?.right, 'mm', String(pickObject(contractRoot.coronary_heights_mm)?.method || 'coronary_height'), 'Right coronary height is not available in this case.', true),
+        leaflet_effective_height_mm: buildEnvelope(groupedRoot.leaflet_geometry?.effective_height_mean_mm, 'mm', String(pickObject(contractRoot.leaflet_geometry)?.method || 'leaflet_geometry'), 'Leaflet effective height is not available in this case.', true),
+        calcium_burden_ml: buildEnvelope(groupedRoot.calcium_burden?.calc_volume_ml, 'ml', String(pickObject(contractRoot.calcium_burden)?.method || 'calcium_proxy'), 'Calcium burden proxy is not available in this case.', true),
+      };
+    }
+  }
   const sections: Array<string> = [
     'annulus_equivalent_diameter_mm',
     'annulus_short_diameter_mm',
@@ -3763,6 +3827,7 @@ function planningPanelRow(
 }
 
 function envelopeNumber(entry: unknown): number | null {
+  if (typeof entry === 'number' && Number.isFinite(entry)) return entry;
   const envelope = pickObject(entry);
   if (!envelope) return null;
   const value = envelope.value;
@@ -3784,7 +3849,10 @@ function buildTaviPlanningRows(
 
   const areaDerived = pickObject(section?.area_derived_valve_size);
   const derivedValue = pickObject(areaDerived?.value);
-  const recommendedNominal = typeof derivedValue?.nearest_nominal_size_mm === 'number' ? derivedValue.nearest_nominal_size_mm : null;
+  const recommendedNominal =
+    typeof derivedValue?.nearest_nominal_size_mm === 'number' ? derivedValue.nearest_nominal_size_mm
+    : typeof areaDerived?.nearest_nominal_size_mm === 'number' ? areaDerived.nearest_nominal_size_mm
+    : null;
   const recommendedDisplay = recommendedNominal == null ? 'Unavailable' : `${recommendedNominal} mm`;
   rows.push(planningPanelRow('TAVI', 'recommended_valve_size', section?.area_derived_valve_size, recommendedDisplay, recommendedNominal == null ? 'danger' : 'ok', 'area/perimeter nominal size mapping'));
 
@@ -3808,7 +3876,7 @@ function buildVsrrPlanningRows(
   measurements: Record<string, Record<string, unknown>>
 ): string[] {
   const rows: Array<string | null> = [];
-  const graftEntry = section?.recommended_graft_diameter_mm || section?.graft_sizing;
+  const graftEntry = section?.recommended_graft_diameter_mm ?? section?.graft_sizing;
   const graftNum = envelopeNumber(graftEntry);
   const graftDisplay = graftNum == null ? (pickObject(graftEntry)?.value != null ? JSON.stringify(pickObject(graftEntry)?.value) : 'Unavailable') : `${graftNum} mm`;
   rows.push(planningPanelRow('VSRR', 'recommended_graft_diameter', graftEntry, graftDisplay, graftNum == null ? 'warn' : 'ok', 'David procedure graft sizing guidance'));
@@ -3833,16 +3901,19 @@ function buildPearsPlanningRows(
   measurements: Record<string, Record<string, unknown>>
 ): string[] {
   const rows: Array<string | null> = [];
-  const rootDiameterEntry = section?.max_sinus_diameter_mm || measurements.sinus_diameter_mm;
+  const rootDiameterEntry = section?.max_sinus_diameter_mm ?? measurements.sinus_diameter_mm;
   const rootDiameter = envelopeNumber(rootDiameterEntry);
   const rootDiameterDisplay = rootDiameter == null ? 'Unavailable' : `${rootDiameter.toFixed(1)} mm`;
   rows.push(planningPanelRow('PEARS', 'root_external_reference_diameter', rootDiameterEntry, rootDiameterDisplay, rootDiameter == null ? 'danger' : 'ok', 'external root reference diameter'));
 
   const supportEntry = pickObject(section?.support_region_status);
   const supportValue = pickObject(supportEntry?.value);
-  const supportLength = typeof supportValue?.support_segment_length_mm === 'number' ? supportValue.support_segment_length_mm : null;
+  const supportLength =
+    typeof supportValue?.support_segment_length_mm === 'number' ? supportValue.support_segment_length_mm
+    : typeof section?.support_segment_length_mm === 'number' ? section.support_segment_length_mm
+    : null;
   const supportDisplay = supportLength == null ? 'Unavailable' : `${supportLength.toFixed(1)} mm`;
-  rows.push(planningPanelRow('PEARS', 'support_segment_length', section?.support_region_status, supportDisplay, supportLength == null ? 'warn' : 'ok', 'support region segment length'));
+  rows.push(planningPanelRow('PEARS', 'support_segment_length', section?.support_region_status ?? section?.support_segment_length_mm, supportDisplay, supportLength == null ? 'warn' : 'ok', 'support region segment length'));
 
   return rows.filter(Boolean) as string[];
 }
@@ -3860,10 +3931,10 @@ function renderCaseOverviewSummary(casePayload: WorkstationCasePayload): void {
   const review = casePayload.clinical_review || casePayload.acceptance_review;
   const overall = acceptanceStatusLabel(review?.overall_status);
   const sourceLabel = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase')
-    ? 'Showcase'
+    ? 'Reference'
     : isHistoricalInferredCase(casePayload)
       ? 'Latest / Legacy'
-      : 'Latest';
+      : 'Real Default';
   const limitations = [
     isCapabilityAvailable(casePayload.capabilities?.cpr) ? null : 'CPR unavailable',
     isHistoricalInferredCase(casePayload) ? 'Historical / inferred provenance' : null,
@@ -4052,6 +4123,7 @@ async function ensureAnnotationProviderHealth(force = false): Promise<ProviderHe
 
 function syncAnnotationState(casePayload: WorkstationCasePayload | null): void {
   const studyId = currentStudyId(casePayload);
+  const stickyDisplayReadyStatuses = new Set(['submitting', 'queued', 'running', 'failed']);
   if (!casePayload) {
     annotationRunState = {
       status: 'unavailable',
@@ -4069,6 +4141,25 @@ function syncAnnotationState(casePayload: WorkstationCasePayload | null): void {
       jobId: null,
       message: 'Showcase annotations are precomputed.',
       detail: 'Use Latest Case to run a fresh automated annotation job on a real study.',
+    };
+    return;
+  }
+  const alreadyDisplayReady = casePayload.display_ready === true
+    || (Array.isArray(casePayload.missing_requirements) && casePayload.missing_requirements.length === 0 && casePayload.completion_state === 'display_ready');
+  if (
+    studyId
+    && annotationRunState.studyId === studyId
+    && stickyDisplayReadyStatuses.has(annotationRunState.status)
+  ) {
+    return;
+  }
+  if (alreadyDisplayReady) {
+    annotationRunState = {
+      status: 'succeeded',
+      studyId,
+      jobId: typeof casePayload.job?.id === 'string' ? casePayload.job.id : null,
+      message: 'Existing auto annotation results are loaded.',
+      detail: 'This real case already has display-ready outputs. You can rerun manually if you want to refresh the pipeline result.',
     };
     return;
   }
@@ -5425,10 +5516,10 @@ async function refreshGpuStatusIndicator(): Promise<void> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 5000);
   try {
-    const resp = await fetch('https://api.heartvalvepro.edu.kg/health', { cache: 'no-store', signal: controller.signal });
+    const resp = await fetch('/providers/inference-health', { cache: 'no-store', signal: controller.signal });
     if (!resp.ok) throw new Error(`gpu_health_failed:${resp.status}`);
     const payload = (await resp.json()) as Record<string, unknown>;
-    const online = Boolean(payload.ok) || String(payload.status || '').toLowerCase() === 'ok';
+    const online = Boolean(payload.ok) || Boolean(payload.reachable) || String(payload.status || '').toLowerCase() === 'ok';
     DOM.gpuStatusDot.classList.toggle('gpu-online', online);
     DOM.gpuStatusDot.classList.toggle('gpu-offline', !online);
     DOM.gpuStatusText.textContent = online ? t('status.gpu_online') : t('status.gpu_offline');

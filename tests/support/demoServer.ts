@@ -33,35 +33,6 @@ const repoRoot = path.resolve(__dirname, "../..");
 const distRoot = path.join(repoRoot, "dist");
 const annotationJobs = new Map<string, { studyId: string; createdAt: number }>();
 
-function buildLegacyPlaceholderPlanning() {
-  return {
-    tavi: {
-      valve_size_suggestion: {
-        value: null,
-        unit: "status",
-        evidence: { method: "legacy_placeholder", source_type: "other", source_ref: "LEGACY_CASE_NO_PLANNING", confidence: 0 },
-        uncertainty: { flag: "NOT_AVAILABLE", message: "Legacy case does not provide structured TAVI planning.", clinician_review_required: true },
-      },
-    },
-    vsrr: {
-      commissural_geometry_status: {
-        value: null,
-        unit: "status",
-        evidence: { method: "legacy_placeholder", source_type: "other", source_ref: "LEGACY_CASE_NO_PLANNING", confidence: 0 },
-        uncertainty: { flag: "NOT_AVAILABLE", message: "Legacy case does not provide structured VSRR planning.", clinician_review_required: true },
-      },
-    },
-    pears: {
-      external_root_geometry_status: {
-        value: null,
-        unit: "status",
-        evidence: { method: "legacy_placeholder", source_type: "other", source_ref: "LEGACY_CASE_NO_PLANNING", confidence: 0 },
-        uncertainty: { flag: "NOT_AVAILABLE", message: "Legacy case does not provide structured PEARS planning.", clinician_review_required: true },
-      },
-    },
-  };
-}
-
 async function readDistFile(assetPath: string, encoding?: BufferEncoding) {
   const normalized = assetPath.replace(/^\//, "");
   const primaryPath = path.join(distRoot, normalized);
@@ -117,19 +88,21 @@ async function writeFetchResponse(nodeRes: http.ServerResponse, response: Respon
 }
 
 async function buildLatestCaseFixtureSummary() {
-  const summary = await buildDefaultCaseSummary(store, buildVersion);
   const workstation = await buildLatestCaseFixtureWorkstation();
   return {
-    ...summary,
     id: LATEST_CASE_ID,
     job_id: LATEST_CASE_ID,
     case_id: LATEST_CASE_ID,
-    case_role: ["latest", "legacy"],
+    case_role: ["latest", "derived_result"],
     display_name: {
       "zh-CN": "最新真实病例",
       en: "Latest Real Case",
     },
     summary_source: "latest_case_fixture",
+    build_version: buildVersion,
+    display_ready: true,
+    completion_state: "display_ready",
+    missing_requirements: [],
     downloads: workstation.downloads,
     planning_summary: workstation.planning_summary,
     acceptance_review: workstation.acceptance_review,
@@ -139,44 +112,34 @@ async function buildLatestCaseFixtureSummary() {
 
 async function buildLatestCaseFixtureWorkstation() {
   const workstation = await buildDefaultCaseWorkstationPayload(store, buildVersion);
-  const planning = buildLegacyPlaceholderPlanning();
   const payload = {
     ...workstation,
     case_id: LATEST_CASE_ID,
+    display_ready: true,
+    completion_state: "display_ready",
+    missing_requirements: [],
     display_name: {
       "zh-CN": "最新真实病例",
       en: "Latest Real Case",
     },
-    case_role: ["latest", "legacy"],
-    job: { ...(workstation.job || {}), id: LATEST_CASE_ID },
+    case_role: ["latest", "derived_result"],
+    job: { ...(workstation.job || {}), id: LATEST_CASE_ID, status: "succeeded", mode: "annotation_complete" },
     study_meta: {
       ...(workstation.study_meta || {}),
       id: LATEST_CASE_ID,
-      source_dataset: "latest-case-fixture",
-      phase: "legacy_real_case",
+      source_dataset: "latest-real-case-fixture",
+      phase: "processed_root_case",
     },
     pipeline_run: {
       ...(workstation.pipeline_run || {}),
-      source_mode: "legacy",
-      inferred: true,
-      inference_mode: "historical_inferred",
+      source_mode: "stored",
+      inferred: false,
+      inference_mode: "segmentation_v1",
+      provider_target: "mock-demo-provider",
+      provider_runtime: "demo-fixture",
+      pipeline_version: "aortic_geometry_pipeline_v3",
     },
-    planning,
-    planning_summary: {
-      tavi_status: "unavailable",
-      vsrr_status: "unavailable",
-      pears_status: "unavailable",
-    },
-    capabilities: {
-      ...(workstation.capabilities || {}),
-      pears_geometry: {
-        available: false,
-        inferred: false,
-        legacy: true,
-        source: "legacy_case",
-        reason: "legacy_case_missing_pears_artifact",
-      },
-    },
+    data_source: "real_ct_pipeline_output",
   };
   return {
     ...payload,
@@ -349,7 +312,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (path === "/jobs" && req.method === "POST") {
+  if ((path === "/jobs" || path === "/api/jobs") && req.method === "POST") {
     const raw = await new Promise<string>((resolve, reject) => {
       let body = "";
       req.setEncoding("utf8");
@@ -370,8 +333,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (path.startsWith("/jobs/") && req.method === "GET" && !path.includes("/artifacts/")) {
-    const jobId = path.split("/")[2] || "";
+  if ((path.startsWith("/jobs/") || path.startsWith("/api/jobs/")) && req.method === "GET" && !path.includes("/artifacts/")) {
+    const segments = path.split("/").filter(Boolean);
+    const jobsIndex = segments.indexOf("jobs");
+    const jobId = jobsIndex >= 0 ? (segments[jobsIndex + 1] || "") : "";
     const payload = buildJobStatus(jobId);
     if (!payload) {
       res.statusCode = 404;

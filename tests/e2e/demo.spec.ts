@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test("default showcase case renders full first-screen workstation", async ({ page }) => {
+test("default demo route prefers the real default case when a display-ready real case exists", async ({ page }) => {
   await page.goto("/demo");
   await expect(page.locator("h1")).toContainText("AorticAI");
   await expect(page.locator("#load-showcase")).toBeVisible();
@@ -20,19 +20,19 @@ test("default showcase case renders full first-screen workstation", async ({ pag
   await expect(page.locator("#acceptance-summary")).toContainText("Review Required");
   await expect(page.locator("#acceptance-list")).toContainText("Viewing");
   await expect(page.locator("#qa-list")).toBeVisible();
-  await expect(page.locator("#annotation-status")).toContainText("precomputed");
+  await expect(page.locator("#annotation-status")).toContainText(/existing auto annotation results|ready|queued|running|completed/i);
   await expect(page.locator("#download-list .download-link").first()).toBeVisible();
   await expect(page.locator("#viewport-axial")).toBeVisible();
   await expect(page.locator("#viewport-sagittal")).toBeVisible();
   await expect(page.locator("#viewport-coronal")).toBeVisible();
   await expect(page.locator("#three-root")).toBeVisible();
-  await expect(page.locator("#case-meta")).toContainText("Gold Showcase CTA Case");
+  await expect(page.locator("#case-meta")).toContainText(/Latest Real Case|Latest Case Auto Annotation/);
   await expect(page.locator("text=Debug")).toHaveCount(0);
   await expect(page.locator("text=Evidence")).toHaveCount(0);
 });
 
-test("default showcase case displays success and failure states together", async ({ page }) => {
-  await page.goto("/demo");
+test("reference case remains available as an explicit fallback route", async ({ page }) => {
+  await page.goto("/demo?case=showcase");
   await expect(page.locator("#planning-grid")).toContainText("TAVI");
   await expect(page.locator("#planning-grid")).toContainText("Access Route Assessment");
   await expect(page.locator("#planning-grid")).toContainText("Coronary Obstruction Risk");
@@ -40,10 +40,11 @@ test("default showcase case displays success and failure states together", async
   await expect(page.locator("#qa-list")).toContainText("reference");
   await expect(page.locator("#qa-list")).toContainText("Cpr Artifact Missing");
   await expect(page.locator("#capability-grid")).toContainText("unavailable");
+  await expect(page.locator("#case-meta")).toContainText("Gold Showcase CTA Case");
 });
 
 test("same workstation can switch from showcase to latest case", async ({ page }) => {
-  await page.goto("/demo");
+  await page.goto("/demo?case=showcase");
   await page.locator("#load-latest").click();
   await expect(page.locator("#case-meta")).toContainText(/Latest Real Case|Latest Case Auto Annotation/);
   await expect(page.locator("#planning-grid .metric-row").first()).toBeVisible();
@@ -89,10 +90,13 @@ test("latest case stays stable through core viewing interactions", async ({ page
   await expect(page.locator("#acceptance-list")).toContainText("Clinical");
 });
 
-test("latest case can auto-trigger annotation and keep the same workstation shell", async ({ page }) => {
+test("latest case can rerun annotation on demand and keep the same workstation shell", async ({ page }) => {
   await page.goto("/demo");
-  await page.locator("#load-latest").click();
-  await expect(page.locator("#annotation-status")).toContainText(/ready|queued|running|completed/i);
+  await expect(page.locator("#case-meta")).toContainText(/Latest Real Case|Latest Case Auto Annotation/, { timeout: 10_000 });
+  await expect(page.locator("#planning-grid .metric-row").first()).toBeVisible();
+  await expect(page.locator("#annotation-status")).toContainText(/existing auto annotation results|ready/i);
+  await page.locator("#run-annotation").click();
+  await expect(page.locator("#annotation-status")).toContainText(/queued|running|completed/i);
   await expect(page.locator("#case-meta")).toContainText("Latest Case Auto Annotation", { timeout: 10_000 });
   await expect(page.locator("#planning-grid .metric-row").first()).toBeVisible();
   await expect(page.locator("#download-list .download-link").first()).toBeVisible();

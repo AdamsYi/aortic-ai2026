@@ -2188,6 +2188,11 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     ...(caseResultMeasurements ? [{ label: "Measurements JSON", href: `/api/cases/${encodeURIComponent(resolvedCaseId)}/artifacts/measurements` }] : []),
     ...(caseResultPlanning ? [{ label: "Planning JSON", href: `/api/cases/${encodeURIComponent(resolvedCaseId)}/artifacts/planning` }] : []),
   ];
+  const caseReadiness = evaluateCaseDisplayReadiness({
+    measurements: caseResultRow?.measurements_json ?? caseResultMeasurements ?? null,
+    planning: caseResultRow?.planning_json ?? caseResultPlanning ?? null,
+    artifactTypes,
+  });
   const acceptanceReview = buildAcceptanceReview({
     pipeline_run: pipelineRun,
     viewer_bootstrap: {
@@ -2213,6 +2218,9 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
   const payload = {
     build_version: getBuildVersion(),
     case_id: resolvedCaseId,
+    display_ready: caseReadiness.display_ready,
+    completion_state: caseReadiness.completion_state,
+    missing_requirements: caseReadiness.missing_requirements,
     display_name: {
       "zh-CN": "最新真实病例",
       en: "Latest Real Case",
