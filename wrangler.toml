@@ -1,4 +1,4 @@
-name = "aortic-ai-api-production"
+name = "aortic-ai-api"
 main = "src/index.ts"
 compatibility_date = "2026-03-10"
 workers_dev = true
@@ -18,8 +18,7 @@ INFERENCE_SKIP_SEGMENTATION = "true"
 API_BASE_URL = "https://aortic-ai-api.we085197.workers.dev"
 PROVIDER_URL = "https://api.heartvalvepro.edu.kg/infer"
 PROVIDER_HEALTH_URL = "https://api.heartvalvepro.edu.kg/health"
-PROVIDER_SECRET = "aorticai-internal-2026"
-BUILD_VERSION = "67285900a4ac"
+BUILD_VERSION = "6043cb099b0e"
 
 [[r2_buckets]]
 binding = "R2_RAW"

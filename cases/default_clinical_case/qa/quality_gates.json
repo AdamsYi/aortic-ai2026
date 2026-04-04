@@ -10,9 +10,9 @@
       "confidence": 0.9
     },
     "observed_value": {
-      "sinus_diameter_mm": 35.6,
-      "annulus_equivalent_diameter_mm": 25.4,
-      "delta_mm": 10.2
+      "sinus_diameter_mm": 39.65986365529072,
+      "annulus_equivalent_diameter_mm": 24.358578615228655,
+      "delta_mm": 15.301285040062067
     },
     "expected_context": "Sinus diameter should generally exceed annulus diameter in tricuspid native root anatomy.",
     "impact": [
@@ -35,9 +35,9 @@
       "confidence": 0.89
     },
     "observed_value": {
-      "stj_diameter_mm": 31,
-      "sinus_diameter_mm": 35.6,
-      "delta_mm": 4.6
+      "stj_diameter_mm": 24.8554767959698,
+      "sinus_diameter_mm": 39.65986365529072,
+      "delta_mm": 14.804386859320919
     },
     "expected_context": "STJ typically remains smaller than sinus diameter unless there is aneurysmal remodeling.",
     "impact": [
@@ -60,9 +60,9 @@
     },
     "observed_value": {
       "commissure_angles_deg": [
-        111,
-        231,
-        351
+        15,
+        135,
+        255
       ],
       "commissure_spacings_deg": [
         120,
@@ -79,28 +79,28 @@
     ]
   },
   "coronary_height_assessment": {
-    "status": "borderline",
-    "summary": "Coronary heights are measurable and above high-risk thresholds, with residual review due to CTA ostial contour sensitivity.",
+    "status": "not_assessable",
+    "summary": "Coronary ostia were not measured reliably in this CT pipeline run and require clinician review.",
     "clinician_review_required": true,
     "evidence": {
       "method": "ostium_to_annulus_distance_consistency_check",
       "source_type": "guideline",
       "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-      "confidence": 0.83
+      "confidence": 0.0
     },
     "observed_value": {
-      "left_height_mm": 13.5,
-      "right_height_mm": 15.2,
+      "left_height_mm": null,
+      "right_height_mm": null,
       "safety_threshold_mm": 10
     },
-    "expected_context": "Coronary heights above 10 mm are generally lower risk but still require integrated procedural judgement.",
+    "expected_context": "Coronary height is only accepted when both ostia are confidently localized on the current CTA acquisition.",
     "impact": [
       "tavi.coronary_obstruction_risk",
       "tavi.access_route_assessment"
     ],
     "reason_codes": [
-      "coronary_heights_above_threshold",
-      "cta_ostial_contour_review_recommended"
+      "coronary_ostia_not_detected",
+      "manual_review_required"
     ]
   },
   "notes": [

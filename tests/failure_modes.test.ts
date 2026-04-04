@@ -6,17 +6,17 @@ import {
 import { createCaseStoreFromFs } from "../services/api/defaultCaseStore.node";
 import { WORKSTATION_BUILD_VERSION } from "../src/generated/workstationAssets";
 
-test("showcase case includes clinically populated coronary measurements", async () => {
+test("showcase case exposes unavailable coronary measurements honestly", async () => {
   const store = createCaseStoreFromFs();
   const workstation = await buildDefaultCaseWorkstationPayload(store, WORKSTATION_BUILD_VERSION);
-  const measurements = (workstation.measurements as Record<string, any>).measurements;
+  const measurements = workstation.measurements as Record<string, any>;
 
-  assert.equal(typeof measurements.coronary_height_left_mm.value, "number");
-  assert.equal(typeof measurements.coronary_height_right_mm.value, "number");
-  assert.ok(measurements.coronary_height_left_mm.value >= 12 && measurements.coronary_height_left_mm.value <= 16);
-  assert.ok(measurements.coronary_height_right_mm.value >= 14 && measurements.coronary_height_right_mm.value <= 18);
-  assert.notEqual(measurements.coronary_height_left_mm.uncertainty.flag, "PLACEHOLDER_ONLY");
-  assert.notEqual(measurements.coronary_height_right_mm.uncertainty.flag, "NOT_AVAILABLE");
+  assert.equal(measurements.coronary_height_left_mm.value, null);
+  assert.equal(measurements.coronary_height_right_mm.value, null);
+  assert.equal(measurements.coronary_height_left_mm.uncertainty.flag, "NOT_AVAILABLE");
+  assert.equal(measurements.coronary_height_right_mm.uncertainty.flag, "NOT_AVAILABLE");
+  assert.equal(measurements.coronary_height_left_mm.uncertainty.clinician_review_required, true);
+  assert.equal(measurements.coronary_height_right_mm.uncertainty.clinician_review_required, true);
 });
 
 test("showcase case uses layered clinical gates instead of hard boolean failures", async () => {
@@ -26,7 +26,7 @@ test("showcase case uses layered clinical gates instead of hard boolean failures
   assert.equal(workstation.quality_gates.sinus_annulus_relation.status, "normal");
   assert.equal(workstation.quality_gates.stj_sinus_relation.status, "normal");
   assert.equal(workstation.quality_gates.commissure_symmetry.status, "normal");
-  assert.equal(workstation.quality_gates.coronary_height_assessment.status, "borderline");
+  assert.equal(workstation.quality_gates.coronary_height_assessment.status, "not_assessable");
   assert.equal(workstation.quality_gates.coronary_height_assessment.clinician_review_required, true);
 });
 
@@ -35,13 +35,12 @@ test("showcase case includes complete tavi planning structure", async () => {
   const workstation = await buildDefaultCaseWorkstationPayload(store, WORKSTATION_BUILD_VERSION);
   const planning = workstation.planning as Record<string, any>;
 
-  assert.equal(planning.tavi.recommended_prosthesis.value.primary.brand, "Edwards SAPIEN 3");
-  assert.equal(planning.tavi.access_route.value.recommended, "transfemoral");
-  assert.equal(planning.tavi.coronary_occlusion_risk.value.lca.risk_level, "low");
-  assert.equal(planning.tavi.implant_depth_recommendation.value.value_mm, 4);
-  assert.equal(planning.tavi.sizing_method.value, "perimeter_based");
-  assert.equal(planning.vsrr.recommended_graft_diameter_mm.value, 28);
-  assert.equal(planning.pears.external_support_size.value, "medium");
+  assert.equal(planning.tavi.area_derived_valve_size.nearest_nominal_size_mm, 23);
+  assert.equal(planning.tavi.area_derived_valve_size.method, "nearest_reference_nominal_size_non_vendor_specific");
+  assert.equal(planning.tavi.coronary_height_left_mm, null);
+  assert.equal(planning.tavi.coronary_height_right_mm, null);
+  assert.equal(planning.vsrr.recommended_graft_size_mm, 24.6);
+  assert.equal(planning.pears.root_external_reference_diameter_mm, 39.65986365529072);
 });
 
 test("showcase case keeps CPR unavailable while retaining real leaflet geometry", async () => {

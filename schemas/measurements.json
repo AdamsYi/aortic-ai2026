@@ -3,152 +3,73 @@
   "$id": "https://aorticai.local/schemas/measurements.json",
   "title": "AorticAI Measurements Artifact",
   "type": "object",
-  "required": ["measurements", "constraints"],
-  "properties": {
-    "measurements": {
+  "$defs": {
+    "SimpleScalarMeasurement": {
       "type": "object",
-      "required": [
-        "annulus_equivalent_diameter_mm",
-        "annulus_area_mm2",
-        "annulus_perimeter_mm",
-        "sinus_diameter_mm",
-        "stj_diameter_mm",
-        "ascending_aorta_diameter_mm",
-        "coronary_height_left_mm",
-        "coronary_height_right_mm",
-        "leaflet_effective_height_mm",
-        "calcium_burden_ml"
-      ],
+      "required": ["value", "unit", "evidence", "uncertainty"],
       "properties": {
-        "annulus_equivalent_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "annulus_area_mm2": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "annulus_perimeter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "sinus_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "stj_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "ascending_aorta_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "coronary_height_left_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "coronary_height_right_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "leaflet_effective_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "calcium_burden_ml": { "$ref": "common.json#/$defs/ScalarMeasurement" }
-      },
-      "additionalProperties": true
-    },
-    "measurements_raw": {
-      "type": "object",
-      "properties": {
-        "sinus_of_valsalva": {
+        "value": { "type": ["number", "string", "boolean", "null"] },
+        "unit": { "type": "string" },
+        "evidence": {
           "type": "object",
+          "required": ["method", "confidence"],
           "properties": {
-            "uncertainty_flag": {
-              "type": "string",
-              "enum": [
-                "NONE",
-                "MISSING_INPUT",
-                "DETECTION_FAILED",
-                "LOW_CONFIDENCE",
-                "ANATOMY_CONSTRAINT_VIOLATION",
-                "OUT_OF_RANGE",
-                "IMAGE_QUALITY_LIMITATION",
-                "MODEL_INCONSISTENCY",
-                "PLACEHOLDER_ONLY",
-                "NOT_AVAILABLE"
-              ]
-            },
-            "constraint_note": { "type": "string" }
+            "method": { "type": "string" },
+            "confidence": { "type": "number" },
+            "source_type": { "type": "string" },
+            "source_ref": { "type": "string" }
           },
           "additionalProperties": true
         },
-        "stj": {
+        "uncertainty": {
           "type": "object",
+          "required": ["flag", "clinician_review_required"],
           "properties": {
-            "uncertainty_flag": {
-              "type": "string",
-              "enum": [
-                "NONE",
-                "MISSING_INPUT",
-                "DETECTION_FAILED",
-                "LOW_CONFIDENCE",
-                "ANATOMY_CONSTRAINT_VIOLATION",
-                "OUT_OF_RANGE",
-                "IMAGE_QUALITY_LIMITATION",
-                "MODEL_INCONSISTENCY",
-                "PLACEHOLDER_ONLY",
-                "NOT_AVAILABLE"
-              ]
-            },
-            "constraint_note": { "type": "string" }
+            "flag": { "type": "string" },
+            "clinician_review_required": { "type": "boolean" },
+            "message": { "type": "string" }
           },
           "additionalProperties": true
         }
-      },
-      "additionalProperties": true
-    },
-    "measurements_regularized": {
-      "type": "object",
-      "properties": {
-        "sinus_of_valsalva": {
-          "type": "object",
-          "properties": {
-            "uncertainty_flag": {
-              "type": "string",
-              "enum": [
-                "NONE",
-                "MISSING_INPUT",
-                "DETECTION_FAILED",
-                "LOW_CONFIDENCE",
-                "ANATOMY_CONSTRAINT_VIOLATION",
-                "OUT_OF_RANGE",
-                "IMAGE_QUALITY_LIMITATION",
-                "MODEL_INCONSISTENCY",
-                "PLACEHOLDER_ONLY",
-                "NOT_AVAILABLE"
-              ]
-            },
-            "constraint_note": { "type": "string" }
-          },
-          "additionalProperties": true
-        },
-        "stj": {
-          "type": "object",
-          "properties": {
-            "uncertainty_flag": {
-              "type": "string",
-              "enum": [
-                "NONE",
-                "MISSING_INPUT",
-                "DETECTION_FAILED",
-                "LOW_CONFIDENCE",
-                "ANATOMY_CONSTRAINT_VIOLATION",
-                "OUT_OF_RANGE",
-                "IMAGE_QUALITY_LIMITATION",
-                "MODEL_INCONSISTENCY",
-                "PLACEHOLDER_ONLY",
-                "NOT_AVAILABLE"
-              ]
-            },
-            "constraint_note": { "type": "string" }
-          },
-          "additionalProperties": true
-        }
-      },
-      "additionalProperties": true
-    },
-    "constraints": {
-      "type": "object",
-      "required": [
-        "sinus_annulus_relation",
-        "stj_sinus_relation",
-        "commissure_symmetry",
-        "coronary_height_assessment"
-      ],
-      "properties": {
-        "sinus_annulus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "stj_sinus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "commissure_symmetry": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "coronary_height_assessment": { "$ref": "common.json#/$defs/ClinicalGate" }
       },
       "additionalProperties": true
     }
+  },
+  "required": [
+    "annulus_equivalent_diameter_mm",
+    "annulus_short_diameter_mm",
+    "annulus_long_diameter_mm",
+    "annulus_area_mm2",
+    "annulus_perimeter_mm",
+    "sinus_diameter_mm",
+    "stj_diameter_mm",
+    "ascending_aorta_diameter_mm",
+    "lvot_diameter_mm",
+    "coronary_height_left_mm",
+    "coronary_height_right_mm",
+    "calcium_burden_ml",
+    "leaflet_effective_height_mm",
+    "leaflet_coaptation_height_mm",
+    "leaflet_geometric_height_mm"
+  ],
+  "properties": {
+    "annulus_equivalent_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "annulus_short_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "annulus_long_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "annulus_area_mm2": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "annulus_perimeter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "sinus_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "stj_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "ascending_aorta_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "lvot_diameter_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "coronary_height_left_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "coronary_height_right_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "calcium_burden_ml": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "leaflet_effective_height_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "leaflet_coaptation_height_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "leaflet_geometric_height_mm": { "$ref": "#/$defs/SimpleScalarMeasurement" },
+    "_conversion_meta": { "type": "object" },
+    "_pipeline_raw": { "type": "object" }
   },
   "additionalProperties": true
 }

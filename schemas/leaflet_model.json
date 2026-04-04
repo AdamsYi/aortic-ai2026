@@ -3,47 +3,100 @@
   "$id": "https://aorticai.local/schemas/leaflet_model.json",
   "title": "AorticAI Leaflet Model",
   "type": "object",
-  "required": ["leaflets", "evidence", "uncertainty"],
+  "required": [
+    "status",
+    "coaptation_height_mm",
+    "effective_height_mean_mm",
+    "geometric_height_mean_mm",
+    "leaflets"
+  ],
   "properties": {
-    "leaflets": {
+    "status": { "type": "string" },
+    "coaptation_height_mm": { "type": ["number", "null"] },
+    "coaptation_surface_area_mm2": { "type": ["number", "null"] },
+    "coaptation_level_mm": { "type": ["number", "null"] },
+    "raw_coaptation_height_mm": { "type": ["number", "null"] },
+    "effective_height_mean_mm": { "type": ["number", "null"] },
+    "geometric_height_mean_mm": { "type": ["number", "null"] },
+    "root_symmetry_index": { "type": ["number", "null"] },
+    "hinge_lines": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
       "items": {
         "type": "object",
-        "required": [
-          "cusp_label",
-          "status",
-          "confidence",
-          "geometric_height_mm",
-          "effective_height_mm",
-          "coaptation_height_mm",
-          "evidence",
-          "uncertainty"
-        ],
+        "required": ["leaflet_id", "point_count", "status"],
         "properties": {
-          "cusp_label": { "type": "string", "enum": ["L", "N", "R"] },
-          "status": { "type": "string" },
-          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-          "hinge_curve_world": {
-            "type": "array",
-            "items": { "$ref": "common.json#/$defs/Vector3" }
-          },
-          "free_edge_world": {
-            "type": "array",
-            "items": { "$ref": "common.json#/$defs/Vector3" }
-          },
-          "geometric_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-          "effective_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-          "coaptation_height_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-          "evidence": { "$ref": "common.json#/$defs/Evidence" },
-          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          "leaflet_id": { "type": ["string", "number"] },
+          "point_count": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string" }
         },
         "additionalProperties": true
       }
     },
-    "evidence": { "$ref": "common.json#/$defs/Evidence" },
-    "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+    "commissures": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["id", "world", "method"],
+        "properties": {
+          "id": { "type": "string" },
+          "world": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "method": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "regularization": {
+      "type": "object",
+      "properties": {
+        "applied": { "type": "boolean" },
+        "mode": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "leaflets": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "leaflet_id",
+          "name",
+          "geometric_height_mm",
+          "effective_height_mm",
+          "status"
+        ],
+        "properties": {
+          "leaflet_id": { "type": ["string", "number"] },
+          "name": { "type": "string" },
+          "geometric_height_mm": { "type": ["number", "null"] },
+          "effective_height_mm": { "type": ["number", "null"] },
+          "free_edge_height_mm": { "type": ["number", "null"] },
+          "raw_geometric_height_mm": { "type": ["number", "null"] },
+          "raw_effective_height_mm": { "type": ["number", "null"] },
+          "raw_free_edge_height_mm": { "type": ["number", "null"] },
+          "hinge_point_count": { "type": "integer", "minimum": 0 },
+          "mesh_vertices": { "type": "integer", "minimum": 0 },
+          "mesh_faces": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string" },
+          "regularized": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "mesh": {
+      "type": "object",
+      "properties": {
+        "vertices": { "type": "integer", "minimum": 0 },
+        "faces": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

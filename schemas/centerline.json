@@ -5,37 +5,46 @@
   "type": "object",
   "required": [
     "method",
-    "status",
-    "confidence",
-    "fallback_reason",
-    "points_world",
-    "tangents_world",
-    "s_mm",
-    "radii_mm",
-    "branch_graph",
-    "evidence",
-    "uncertainty"
+    "point_count",
+    "annulus_index",
+    "stj_index",
+    "sinus_peak_index",
+    "ascending_reference_index",
+    "skeletonization",
+    "quality"
   ],
   "properties": {
     "method": { "type": "string" },
-    "status": { "type": "string" },
-    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-    "fallback_reason": { "type": ["string", "null"] },
-    "points_world": {
-      "type": "array",
-      "minItems": 3,
-      "items": { "$ref": "common.json#/$defs/Vector3" }
-    },
-    "tangents_world": {
-      "type": "array",
-      "minItems": 3,
-      "items": { "$ref": "common.json#/$defs/Vector3" }
-    },
-    "s_mm": { "type": "array", "items": { "type": "number" } },
-    "radii_mm": { "type": "array", "items": { "type": "number" } },
-    "branch_graph": { "type": ["object", "null"] },
-    "evidence": { "$ref": "common.json#/$defs/Evidence" },
-    "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+    "point_count": { "type": "integer", "minimum": 1 },
+    "annulus_index": { "type": "integer", "minimum": 0 },
+    "stj_index": { "type": "integer", "minimum": 0 },
+    "sinus_peak_index": { "type": "integer", "minimum": 0 },
+    "ascending_reference_index": { "type": "integer", "minimum": 0 },
+    "skeletonization": { "type": "string" },
+    "quality": {
+      "type": "object",
+      "required": [
+        "point_count",
+        "total_length_mm",
+        "mean_radius_mm",
+        "min_radius_mm",
+        "smoothness_score",
+        "method",
+        "quality_flag",
+        "uncertainty_flag"
+      ],
+      "properties": {
+        "point_count": { "type": "integer", "minimum": 1 },
+        "total_length_mm": { "type": "number" },
+        "mean_radius_mm": { "type": "number" },
+        "min_radius_mm": { "type": "number" },
+        "smoothness_score": { "type": "number" },
+        "method": { "type": "string" },
+        "quality_flag": { "type": "string" },
+        "uncertainty_flag": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

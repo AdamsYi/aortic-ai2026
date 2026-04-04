@@ -8,6 +8,13 @@ export interface CapabilityResolutionInput {
   planning: Record<string, unknown>;
 }
 
+function readNumeric(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
 function fromManifest(manifest: Record<string, unknown>, key: string): CapabilityState {
   const value = pickObject(pickObject(manifest.capabilities)?.[key]);
   return {
@@ -27,6 +34,9 @@ export function resolveCapabilityState(input: CapabilityResolutionInput): Record
   const pears = fromManifest(manifest, "pears_geometry");
 
   const coronaryOstia = pickObject(model.coronary_ostia);
+  const leftCoronary = pickObject(coronaryOstia?.left_coronary ?? coronaryOstia?.left);
+  const rightCoronary = pickObject(coronaryOstia?.right_coronary ?? coronaryOstia?.right);
+  const coronaryMeasured = [leftCoronary, rightCoronary].some((entry) => readNumeric(entry?.height_mm, entry?.height_above_annulus_mm) !== null);
   const leafletArray = Array.isArray(leafletModel.leaflets) ? leafletModel.leaflets : [];
   const pearsPlanning = pickObject(pickObject(planning.pears)?.external_root_geometry_status);
 
@@ -38,7 +48,8 @@ export function resolveCapabilityState(input: CapabilityResolutionInput): Record
     },
     coronary_ostia: {
       ...coronary,
-      available: Boolean(coronary.available && coronaryOstia),
+      available: Boolean(coronary.available && coronaryMeasured),
+      reason: coronaryMeasured ? coronary.reason : (coronary.reason || "coronary_ostia_not_measurable"),
     },
     leaflet_geometry: {
       ...leaflet,

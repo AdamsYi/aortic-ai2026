@@ -12,20 +12,18 @@ test("planning artifact keeps required planning sections and supports per-field 
   const planning = JSON.parse(fs.readFileSync(planningPath, "utf8")) as Record<string, any>;
   const requiredKeys: Record<"tavi" | "vsrr" | "pears", string[]> = {
     tavi: [
-      "valve_size_suggestion",
-      "access_route_assessment",
-      "coronary_obstruction_risk",
-      "implant_depth",
-      "optimal_projection_angle",
+      "area_derived_valve_size",
+      "coronary_risk_flag",
+      "stj_diameter_mm",
     ],
     vsrr: [
-      "graft_sizing",
-      "commissural_geometry_status",
-      "leaflet_geometry_status",
+      "recommended_graft_size_mm",
+      "annulus_stj_mismatch_mm",
+      "coaptation_height_mm",
     ],
     pears: [
-      "external_root_geometry_status",
-      "support_region_status",
+      "root_external_reference_diameter_mm",
+      "support_segment_length_mm",
     ],
   };
 
@@ -37,8 +35,8 @@ test("planning artifact keeps required planning sections and supports per-field 
   }
 
   assert.equal(
-    planning.vsrr.key_geometry_ratio,
+    planning.tavi.access_route_assessment,
     undefined,
-    "vsrr.key_geometry_ratio should currently be missing and rendered by UI-level fallback"
+    "tavi.access_route_assessment should currently be missing and rendered by UI-level fallback"
   );
 });

@@ -45,7 +45,7 @@ test("default case list is derived from manifest fields", async () => {
     en: "Gold Showcase CTA Case",
   });
   assert.equal(listing.cases[0]?.scan_date, "2026-02-14");
-  assert.equal(listing.cases[0]?.pipeline_version, "showcase_pipeline_v2");
+  assert.equal(listing.cases[0]?.pipeline_version, "aortic_geometry_pipeline_v3");
   assert.equal(listing.cases[0]?.has_planning, true);
   assert.equal(listing.cases[0]?.has_measurements, true);
   assert.equal(listing.cases[0]?.has_meshes, true);
@@ -60,9 +60,12 @@ test("default case workstation payload includes planning and downloads", async (
   assert.ok(Array.isArray(workstation.downloads.stl) && workstation.downloads.stl.length > 0);
   assert.equal(typeof workstation.downloads.raw, "object");
   assert.equal(typeof workstation.downloads.pdf, "object");
-  assert.ok(workstation.pears_geometry);
+  assert.equal(workstation.pears_geometry, null);
   assert.ok(workstation.planning?.tavi);
-  assert.equal(workstation.quality_gates?.coronary_height_assessment?.status, "borderline");
+  assert.equal(workstation.planning_summary?.tavi_status, "review_required");
+  assert.equal(workstation.planning_summary?.vsrr_status, "available");
+  assert.equal(workstation.planning_summary?.pears_status, "available");
+  assert.equal(workstation.quality_gates?.coronary_height_assessment?.status, "not_assessable");
   assert.equal(workstation.quality_gates?.coronary_height_assessment?.clinician_review_required, true);
   assert.equal(workstation.acceptance_review?.overall_status, "needs_review");
   assert.equal(workstation.acceptance_review?.domains?.viewing?.status, "pass");

@@ -4,9 +4,7 @@
   "title": "AorticRootComputationalModel",
   "type": "object",
   "required": [
-    "model_id",
-    "case_id",
-    "coordinate_system",
+    "model_type",
     "centerline",
     "annulus_ring",
     "hinge_curve",
@@ -15,48 +13,80 @@
     "sinotubular_junction",
     "ascending_aorta_axis",
     "coronary_ostia",
-    "leaflet_meshes",
-    "quality_gates"
+    "leaflet_meshes"
   ],
   "properties": {
-    "model_id": { "type": "string" },
-    "case_id": { "type": "string" },
-    "coordinate_system": { "type": "string" },
-    "centerline": { "$ref": "centerline.json" },
+    "model_type": { "type": "string" },
+    "centerline": {
+      "type": "object",
+      "required": ["point_count", "points_world"],
+      "properties": {
+        "point_count": { "type": "integer", "minimum": 1 },
+        "points_world": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "annulus_ring": {
       "type": "object",
-      "required": ["origin_world", "normal_world", "ring_points_world", "evidence", "uncertainty"],
+      "required": ["center_world", "normal_world", "equivalent_diameter_mm"],
       "properties": {
-        "origin_world": { "$ref": "common.json#/$defs/Vector3" },
-        "normal_world": { "$ref": "common.json#/$defs/Vector3" },
-        "ring_points_world": { "type": "array", "items": { "$ref": "common.json#/$defs/Vector3" } },
-        "evidence": { "$ref": "common.json#/$defs/Evidence" },
-        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        "center_world": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "normal_world": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "equivalent_diameter_mm": { "type": "number" }
       },
       "additionalProperties": true
     },
     "hinge_curve": {
       "type": "object",
-      "required": ["points_world", "evidence", "uncertainty"],
+      "required": ["point_count", "points_world"],
       "properties": {
-        "points_world": { "type": "array", "items": { "$ref": "common.json#/$defs/Vector3" } },
-        "evidence": { "$ref": "common.json#/$defs/Evidence" },
-        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        "point_count": { "type": "integer", "minimum": 1 },
+        "points_world": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        }
       },
       "additionalProperties": true
     },
     "commissures": {
       "type": "array",
       "minItems": 3,
-      "maxItems": 3,
       "items": {
         "type": "object",
-        "required": ["name", "point_world", "evidence", "uncertainty"],
+        "required": ["id", "world"],
         "properties": {
-          "name": { "type": "string" },
-          "point_world": { "$ref": "common.json#/$defs/Vector3" },
-          "evidence": { "$ref": "common.json#/$defs/Evidence" },
-          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          "id": { "type": "string" },
+          "world": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
         },
         "additionalProperties": true
       }
@@ -64,38 +94,57 @@
     "sinus_peaks": {
       "type": "array",
       "minItems": 3,
-      "maxItems": 3,
       "items": {
         "type": "object",
-        "required": ["name", "point_world", "evidence", "uncertainty"],
+        "required": ["id", "world"],
         "properties": {
-          "name": { "type": "string" },
-          "point_world": { "$ref": "common.json#/$defs/Vector3" },
-          "evidence": { "$ref": "common.json#/$defs/Evidence" },
-          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          "id": { "type": "string" },
+          "world": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
         },
         "additionalProperties": true
       }
     },
     "sinotubular_junction": {
       "type": "object",
-      "required": ["origin_world", "normal_world", "evidence", "uncertainty"],
+      "required": ["center_world", "normal_world", "equivalent_diameter_mm"],
       "properties": {
-        "origin_world": { "$ref": "common.json#/$defs/Vector3" },
-        "normal_world": { "$ref": "common.json#/$defs/Vector3" },
-        "evidence": { "$ref": "common.json#/$defs/Evidence" },
-        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        "center_world": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "normal_world": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "equivalent_diameter_mm": { "type": "number" }
       },
       "additionalProperties": true
     },
     "ascending_aorta_axis": {
       "type": "object",
-      "required": ["origin_world", "direction_world", "evidence", "uncertainty"],
+      "required": ["start_world", "end_world"],
       "properties": {
-        "origin_world": { "$ref": "common.json#/$defs/Vector3" },
-        "direction_world": { "$ref": "common.json#/$defs/Vector3" },
-        "evidence": { "$ref": "common.json#/$defs/Evidence" },
-        "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+        "start_world": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "end_world": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        }
       },
       "additionalProperties": true
     },
@@ -105,42 +154,43 @@
       "properties": {
         "left": {
           "type": "object",
-          "required": ["status", "point_world", "evidence", "uncertainty"],
+          "required": ["status", "clinician_review_required"],
           "properties": {
             "status": { "type": "string" },
             "clinician_review_required": { "type": "boolean" },
-            "point_world": { "anyOf": [{ "$ref": "common.json#/$defs/Vector3" }, { "type": "null" }] },
-            "evidence": { "$ref": "common.json#/$defs/Evidence" },
-            "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+            "height_mm": { "type": ["number", "null"] },
+            "ostium_world": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                { "type": "null" }
+              ]
+            }
           },
           "additionalProperties": true
         },
         "right": {
           "type": "object",
-          "required": ["status", "point_world", "evidence", "uncertainty"],
+          "required": ["status", "clinician_review_required"],
           "properties": {
             "status": { "type": "string" },
             "clinician_review_required": { "type": "boolean" },
-            "point_world": { "anyOf": [{ "$ref": "common.json#/$defs/Vector3" }, { "type": "null" }] },
-            "evidence": { "$ref": "common.json#/$defs/Evidence" },
-            "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
-          },
-          "additionalProperties": true
-        },
-        "clinician_review_required": { "type": "boolean" },
-        "expected_height_mm": { "type": "number" }
-      },
-      "additionalProperties": true
-    },
-    "reference_sections": {
-      "type": "object",
-      "properties": {
-        "geometry_stats": {
-          "type": "object",
-          "properties": {
-            "regularization_applied": { "type": "boolean" },
-            "regularization_reason": { "type": "string" },
-            "primary_spacing_error_deg": { "type": "number" }
+            "height_mm": { "type": ["number", "null"] },
+            "ostium_world": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                { "type": "null" }
+              ]
+            }
           },
           "additionalProperties": true
         }
@@ -149,34 +199,17 @@
     },
     "leaflet_meshes": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
+      "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["cusp_label", "mesh_path", "evidence", "uncertainty"],
+        "required": ["leaflet_id", "name", "status"],
         "properties": {
-          "cusp_label": { "type": "string" },
-          "mesh_path": { "type": "string" },
-          "evidence": { "$ref": "common.json#/$defs/Evidence" },
-          "uncertainty": { "$ref": "common.json#/$defs/Uncertainty" }
+          "leaflet_id": { "type": ["string", "number"] },
+          "name": { "type": "string" },
+          "status": { "type": "string" }
         },
         "additionalProperties": true
       }
-    },
-    "quality_gates": {
-      "type": "object",
-      "required": ["sinus_annulus_relation", "stj_sinus_relation", "commissure_symmetry", "coronary_height_assessment", "notes"],
-      "properties": {
-        "sinus_annulus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "stj_sinus_relation": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "commissure_symmetry": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "coronary_height_assessment": { "$ref": "common.json#/$defs/ClinicalGate" },
-        "notes": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
-      },
-      "additionalProperties": true
     }
   },
   "additionalProperties": true

@@ -52,11 +52,11 @@
       "reason": "cpr_artifact_missing"
     },
     "coronary_ostia": {
-      "available": true,
+      "available": false,
       "inferred": false,
       "legacy": false,
-      "source": "artifact",
-      "reason": null
+      "source": "unavailable",
+      "reason": "coronary_ostia_not_measurable"
     },
     "leaflet_geometry": {
       "available": true,
@@ -72,130 +72,5 @@
       "source": "planning_artifact",
       "reason": "derived_from_showcase_root_model"
     }
-  },
-  "planning_summary": {
-    "tavi_status": "available",
-    "vsrr_status": "available",
-    "pears_status": "available"
-  },
-  "quality_gates_summary": {
-    "sinus_annulus_relation": {
-      "status": "normal",
-      "summary": "Sinus diameter remains clearly larger than annulus size in the showcase root.",
-      "clinician_review_required": false,
-      "evidence": {
-        "method": "showcase_root_geometry_consistency_check",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.9
-      },
-      "observed_value": {
-        "sinus_diameter_mm": 32.61,
-        "annulus_equivalent_diameter_mm": 20.96,
-        "delta_mm": 11.65
-      },
-      "expected_context": "Sinus diameter is usually larger than annulus in a tricuspid root unless segmentation or section selection is wrong.",
-      "impact": [
-        "tavi.valve_size_suggestion",
-        "vsrr.graft_sizing",
-        "pears.external_root_geometry_status"
-      ],
-      "reason_codes": [
-        "sinus_diameter_exceeds_annulus"
-      ]
-    },
-    "stj_sinus_relation": {
-      "status": "normal",
-      "summary": "STJ diameter stays below the sinus reference diameter and looks internally consistent.",
-      "clinician_review_required": false,
-      "evidence": {
-        "method": "showcase_root_geometry_consistency_check",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.89
-      },
-      "observed_value": {
-        "stj_diameter_mm": 26.48,
-        "sinus_diameter_mm": 32.61,
-        "delta_mm": 6.13
-      },
-      "expected_context": "STJ is expected to remain narrower than the sinus reference in routine tricuspid root morphology.",
-      "impact": [
-        "vsrr.graft_sizing",
-        "pears.support_region_status"
-      ],
-      "reason_codes": [
-        "stj_below_sinus_reference"
-      ]
-    },
-    "commissure_symmetry": {
-      "status": "normal",
-      "summary": "Commissure spacing is balanced enough for a tricuspid showcase root and does not suggest landmark drift.",
-      "clinician_review_required": false,
-      "evidence": {
-        "method": "commissure_angle_spacing_check",
-        "source_type": "literature",
-        "source_ref": "VSRR_EFFECTIVE_HEIGHT_LIT",
-        "confidence": 0.83
-      },
-      "observed_value": {
-        "commissure_angles_deg": [
-          110,
-          230,
-          350
-        ],
-        "commissure_spacings_deg": [
-          120,
-          120,
-          120
-        ]
-      },
-      "expected_context": "Tricuspid commissural spacing is judged clinically as balanced rather than forced to an exact 120 degree mechanical rule.",
-      "impact": [
-        "vsrr.commissural_geometry_status"
-      ],
-      "reason_codes": [
-        "commissure_spacing_clinically_balanced"
-      ]
-    },
-    "coronary_height_assessment": {
-      "status": "borderline",
-      "summary": "Coronary heights are measurable and above high-risk thresholds, with residual review due to CTA ostial contour sensitivity.",
-      "clinician_review_required": true,
-      "evidence": {
-        "method": "ostium_to_annulus_distance_consistency_check",
-        "source_type": "guideline",
-        "source_ref": "SCCT_TAVI_CT_CONSENSUS",
-        "confidence": 0.83
-      },
-      "observed_value": {
-        "left_height_mm": 13.5,
-        "right_height_mm": 15.2,
-        "safety_threshold_mm": 10
-      },
-      "expected_context": "Coronary heights above 10 mm are generally lower risk but still require integrated procedural judgement.",
-      "impact": [
-        "tavi.coronary_obstruction_risk",
-        "tavi.access_route_assessment"
-      ],
-      "reason_codes": [
-        "coronary_heights_above_threshold",
-        "cta_ostial_contour_review_recommended"
-      ]
-    }
-  },
-  "uncertainty_summary": {
-    "clinician_review_required": true,
-    "failing_fields": [
-      "access_route_assessment"
-    ],
-    "clinical_gate_overview": {
-      "review_required": [
-        "coronary_height_assessment"
-      ],
-      "not_assessable": [],
-      "failed": []
-    },
-    "pipeline_risk_flags": 3
   }
 }

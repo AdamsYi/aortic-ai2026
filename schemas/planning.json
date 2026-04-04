@@ -8,72 +8,122 @@
     "tavi": {
       "type": "object",
       "required": [
-        "valve_size_suggestion",
-        "recommended_prosthesis",
-        "access_route",
-        "coronary_obstruction_risk",
-        "coronary_occlusion_risk",
-        "optimal_projection_angle",
-        "access_route_assessment",
-        "implant_depth_recommendation",
-        "annulus_rupture_risk",
-        "sizing_method",
-        "oversizing_ratio"
+        "annulus_area_mm2",
+        "annulus_perimeter_mm",
+        "annulus_diameter_short_mm",
+        "annulus_diameter_long_mm",
+        "coronary_height_left_mm",
+        "coronary_height_right_mm",
+        "sinus_width_mm",
+        "stj_diameter_mm",
+        "area_derived_valve_size",
+        "coronary_risk_flag",
+        "valve_calcium_burden"
       ],
       "properties": {
-        "valve_size_suggestion": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "area_derived_valve_size": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "recommended_prosthesis": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "access_route": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "coronary_obstruction_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "coronary_occlusion_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "optimal_projection_angle": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "access_route_assessment": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "implant_depth_recommendation": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "annulus_rupture_risk": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "sizing_method": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "oversizing_ratio": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "implant_depth": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+        "annulus_area_mm2": { "type": "number" },
+        "annulus_perimeter_mm": { "type": "number" },
+        "annulus_diameter_short_mm": { "type": "number" },
+        "annulus_diameter_long_mm": { "type": "number" },
+        "coronary_height_left_mm": { "type": ["number", "null"] },
+        "coronary_height_right_mm": { "type": ["number", "null"] },
+        "sinus_width_mm": { "type": "number" },
+        "stj_diameter_mm": { "type": "number" },
+        "area_derived_valve_size": {
+          "type": "object",
+          "required": [
+            "reference_nominal_sizes_mm",
+            "nearest_nominal_size_mm",
+            "area_derived_diameter_mm",
+            "method"
+          ],
+          "properties": {
+            "reference_nominal_sizes_mm": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 1
+            },
+            "nearest_nominal_size_mm": { "type": "number" },
+            "area_derived_diameter_mm": { "type": "number" },
+            "method": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "coronary_risk_flag": { "type": "boolean" },
+        "valve_calcium_burden": {
+          "type": "object",
+          "required": ["threshold_hu", "calc_voxels", "calc_volume_ml", "method"],
+          "properties": {
+            "threshold_hu": { "type": "number" },
+            "calc_voxels": { "type": "number" },
+            "calc_volume_ml": { "type": "number" },
+            "method": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "area_derived_valve_size_metadata": { "type": "object" },
+        "coronary_risk_flag_metadata": { "type": "object" }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "vsrr": {
       "type": "object",
       "required": [
-        "commissural_geometry_status",
-        "leaflet_geometry_status",
-        "graft_sizing",
-        "recommended_graft_diameter_mm",
-        "key_geometry",
-        "procedure_feasibility"
+        "annulus_diameter_mm",
+        "sinus_diameter_mm",
+        "stj_diameter_mm",
+        "lvot_diameter_mm",
+        "recommended_graft_size_mm",
+        "annulus_stj_mismatch_mm",
+        "coaptation_height_mm",
+        "effective_height_mean_mm",
+        "coaptation_reserve_mm"
       ],
       "properties": {
-        "commissural_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "leaflet_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "graft_sizing": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "recommended_graft_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "key_geometry": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "procedure_feasibility": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+        "annulus_diameter_mm": { "type": "number" },
+        "sinus_diameter_mm": { "type": "number" },
+        "stj_diameter_mm": { "type": "number" },
+        "lvot_diameter_mm": { "type": "number" },
+        "recommended_graft_size_mm": { "type": "number" },
+        "annulus_stj_mismatch_mm": { "type": "number" },
+        "coaptation_height_mm": { "type": "number" },
+        "effective_height_mean_mm": { "type": "number" },
+        "coaptation_reserve_mm": { "type": "number" },
+        "recommended_graft_size_metadata": { "type": "object" },
+        "coaptation_reserve_metadata": { "type": "object" }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "pears": {
       "type": "object",
       "required": [
-        "external_root_geometry_status",
-        "support_region_status",
-        "external_support_size",
-        "root_compliance_estimate",
-        "max_sinus_diameter_mm"
+        "root_external_geometry",
+        "root_external_reference_diameter_mm",
+        "support_segment_length_mm",
+        "annulus_plane"
       ],
       "properties": {
-        "external_root_geometry_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "support_region_status": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "external_support_size": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "root_compliance_estimate": { "$ref": "common.json#/$defs/ScalarMeasurement" },
-        "max_sinus_diameter_mm": { "$ref": "common.json#/$defs/ScalarMeasurement" }
+        "root_external_geometry": {
+          "type": "object",
+          "required": [
+            "annulus_reference_mm",
+            "sinus_reference_mm",
+            "stj_reference_mm"
+          ],
+          "properties": {
+            "annulus_reference_mm": { "type": "number" },
+            "sinus_reference_mm": { "type": "number" },
+            "stj_reference_mm": { "type": "number" }
+          },
+          "additionalProperties": true
+        },
+        "root_external_reference_diameter_mm": { "type": "number" },
+        "support_segment_length_mm": { "type": "number" },
+        "annulus_plane": { "type": "object" },
+        "root_external_geometry_metadata": { "type": "object" },
+        "device_mesh_export_metadata": { "type": "object" }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     }
   },
   "additionalProperties": false

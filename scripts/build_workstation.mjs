@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const distRoot = path.join(repoRoot, 'dist');
 const distAssetsRoot = path.join(distRoot, 'assets');
+const wranglerPath = path.join(repoRoot, 'wrangler.toml');
 
 const appEntry = path.join(repoRoot, 'apps/web/src/main.ts');
 const workerEntry = path.join(repoRoot, 'apps/web/src/dicomZip.worker.ts');
@@ -85,6 +86,17 @@ function extractConst(source, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = source.match(new RegExp(`export const ${escaped} = "([^"]*)";`));
   return match ? match[1] : null;
+}
+
+async function syncWranglerBuildVersion(buildVersion) {
+  const original = await readFile(wranglerPath, 'utf8');
+  if (!/BUILD_VERSION = ".*?"/.test(original)) {
+    throw new Error('failed_to_find_build_version_in_wrangler');
+  }
+  const updated = original.replace(/BUILD_VERSION = ".*?"/, `BUILD_VERSION = "${buildVersion}"`);
+  if (updated !== original) {
+    await writeFile(wranglerPath, updated, 'utf8');
+  }
 }
 
 const browserBuiltinShimPlugin = {
@@ -203,4 +215,5 @@ export const WORKSTATION_DICOM_WORKER_PATH = ${JSON.stringify(`/assets/${dicomWo
 `;
 
 await writeFile(outputPath, moduleSource, 'utf8');
+await syncWranglerBuildVersion(buildVersion);
 console.log(`Generated ${path.relative(repoRoot, outputPath)} (${buildVersion})`);

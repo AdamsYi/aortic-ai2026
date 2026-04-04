@@ -1056,7 +1056,8 @@ function deriveLegacyUncertaintySummary(
 
 function buildLatestCaseSummaryFromWorkstationPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const job = pickObject(payload.job);
-  const jobId = String(job?.id || payload.case_id || "");
+  const caseId = String(payload.case_id || job?.result_case_id || job?.id || "");
+  const jobId = String(job?.id || caseId || "");
   const studyMeta = pickObject(payload.study_meta);
   const planning = pickObject(payload.planning);
   const qualityGates = pickObject(payload.quality_gates_summary) || pickObject(payload.quality_gates);
@@ -1065,7 +1066,7 @@ function buildLatestCaseSummaryFromWorkstationPayload(payload: Record<string, un
   return {
     id: jobId,
     job_id: jobId,
-    case_id: jobId,
+    case_id: caseId,
     case_role: ["latest", "legacy"],
     display_name: payload.display_name || {
       "zh-CN": "最新真实病例",
@@ -1211,11 +1212,15 @@ export default {
       if (request.method === "GET" && /^\/api\/cases\/[^/]+\/summary$/.test(path)) {
         const parts = path.split("/");
         const caseId = decodeURIComponent(parts[3] || "");
-        if (caseId !== DEFAULT_CASE_ID) {
-          return respond(json({ error: "case_not_found" }, 404));
+        if (caseId === DEFAULT_CASE_ID) {
+          return respond(await handleDefaultCaseSummary(getDefaultCaseStore(env, request), getBuildVersion()));
         }
-        const manifest = await getDefaultCaseStore(env, request).getCaseManifest();
-        return respond(json(manifest));
+        const workstationResponse = await getWorkstationCase(caseId, env, request);
+        if (!workstationResponse.ok) {
+          return respond(workstationResponse);
+        }
+        const workstationPayload = await workstationResponse.clone().json() as Record<string, unknown>;
+        return respond(json(buildLatestCaseSummaryFromWorkstationPayload(workstationPayload)));
       }
 
       if (request.method === "POST" && /^\/api\/cases\/[^/]+\/annotations$/.test(path)) {
@@ -1905,6 +1910,7 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
     `SELECT
        j.id,
        j.study_id,
+       j.result_case_id,
        j.status,
        j.model_tag,
        j.created_at,
@@ -1925,33 +1931,7 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
      FROM jobs j
      WHERE j.status = 'succeeded'
      ORDER BY
-       CASE
-         WHEN
-           EXISTS(
-             SELECT 1 FROM artifacts a
-             WHERE a.job_id = j.id AND a.artifact_type IN ('segmentation_mask_nifti', 'mask_output', 'mask_multiclass')
-           )
-           AND EXISTS(
-             SELECT 1 FROM artifacts a
-             WHERE a.job_id = j.id AND a.artifact_type = 'measurements_json'
-           )
-         THEN 0
-         ELSE 1
-       END,
-       CASE
-         WHEN EXISTS(
-           SELECT 1 FROM artifacts a
-           WHERE a.job_id = j.id AND a.artifact_type IN ('segmentation_mask_nifti', 'mask_output', 'mask_multiclass')
-         )
-         THEN 0
-         ELSE 1
-       END,
-       CASE
-         WHEN j.study_id LIKE 'hqcta-cardio-%' THEN 0
-         WHEN j.study_id LIKE 'openct-%' OR j.study_id LIKE 'colab-openct-%' THEN 1
-         ELSE 2
-       END,
-       j.created_at DESC
+       COALESCE(j.updated_at, j.finished_at, j.started_at, j.created_at) DESC
      LIMIT 20`
   ).all<Record<string, unknown>>();
 
@@ -1969,6 +1949,8 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
     if (!imageKey) continue;
     const head = await env.R2_RAW.head(imageKey);
     if (!head?.size) continue;
+    const hasStructuredOutputs = Boolean(candidate.has_measurements || nullableString(candidate.result_case_id));
+    if (!hasStructuredOutputs) continue;
     job = candidate;
     preferredStudy = candidateStudy;
     break;
@@ -2628,6 +2610,25 @@ function parseJsonColumn(value: unknown): Record<string, unknown> | null {
   return safeJsonObject(value);
 }
 
+function normalizeCaseResultPayloads(resultJson: Record<string, unknown> | null): {
+  measurements: Record<string, unknown> | null;
+  planning: Record<string, unknown> | null;
+} {
+  if (!resultJson) {
+    return { measurements: null, planning: null };
+  }
+  const measurements =
+    pickObject(resultJson.measurements)
+    || pickObject(resultJson.measurements_structured)
+    || null;
+  const planning =
+    pickObject(resultJson.planning)
+    || pickObject(resultJson.planning_metrics)
+    || pickObject(measurements?.planning)
+    || null;
+  return { measurements, planning };
+}
+
 async function getCaseResultRow(env: Env, caseId: string): Promise<CaseResultRow | null> {
   if (!caseId) return null;
   try {
@@ -2957,12 +2958,15 @@ function buildCoronaryOstiaSummary(
       right: null,
     };
   }
+  const left = normalizeCoronaryOstiumSummary(pickObject(coronary.left));
+  const right = normalizeCoronaryOstiumSummary(pickObject(coronary.right));
+  const hasMeasuredHeight = [left, right].some((entry) => typeof entry?.height_mm === "number" && Number.isFinite(entry.height_mm));
   return {
-    source: measurementsCoronary ? "measurements_artifact" : "model_artifact",
+    source: hasMeasuredHeight ? (measurementsCoronary ? "measurements_artifact" : "model_artifact") : "unavailable",
     inferred: false,
-    reason: null,
-    left: normalizeCoronaryOstiumSummary(pickObject(coronary.left)),
-    right: normalizeCoronaryOstiumSummary(pickObject(coronary.right)),
+    reason: hasMeasuredHeight ? null : "coronary_ostia_not_measurable",
+    left,
+    right,
   };
 }
 
@@ -2973,7 +2977,7 @@ function normalizeCoronaryOstiumSummary(input: Record<string, unknown> | null): 
     confidence: readFiniteNumber(input.confidence),
     reason: nullableString(input.reason),
     point_world: toPointArray(input.point_world) || toPointArray(input.origin_world),
-    height_mm: readFiniteNumber(input.height_mm),
+    height_mm: readFiniteNumber(input.height_mm) ?? readFiniteNumber(input.height_above_annulus_mm),
     method: nullableString(input.method),
     source_fields: Array.isArray(input.source_fields) ? input.source_fields : null,
   };
@@ -3561,11 +3565,12 @@ async function applyInferenceOutputToJob(
   }
 
   if (safeResultJson) {
+    const normalizedCaseResult = normalizeCaseResultPayloads(safeResultJson);
     await upsertCaseResult(env, {
       case_id: resultCaseId,
       job_id: jobId,
-      measurements: safeResultJson.measurements ?? null,
-      planning: safeResultJson.planning ?? null,
+      measurements: normalizedCaseResult.measurements,
+      planning: normalizedCaseResult.planning,
     });
   }
 

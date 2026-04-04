@@ -14,10 +14,7 @@
     "mesh_index",
     "report_index",
     "qa_index",
-    "capabilities",
-    "planning_summary",
-    "quality_gates_summary",
-    "uncertainty_summary"
+    "capabilities"
   ],
   "properties": {
     "case_id": { "type": "string" },

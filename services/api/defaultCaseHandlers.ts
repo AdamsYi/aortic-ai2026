@@ -298,16 +298,156 @@ function buildPearsGeometry(model: Record<string, unknown>, planning: Record<str
   };
 }
 
-export async function buildDefaultCaseSummary(store: DefaultCaseStore, buildVersion: string) {
+function readScalarMeasurementEnvelope(measurements: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  return pickObject(measurements[key]);
+}
+
+function readScalarMeasurementValue(measurements: Record<string, unknown>, key: string): number | null {
+  const envelope = readScalarMeasurementEnvelope(measurements, key);
+  if (!envelope) return null;
+  const raw = envelope.value;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function summarizePlanningSection(section: Record<string, unknown> | null): string {
+  if (!section) return "unavailable";
+  const entries = Object.entries(section).filter(([key]) => !key.endsWith("_metadata"));
+  if (!entries.length) return "unavailable";
+  let hasValue = false;
+  let needsReview = false;
+  for (const [, entry] of entries) {
+    if (entry === null || entry === undefined || entry === "") {
+      needsReview = true;
+      continue;
+    }
+    if (typeof entry === "number" || typeof entry === "string" || typeof entry === "boolean") {
+      hasValue = true;
+      if (typeof entry === "boolean" && entry) needsReview = true;
+      continue;
+    }
+    const record = pickObject(entry);
+    if (!record) continue;
+    if ("value" in record) {
+      const value = record.value;
+      if (value !== null && value !== undefined && value !== "") hasValue = true;
+      else needsReview = true;
+      const uncertainty = pickObject(record.uncertainty);
+      const flag = typeof uncertainty?.flag === "string" ? uncertainty.flag : "NONE";
+      if (flag !== "NONE") needsReview = true;
+      if (uncertainty?.clinician_review_required === true) needsReview = true;
+      continue;
+    }
+    const nestedValues = Object.entries(record).filter(([nestedKey]) => !nestedKey.endsWith("_metadata"));
+    const nestedHasValue = nestedValues.some(([, nestedValue]) => nestedValue !== null && nestedValue !== undefined && nestedValue !== "");
+    const nestedHasGap = nestedValues.some(([, nestedValue]) => nestedValue === null || nestedValue === undefined || nestedValue === "");
+    if (nestedHasValue) hasValue = true;
+    if (nestedHasGap) needsReview = true;
+  }
+  if (!hasValue) return "unavailable";
+  return needsReview ? "review_required" : "available";
+}
+
+function derivePlanningSummary(planning: Record<string, unknown>): Record<string, unknown> {
+  return {
+    tavi_status: summarizePlanningSection(pickObject(planning.tavi)),
+    vsrr_status: summarizePlanningSection(pickObject(planning.vsrr)),
+    pears_status: summarizePlanningSection(pickObject(planning.pears)),
+  };
+}
+
+function deriveClinicalGateOverview(qualityGates: Record<string, unknown>) {
+  const reviewRequired: string[] = [];
+  const notAssessable: string[] = [];
+  const failed: string[] = [];
+  for (const [key, value] of Object.entries(qualityGates)) {
+    const gate = pickObject(value);
+    const status = typeof gate?.status === "string" ? gate.status : "not_assessable";
+    if (status === "failed") failed.push(key);
+    else if (status === "not_assessable") notAssessable.push(key);
+    else if (status === "review_required" || status === "borderline") reviewRequired.push(key);
+  }
+  return {
+    review_required: reviewRequired,
+    not_assessable: notAssessable,
+    failed,
+  };
+}
+
+function deriveUncertaintySummary(
+  measurements: Record<string, unknown>,
+  qualityGates: Record<string, unknown>,
+  failureFlags: Record<string, unknown>,
+): Record<string, unknown> {
+  const failureItems = Array.isArray(failureFlags.items) ? failureFlags.items : [];
+  const failingFields = failureItems
+    .map((item) => pickObject(item))
+    .filter(Boolean)
+    .map((item) => typeof item?.field === "string" ? item.field : null)
+    .filter((item): item is string => Boolean(item));
+
+  const gateOverview = deriveClinicalGateOverview(qualityGates);
+  const measurementReviewFields = Object.entries(measurements)
+    .filter(([key]) => !key.startsWith("_"))
+    .map(([key, value]) => ({ key, envelope: pickObject(value) }))
+    .filter((entry) => entry.envelope)
+    .filter((entry) => {
+      const uncertainty = pickObject(entry.envelope?.uncertainty);
+      return uncertainty?.clinician_review_required === true;
+    })
+    .map((entry) => entry.key);
+
+  const clinicianReviewRequired =
+    measurementReviewFields.length > 0
+    || gateOverview.review_required.length > 0
+    || gateOverview.not_assessable.length > 0
+    || gateOverview.failed.length > 0;
+
+  return {
+    clinician_review_required: clinicianReviewRequired,
+    failing_fields: [...new Set([...failingFields, ...measurementReviewFields])],
+    clinical_gate_overview: gateOverview,
+    pipeline_risk_flags: failureItems.length,
+  };
+}
+
+function buildBootstrapWarnings(
+  capabilities: Record<string, unknown>,
+  failureFlags: Record<string, unknown>,
+  measurements: Record<string, unknown>,
+): string[] {
+  const warnings = new Set<string>();
+  if (!pickObject(capabilities.cpr)?.available) warnings.add("cpr_artifact_missing");
+  const leftCoronary = readScalarMeasurementEnvelope(measurements, "coronary_height_left_mm");
+  const rightCoronary = readScalarMeasurementEnvelope(measurements, "coronary_height_right_mm");
+  if (leftCoronary?.value == null || rightCoronary?.value == null) warnings.add("coronary_heights_not_detected");
+  for (const item of Array.isArray(failureFlags.items) ? failureFlags.items : []) {
+    const record = pickObject(item);
+    const reason = typeof record?.reason === "string" ? record.reason : null;
+    if (reason) warnings.add(reason);
+  }
+  return [...warnings];
+}
+
+async function loadDefaultCaseArtifacts(store: DefaultCaseStore, buildVersion: string) {
   const manifest = await store.getCaseManifest();
   const model = safeJsonParse(await store.getDefaultCaseArtifact("aortic_root_model.json"));
+  const measurements = safeJsonParse(await store.getDefaultCaseArtifact("measurements.json"));
   const planning = safeJsonParse(await store.getDefaultCaseArtifact("planning.json"));
   const leafletModel = safeJsonParse(await store.getDefaultCaseArtifact("leaflet_model.json"));
+  const centerline = safeJsonParse(await store.getDefaultCaseArtifact("centerline.json"));
   const qualityGates = safeJsonParse(await store.getDefaultCaseQa("quality_gates.json"));
+  const failureFlags = safeJsonParse(await store.getDefaultCaseQa("failure_flags.json"));
   const links = buildLinks(manifest);
   const downloads = buildDownloads(manifest, links);
   const capabilities = resolveCapabilityState({ manifest, model, leafletModel, planning });
-  const summaryViewerBootstrap = {
+  const pearsGeometry = buildPearsGeometry(model, planning);
+  const qualityGatesSummary = qualityGates;
+  const planningSummary = derivePlanningSummary(planning);
+  const uncertaintySummary = deriveUncertaintySummary(measurements, qualityGates, failureFlags);
+  const viewerBootstrap = {
+    focus_world: pickObject(model.annulus_ring)?.origin_world || { x: 0, y: 0, z: 4 },
+    aux_mode: "annulus",
+    centerline_index: 2,
     runtime_requirements: {
       source_kind: "nifti",
       loader_kind: "cornerstone-nifti",
@@ -316,23 +456,53 @@ export async function buildDefaultCaseSummary(store: DefaultCaseStore, buildVers
       supports_cpr: Boolean(pickObject(capabilities.cpr)?.available),
     },
     qa_flags: buildQaFlags(capabilities as unknown as Record<string, unknown>, model),
-    bootstrap_warnings: [
-      "cpr_artifact_missing",
-      "coronary_heights_not_detected",
-      "access_route_volume_not_available",
-    ],
+    bootstrap_warnings: buildBootstrapWarnings(capabilities as unknown as Record<string, unknown>, failureFlags, measurements),
   };
-  const acceptance_review = buildAcceptanceReview({
+  const acceptanceReview = buildAcceptanceReview({
     case_role: manifest.case_role,
-    viewer_bootstrap: summaryViewerBootstrap,
     capabilities,
     downloads,
     planning,
     quality_gates: qualityGates,
-    quality_gates_summary: manifest.quality_gates_summary,
+    quality_gates_summary: qualityGatesSummary,
     coronary_ostia_summary: pickObject(model.coronary_ostia),
     leaflet_geometry_summary: buildLeafletGeometrySummary(leafletModel),
+    viewer_bootstrap: viewerBootstrap,
   });
+
+  return {
+    manifest,
+    model,
+    measurements,
+    planning,
+    leafletModel,
+    centerline,
+    qualityGates,
+    qualityGatesSummary,
+    failureFlags,
+    links,
+    downloads,
+    capabilities,
+    pearsGeometry,
+    planningSummary,
+    uncertaintySummary,
+    viewerBootstrap,
+    acceptanceReview,
+    buildVersion,
+  };
+}
+
+export async function buildDefaultCaseSummary(store: DefaultCaseStore, buildVersion: string) {
+  const {
+    manifest,
+    downloads,
+    capabilities,
+    planningSummary,
+    qualityGatesSummary,
+    uncertaintySummary,
+    links,
+    acceptanceReview,
+  } = await loadDefaultCaseArtifacts(store, buildVersion);
   return {
     id: manifest.case_id,
     job_id: manifest.case_id,
@@ -343,19 +513,19 @@ export async function buildDefaultCaseSummary(store: DefaultCaseStore, buildVers
     not_real_cta: manifest.not_real_cta,
     build_version: buildVersion,
     capabilities,
-    planning_summary: manifest.planning_summary,
-    quality_gates_summary: manifest.quality_gates_summary,
-    uncertainty_summary: manifest.uncertainty_summary,
+    planning_summary: planningSummary,
+    quality_gates_summary: qualityGatesSummary,
+    uncertainty_summary: uncertaintySummary,
     downloads,
-    acceptance_review,
-    clinical_review: acceptance_review,
-    summary_source: "case_manifest",
+    acceptance_review: acceptanceReview,
+    clinical_review: acceptanceReview,
+    summary_source: "derived_default_case_bundle",
     links,
   };
 }
 
 export async function buildDefaultCaseList(store: DefaultCaseStore, buildVersion: string) {
-  const manifest = await store.getCaseManifest();
+  const { manifest, capabilities, planningSummary, qualityGatesSummary, links } = await loadDefaultCaseArtifacts(store, buildVersion);
   const caseId = normalizeCaseId(manifest);
   return {
     cases: [
@@ -373,10 +543,10 @@ export async function buildDefaultCaseList(store: DefaultCaseStore, buildVersion
         has_planning: hasIndexedFile(manifest, "planning"),
         has_measurements: hasIndexedFile(manifest, "measurements"),
         has_meshes: groupEntries(manifest, "mesh_index").length > 0,
-        capabilities: manifest.capabilities ?? {},
-        planning_summary: manifest.planning_summary ?? {},
-        quality_gates_summary: manifest.quality_gates_summary ?? {},
-        links: buildLinks(manifest),
+        capabilities,
+        planning_summary: planningSummary,
+        quality_gates_summary: qualityGatesSummary,
+        links,
       },
     ],
     total: 1,
@@ -384,48 +554,26 @@ export async function buildDefaultCaseList(store: DefaultCaseStore, buildVersion
 }
 
 export async function buildDefaultCaseWorkstationPayload(store: DefaultCaseStore, buildVersion: string) {
-  const manifest = await store.getCaseManifest();
-  const model = safeJsonParse(await store.getDefaultCaseArtifact("aortic_root_model.json"));
-  const measurements = safeJsonParse(await store.getDefaultCaseArtifact("measurements.json"));
-  const planning = safeJsonParse(await store.getDefaultCaseArtifact("planning.json"));
-  const leafletModel = safeJsonParse(await store.getDefaultCaseArtifact("leaflet_model.json"));
-  const centerline = safeJsonParse(await store.getDefaultCaseArtifact("centerline.json"));
-  const qualityGates = safeJsonParse(await store.getDefaultCaseQa("quality_gates.json"));
-  const failureFlags = safeJsonParse(await store.getDefaultCaseQa("failure_flags.json"));
-  const links = buildLinks(manifest);
-  const capabilities = resolveCapabilityState({ manifest, model, leafletModel, planning });
-  const rawVolumePath = readPathIndex(manifest, "raw_ct") || "imaging_hidden/ct_showcase_root_roi.nii.gz";
-  const pearsGeometry = buildPearsGeometry(model, planning);
-  const downloads = buildDownloads(manifest, links);
-  const viewer_bootstrap = {
-    focus_world: pickObject(model.annulus_ring)?.origin_world || { x: 0, y: 0, z: 4 },
-    aux_mode: "annulus",
-    centerline_index: 2,
-    runtime_requirements: {
-      source_kind: "nifti",
-      loader_kind: "cornerstone-nifti",
-      supports_mpr: true,
-      supports_aux_plane: true,
-      supports_cpr: false,
-    },
-    qa_flags: buildQaFlags(capabilities as unknown as Record<string, unknown>, model),
-    bootstrap_warnings: [
-      "cpr_artifact_missing",
-      "coronary_heights_not_detected",
-      "access_route_volume_not_available",
-    ],
-  };
-  const acceptance_review = buildAcceptanceReview({
-    case_role: manifest.case_role,
-    capabilities,
-    downloads,
+  const {
+    manifest,
+    model,
+    measurements,
     planning,
-    quality_gates: qualityGates,
-    quality_gates_summary: manifest.quality_gates_summary,
-    coronary_ostia_summary: pickObject(model.coronary_ostia),
-    leaflet_geometry_summary: buildLeafletGeometrySummary(leafletModel),
-    viewer_bootstrap,
-  });
+    leafletModel,
+    centerline,
+    qualityGates,
+    qualityGatesSummary,
+    failureFlags,
+    links,
+    downloads,
+    capabilities,
+    pearsGeometry,
+    planningSummary,
+    uncertaintySummary,
+    viewerBootstrap,
+    acceptanceReview,
+  } = await loadDefaultCaseArtifacts(store, buildVersion);
+  const rawVolumePath = readPathIndex(manifest, "raw_ct") || "imaging_hidden/ct_showcase_root_roi.nii.gz";
   return {
     build_version: buildVersion,
     case_id: manifest.case_id,
@@ -464,7 +612,7 @@ export async function buildDefaultCaseWorkstationPayload(store: DefaultCaseStore
       stj: readPlane(model, "sinotubular_junction"),
       centerline: buildCenterlinePlane(centerline),
     },
-    viewer_bootstrap,
+    viewer_bootstrap: viewerBootstrap,
     capabilities,
     centerline,
     measurements,
@@ -475,11 +623,11 @@ export async function buildDefaultCaseWorkstationPayload(store: DefaultCaseStore
     failure_flags: failureFlags,
     coronary_ostia_summary: pickObject(model.coronary_ostia),
     leaflet_geometry_summary: buildLeafletGeometrySummary(leafletModel),
-    planning_summary: manifest.planning_summary,
-    quality_gates_summary: manifest.quality_gates_summary,
-    uncertainty_summary: manifest.uncertainty_summary,
-    acceptance_review,
-    clinical_review: acceptance_review,
+    planning_summary: planningSummary,
+    quality_gates_summary: qualityGatesSummary,
+    uncertainty_summary: uncertaintySummary,
+    acceptance_review: acceptanceReview,
+    clinical_review: acceptanceReview,
     model_landmarks_summary: {
       annulus: { status: "available", confidence: pickObject(pickObject(model.annulus_ring)?.evidence)?.confidence || null },
       stj: { status: "available", confidence: pickObject(pickObject(model.sinotubular_junction)?.evidence)?.confidence || null },
