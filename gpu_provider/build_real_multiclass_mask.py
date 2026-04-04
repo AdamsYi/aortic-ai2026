@@ -338,10 +338,13 @@ def main() -> None:
         seg_dir = td_path / "ts_total_open"
         seg_dir.mkdir(parents=True, exist_ok=True)
 
-        # Always keep --fast for better reliability on consumer GPUs (e.g., RTX 4060).
-        common_flags: list[str] = ["--fast"]
-        if args.quality != "fast":
-            common_flags.extend(["--robust_crop", "--higher_order_resampling"])
+        # quality=fast uses 3mm resampling (quick, lower accuracy).
+        # quality=high uses full-resolution model (better aortic root segmentation).
+        # RTX 5060 has sufficient VRAM for the full model.
+        if args.quality == "fast":
+            common_flags: list[str] = ["--fast"]
+        else:
+            common_flags = ["--robust_crop", "--higher_order_resampling"]
 
         # Open-only task: no license required.
         totalseg_cmd_base = [
