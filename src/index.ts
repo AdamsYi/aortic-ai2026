@@ -1170,6 +1170,13 @@ export default {
       }
 
       if ((request.method === "GET" || request.method === "HEAD") && path.startsWith("/default-case/")) {
+        // Cloudflare Workers Assets refuses to serve .nii.gz (unknown MIME type).
+        // Build script stores imaging as .nii.gz.bin; rewrite the URL so ASSETS finds it.
+        if (path.includes("/imaging_hidden/") && (path.endsWith(".nii.gz") || path.endsWith(".nii"))) {
+          const rewritten = new URL(request.url);
+          rewritten.pathname = path + ".bin";
+          return env.ASSETS.fetch(new Request(rewritten.toString(), request));
+        }
         return env.ASSETS.fetch(request);
       }
 

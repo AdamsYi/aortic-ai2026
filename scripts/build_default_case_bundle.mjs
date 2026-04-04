@@ -35,11 +35,12 @@ async function readDirMap(dirPath, mode) {
   return out;
 }
 
-async function writeDirMap(dirPath, map, mode) {
+async function writeDirMap(dirPath, map, mode, { renameSuffix } = {}) {
   await rm(dirPath, { recursive: true, force: true });
   await mkdir(dirPath, { recursive: true });
   for (const [name, value] of Object.entries(map)) {
-    const absPath = path.join(dirPath, name);
+    const outName = renameSuffix ? name + renameSuffix : name;
+    const absPath = path.join(dirPath, outName);
     if (mode === "utf8") {
       await writeFile(absPath, value, "utf8");
     } else {
@@ -66,7 +67,7 @@ export async function buildDefaultCaseBundle({ buildVersion } = {}) {
   await writeDirMap(path.join(distDefaultCaseRoot, "qa"), qa, "utf8");
   await writeDirMap(path.join(distDefaultCaseRoot, "meshes"), meshes, "base64");
   await writeDirMap(path.join(distDefaultCaseRoot, "reports"), reports, "base64");
-  await writeDirMap(path.join(distDefaultCaseRoot, "imaging_hidden"), imaging, "base64");
+  await writeDirMap(path.join(distDefaultCaseRoot, "imaging_hidden"), imaging, "base64", { renameSuffix: ".bin" });
 
   const digests = {};
   for (const [groupName, group] of Object.entries({ artifacts, qa, meshes, reports, imaging })) {

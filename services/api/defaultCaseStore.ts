@@ -98,7 +98,7 @@ export function createCaseStoreFromAssetFetcher(
       return fetchAssetBase64(fetcher, `/default-case/reports/${name}`, "report");
     },
     async getDefaultCaseVolume(name = "ct_showcase_root_roi.nii.gz") {
-      return fetchAssetBase64(fetcher, `/default-case/imaging_hidden/${name}`, "imaging");
+      return fetchAssetBase64(fetcher, `/default-case/imaging_hidden/${name}.bin`, "imaging");
     },
     async getDefaultCaseQa(name: string) {
       return fetchAssetText(fetcher, `/default-case/qa/${name}`, "qa");
