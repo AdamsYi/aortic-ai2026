@@ -318,6 +318,11 @@ def main() -> None:
     ct = ct_nii.get_fdata().astype(np.float32)
 
     totalseg_bin = os.getenv("TOTALSEG_BIN") or str(Path(sys.executable).with_name("TotalSegmentator"))
+    # On Windows, executables have .exe suffix
+    if not Path(totalseg_bin).exists() and sys.platform == "win32":
+        totalseg_bin_exe = totalseg_bin + ".exe"
+        if Path(totalseg_bin_exe).exists():
+            totalseg_bin = totalseg_bin_exe
     if not Path(totalseg_bin).exists():
         found = shutil.which("TotalSegmentator")
         if found:
