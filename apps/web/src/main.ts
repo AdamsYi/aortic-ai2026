@@ -210,6 +210,27 @@ type ProviderHealthState = {
   detail: string;
 };
 
+function describeProviderHealth(payload: Record<string, unknown> | null | undefined): { message: string; detail: string; statusLabel: string } {
+  const code = String(payload?.code || '').toLowerCase();
+  const message = String(payload?.message || '').trim();
+  if (code === 'provider_http_530' || message.includes('1033')) {
+    return {
+      message: currentLocale === 'zh-CN' ? 'GPU 云端通道离线。' : 'GPU tunnel offline.',
+      detail: currentLocale === 'zh-CN'
+        ? '远端 GPU 节点当前没有连上 Cloudflare 通道，所以现在不能发起新的自动标注任务。'
+        : 'The remote GPU node is not connected to its Cloudflare tunnel right now, so new auto-annotation jobs cannot be started.',
+      statusLabel: t('status.gpu_tunnel_offline'),
+    };
+  }
+  return {
+    message: currentLocale === 'zh-CN' ? '自动标注服务暂不可用。' : 'Auto annotation provider unavailable.',
+    detail: message || (currentLocale === 'zh-CN'
+      ? '当前无法连接外部 GPU 标注服务。'
+      : 'The external GPU provider is not reachable right now.'),
+    statusLabel: t('status.gpu_offline'),
+  };
+}
+
 type AnnotationUndoEntry =
   | {
       kind: 'remove_annotation';
@@ -2045,6 +2066,7 @@ function handleGlobalShortcuts(event: KeyboardEvent): void {
 
 function requestedCaseMode(): CaseMode {
   const current = new URL(window.location.href);
+  if (current.pathname === '/demo/showcase' || current.pathname === '/demo/reference') return 'showcase';
   const explicit = (current.searchParams.get('case') || '').trim().toLowerCase();
   if (explicit === 'showcase' || explicit === 'reference') return 'showcase';
   return 'latest';
@@ -4091,26 +4113,29 @@ async function ensureAnnotationProviderHealth(force = false): Promise<ProviderHe
     try {
       const payload = await fetchJson<Record<string, unknown>>('/providers/inference-health');
       const ok = Boolean(payload.ok);
+      const description = describeProviderHealth(payload);
       providerHealthState = {
         checked: true,
         checking: false,
         ok,
         status: typeof payload.status === 'number' ? payload.status : null,
         code: typeof payload.code === 'string' ? payload.code : null,
-        message: ok ? 'Auto annotation is ready for the active study.' : 'Auto annotation provider unavailable.',
+        message: ok ? 'Auto annotation is ready for the active study.' : description.message,
         detail: ok
           ? 'Root, annulus, sinus, STJ, coronary ostia, and leaflet geometry will be requested together.'
-          : String(payload.message || payload.code || 'The external GPU provider is not reachable right now.'),
+          : description.detail,
       };
     } catch (error) {
+      const payload = error instanceof Error ? { message: error.message } : { message: String(error) };
+      const description = describeProviderHealth(payload);
       providerHealthState = {
         checked: true,
         checking: false,
         ok: false,
         status: null,
         code: 'provider_check_failed',
-        message: 'Auto annotation provider unavailable.',
-        detail: error instanceof Error ? error.message : String(error),
+        message: description.message,
+        detail: description.detail,
       };
     } finally {
       providerHealthPromise = null;
@@ -4223,7 +4248,10 @@ function renderAnnotationPanel(casePayload: WorkstationCasePayload | null): void
   button.disabled = !canRunAutoAnnotation(casePayload) || annotationRunState.status === 'submitting' || annotationRunState.status === 'queued' || annotationRunState.status === 'running';
   button.textContent =
     annotationRunState.status === 'checking_provider' ? t('action.annotation_checking_provider')
-    : annotationRunState.status === 'provider_unavailable' ? t('action.annotation_provider_unavailable')
+    : annotationRunState.status === 'provider_unavailable'
+      ? (providerHealthState.code === 'provider_http_530'
+        ? t('action.annotation_provider_tunnel_offline')
+        : t('action.annotation_provider_unavailable'))
     : annotationRunState.status === 'submitting' ? t('action.annotation_submitting')
     : annotationRunState.status === 'queued' || annotationRunState.status === 'running' ? t('action.annotation_running')
     : annotationRunState.status === 'succeeded' ? t('action.annotation_rerun')
@@ -4841,18 +4869,23 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
     }),
     runtime.meshGroups.ascending_aorta
   );
-  const loadedAnnulusRing = await maybeLoadStlMesh(
-    defaultCaseMeshUrl('annulus_ring.stl'),
-    loader,
-    new THREE.MeshStandardMaterial({
-      color: 0x5ee6b0,
-      wireframe: true,
-      transparent: true,
-      opacity: runtime.meshState.annulus_ring.opacity,
-      side: THREE.DoubleSide,
-    }),
-    runtime.meshGroups.annulus_ring
-  );
+  const annulusRingMeshUrl = typeof casePayload.links?.annulus_ring_stl === 'string'
+    ? casePayload.links.annulus_ring_stl
+    : null;
+  const loadedAnnulusRing = annulusRingMeshUrl
+    ? await maybeLoadStlMesh(
+      annulusRingMeshUrl,
+      loader,
+      new THREE.MeshStandardMaterial({
+        color: 0x5ee6b0,
+        wireframe: true,
+        transparent: true,
+        opacity: runtime.meshState.annulus_ring.opacity,
+        side: THREE.DoubleSide,
+      }),
+      runtime.meshGroups.annulus_ring
+    )
+    : false;
 
   if (Array.isArray(casePayload.centerline?.points_world) && casePayload.centerline!.points_world!.length > 1) {
     const points = casePayload.centerline!.points_world!.map((point) => toPoint3(point));
@@ -5522,11 +5555,22 @@ async function refreshGpuStatusIndicator(): Promise<void> {
     const online = Boolean(payload.ok) || Boolean(payload.reachable) || String(payload.status || '').toLowerCase() === 'ok';
     DOM.gpuStatusDot.classList.toggle('gpu-online', online);
     DOM.gpuStatusDot.classList.toggle('gpu-offline', !online);
-    DOM.gpuStatusText.textContent = online ? t('status.gpu_online') : t('status.gpu_offline');
-  } catch {
+    if (online) {
+      DOM.gpuStatusText.textContent = t('status.gpu_online');
+      DOM.gpuStatusText.title = currentLocale === 'zh-CN'
+        ? '远端 GPU 标注服务在线。'
+        : 'The remote GPU annotation service is online.';
+    } else {
+      const description = describeProviderHealth(payload);
+      DOM.gpuStatusText.textContent = description.statusLabel;
+      DOM.gpuStatusText.title = description.detail;
+    }
+  } catch (error) {
     DOM.gpuStatusDot.classList.add('gpu-offline');
     DOM.gpuStatusDot.classList.remove('gpu-online');
-    DOM.gpuStatusText.textContent = t('status.gpu_offline');
+    const description = describeProviderHealth(error instanceof Error ? { message: error.message } : undefined);
+    DOM.gpuStatusText.textContent = description.statusLabel;
+    DOM.gpuStatusText.title = description.detail;
   } finally {
     window.clearTimeout(timer);
   }

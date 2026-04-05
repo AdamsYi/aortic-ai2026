@@ -328,6 +328,36 @@ async function buildSignedPath(path: string, env: Env, ttlSeconds?: number): Pro
   return `${path}${sep}exp=${expiresAt}&sig=${sig}`;
 }
 
+function sanitizeRawFilename(filename: string | null | undefined, fallbackStudyId: string): string {
+  const raw = String(filename || "").trim();
+  const safe = raw
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/^_+/, "")
+    .trim();
+  if (safe) return safe;
+  return `${fallbackStudyId}.bin`;
+}
+
+async function buildStudyRawPath(studyId: string, env: Env): Promise<string> {
+  const row = await safeFirst(
+    env.DB.prepare(
+      `SELECT s.image_key, sr.raw_filename
+       FROM studies s
+       LEFT JOIN study_repository sr ON sr.study_id = s.id
+       WHERE s.id = ?1`
+    )
+      .bind(studyId)
+      .first<Record<string, unknown>>()
+  );
+  const rawFilename =
+    nullableString(row?.raw_filename)
+    || nullableString(row?.image_key)?.split("/").pop()
+    || `${studyId}.bin`;
+  return `/studies/${encodeURIComponent(studyId)}/raw/${encodeURIComponent(sanitizeRawFilename(rawFilename, studyId))}`;
+}
+
 async function requireSignedAccess(request: Request, env: Env): Promise<Response | null> {
   const secret = getArtifactLinkSecret(env);
   if (!secret) return null;
@@ -665,7 +695,7 @@ async function recordArtifactAccess(
 
 async function buildJobLinks(jobId: string, studyId: string, env: Env): Promise<Record<string, string>> {
   const links = {
-    raw_ct: `/studies/${studyId}/raw`,
+    raw_ct: await buildStudyRawPath(studyId, env),
     mask_multiclass: `/jobs/${jobId}/artifacts/mask_output`,
     segmentation_mask_nifti: `/jobs/${jobId}/artifacts/segmentation_mask_nifti`,
     result_json: `/jobs/${jobId}/artifacts/result_json`,
@@ -1360,7 +1390,7 @@ export default {
         return respond(await getJob(jobId, env));
       }
 
-      if (request.method === "GET" && path.startsWith("/studies/") && path.endsWith("/raw")) {
+      if ((request.method === "GET" || request.method === "HEAD") && /^\/studies\/[^/]+\/raw(?:\/[^/]+)?$/.test(path)) {
         const parts = path.split("/");
         return respond(await streamStudyRaw(request, parts[2] ?? "", env));
       }
@@ -3267,13 +3297,28 @@ async function streamStudyRaw(request: Request, studyId: string, env: Env): Prom
   const obj = await env.R2_RAW.get(study.image_key);
   if (!obj?.body) return json({ error: "raw_object_not_found" }, 404);
 
-  const filename = study.image_key.split("/").pop() || `${studyId}.bin`;
+  const repository = await safeFirst(
+    env.DB.prepare(`SELECT raw_filename FROM study_repository WHERE study_id = ?1`)
+      .bind(studyId)
+      .first<Record<string, unknown>>()
+  );
+  const filename = sanitizeRawFilename(
+    nullableString(repository?.raw_filename) || study.image_key.split("/").pop(),
+    studyId
+  );
   const headers = new Headers(jsonHeaders);
-  headers.set("content-type", obj.httpMetadata?.contentType || "application/octet-stream");
-  headers.set("content-disposition", `attachment; filename="${filename}"`);
+  const inferredContentType =
+    filename.endsWith(".nii.gz") ? "application/gzip"
+    : filename.endsWith(".nii") ? "application/x-nifti"
+    : filename.endsWith(".zip") ? "application/zip"
+    : obj.httpMetadata?.contentType || "application/octet-stream";
+  headers.set("content-type", inferredContentType);
+  headers.set("content-disposition", `inline; filename="${filename}"`);
   headers.set("content-length", String(obj.size));
   await recordArtifactAccess(env, request, "study_raw", studyId, null, "raw_ct", getArtifactLinkSecret(env) ? "signed" : "unsigned");
-
+  if (request.method === "HEAD") {
+    return new Response(null, { status: 200, headers });
+  }
   return new Response(obj.body, { status: 200, headers });
 }
 
@@ -3309,7 +3354,7 @@ async function getStudyMeta(studyId: string, env: Env): Promise<Response> {
       ? {
           ...repository,
           metadata: safeParseJsonText(repository.metadata_json),
-          raw_ct_link: await buildSignedPath(`/studies/${studyId}/raw`, env),
+          raw_ct_link: await buildSignedPath(await buildStudyRawPath(studyId, env), env),
         }
       : null,
     latest_pipeline_run: latestRun || null,
@@ -3356,7 +3401,7 @@ async function getStudyRepository(studyId: string, env: Env): Promise<Response> 
       ? {
           ...repository,
           metadata: safeParseJsonText(repository.metadata_json),
-          raw_ct_link: await buildSignedPath(`/studies/${studyId}/raw`, env),
+          raw_ct_link: await buildSignedPath(await buildStudyRawPath(studyId, env), env),
         }
       : null,
     jobs,
@@ -5646,7 +5691,7 @@ const DEMO_HTML = `<!doctype html>
       } catch {}
 
       const links = job.links || {
-        raw_ct: '/studies/' + studyId + '/raw',
+        raw_ct: '/studies/' + studyId + '/raw/' + encodeURIComponent(String((job.study_meta?.repository?.raw_filename || '') || 'input.nii.gz')),
         segmentation_mask_nifti: '/jobs/' + jobId + '/artifacts/segmentation_mask_nifti',
         result_json: '/jobs/' + jobId + '/artifacts/result_json',
         provider_receipt: '/jobs/' + jobId + '/artifacts/provider_receipt',
