@@ -100,14 +100,20 @@ def detect_coronary_ostia(
 
     centers = np.vstack([annulus.center_voxel, sinus.center_voxel, stj.center_voxel]).astype(np.float64)
     x0 = max(0, int(np.floor(np.min(centers[:, 0]) - 64)))
-    x1 = min(lumen_mask.shape[0], int(np.ceil(np.max(centers[:, 0]) + 65)))
+    x1 = min(lumen_mask.shape[0], ct_hu.shape[0], int(np.ceil(np.max(centers[:, 0]) + 65)))
     y0 = max(0, int(np.floor(np.min(centers[:, 1]) - 64)))
-    y1 = min(lumen_mask.shape[1], int(np.ceil(np.max(centers[:, 1]) + 65)))
+    y1 = min(lumen_mask.shape[1], ct_hu.shape[1], int(np.ceil(np.max(centers[:, 1]) + 65)))
     z0 = max(0, int(round(min(annulus.center_voxel[2], sinus.center_voxel[2])) - mm_to_vox_z(4.0, spacing_mm)))
-    z1 = min(lumen_mask.shape[2], int(round(max(stj.center_voxel[2], sinus.center_voxel[2])) + mm_to_vox_z(18.0, spacing_mm) + 1))
+    z1 = min(lumen_mask.shape[2], ct_hu.shape[2], int(round(max(stj.center_voxel[2], sinus.center_voxel[2])) + mm_to_vox_z(18.0, spacing_mm) + 1))
 
     lumen_roi = np.asarray(lumen_mask[x0:x1, y0:y1, z0:z1], dtype=bool)
     ct_roi = np.asarray(ct_hu[x0:x1, y0:y1, z0:z1], dtype=np.float32)
+    # Guard: if shapes still differ (e.g. ct and mask in different voxel spaces),
+    # truncate to common extent so downstream ops don't crash.
+    if lumen_roi.shape != ct_roi.shape:
+        _sh = tuple(min(a, b) for a, b in zip(lumen_roi.shape, ct_roi.shape))
+        lumen_roi = lumen_roi[:_sh[0], :_sh[1], :_sh[2]]
+        ct_roi = ct_roi[:_sh[0], :_sh[1], :_sh[2]]
     roi_crop = np.ones_like(lumen_roi, dtype=bool)
 
     shell_inner = ndimage.binary_dilation(lumen_roi, iterations=mm_to_vox_xy(1.5, spacing_mm)) & (~lumen_roi)
