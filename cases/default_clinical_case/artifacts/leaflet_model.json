@@ -1,144 +1,146 @@
 {
-  "status": "fallback",
-  "coaptation_height_mm": 32.5749143133062,
-  "coaptation_surface_area_mm2": null,
-  "coaptation_level_mm": 32.5749143133062,
-  "raw_coaptation_height_mm": 32.5749143133062,
-  "effective_height_mean_mm": 32.5749143133062,
-  "geometric_height_mean_mm": 37.228473500921375,
-  "root_symmetry_index": null,
+  "status": "detected",
+  "coaptation_height_mm": 1.0145372692243557,
+  "coaptation_surface_area_mm2": 53.16746184788991,
+  "coaptation_level_mm": 2.362722789302404,
+  "raw_coaptation_height_mm": 1.4077921675301832,
+  "effective_height_mean_mm": 2.4155649267246564,
+  "geometric_height_mean_mm": 4.040037518156865,
+  "root_symmetry_index": 0.35730638813353455,
   "hinge_lines": [
     {
       "leaflet_id": 1,
-      "point_count": 25,
-      "status": "fallback"
+      "point_count": 47,
+      "status": "detected"
     },
     {
       "leaflet_id": 2,
-      "point_count": 25,
-      "status": "fallback"
+      "point_count": 22,
+      "status": "detected"
     },
     {
       "leaflet_id": 3,
-      "point_count": 25,
-      "status": "fallback"
+      "point_count": 26,
+      "status": "detected"
     }
   ],
   "commissures": [
     {
       "id": "commissure_1",
-      "index": 3,
-      "source_sinus_index": 3,
-      "angle_deg": 15.0,
-      "radius_mm": 11.9174841398114,
-      "curvature_score": -0.031808493910340574,
+      "index": 22,
+      "source_sinus_index": 22,
+      "angle_deg": 110.0,
+      "radius_mm": 13.36703167192771,
+      "curvature_score": -0.07437419412154427,
       "world": [
-        0.24813837146317475,
-        -196.8637186346413,
-        -623.5081265063143
+        -21.287634190885974,
+        -13.675325445378602,
+        85.59138690217848
       ],
       "voxel": [
-        262.81896041568916,
-        369.66105049020973,
-        189.97064374875953
+        136.6981804026711,
+        144.8519483574133,
+        188.4731095217428
       ],
       "method": "angularly_regularized_saddle_points"
     },
     {
       "id": "commissure_2",
-      "index": 27,
-      "source_sinus_index": 27,
-      "angle_deg": 135.0,
-      "radius_mm": 10.56884575004675,
-      "curvature_score": -0.08637150981271044,
+      "index": 46,
+      "source_sinus_index": 46,
+      "angle_deg": 230.0,
+      "radius_mm": 11.955836590329213,
+      "curvature_score": 0.013792761987411372,
       "world": [
-        -18.736561947334767,
-        -196.84358673718512,
-        -627.896945120175
+        0.2269537664648862,
+        -16.241150692709716,
+        82.13123423417845
       ],
       "voxel": [
-        289.5227147102621,
-        369.6327330959857,
-        188.5077038620139
+        159.74308881493988,
+        142.1036174135976,
+        185.70498738734278
       ],
       "method": "angularly_regularized_saddle_points"
     },
     {
       "id": "commissure_3",
-      "index": 51,
-      "source_sinus_index": 51,
-      "angle_deg": 255.0,
-      "radius_mm": 13.109039775213324,
-      "curvature_score": -0.04165376617558522,
+      "index": 70,
+      "source_sinus_index": 70,
+      "angle_deg": 350.0,
+      "radius_mm": 12.279511724476533,
+      "curvature_score": -0.21077150452775467,
       "world": [
-        -14.656058365893388,
-        -196.80299533247296,
-        -607.7613376922485
+        -6.733110246167646,
+        3.090213315219523,
+        86.42030719766137
       ],
       "voxel": [
-        283.78310527702587,
-        369.5756374937532,
-        195.21957460489077
+        152.2879593914715,
+        162.8100103935639,
+        189.13624575812912
       ],
       "method": "angularly_regularized_saddle_points"
     }
   ],
   "regularization": {
-    "applied": false,
-    "mode": "fallback_parametric"
+    "applied": true,
+    "commissure_height_reference_mm": 16.434609336086382,
+    "stj_height_mm": 20.228891401393458,
+    "raw_coaptation_height_mm": 1.4077921675301832
   },
   "leaflets": [
     {
       "leaflet_id": 1,
       "name": "leaflet_1",
-      "voxel_count": 0,
-      "geometric_height_mm": 37.228473500921375,
-      "effective_height_mm": 32.5749143133062,
-      "free_edge_height_mm": 37.228473500921375,
-      "raw_geometric_height_mm": 37.228473500921375,
-      "raw_effective_height_mm": 32.5749143133062,
-      "raw_free_edge_height_mm": 37.228473500921375,
-      "hinge_point_count": 25,
-      "mesh_vertices": 0,
-      "mesh_faces": 0,
-      "status": "fallback",
-      "regularized": false
+      "voxel_count": 116,
+      "geometric_height_mm": 5.8413700523459875,
+      "effective_height_mm": 3.3721602420968195,
+      "free_edge_height_mm": 3.3721602420968195,
+      "raw_geometric_height_mm": 5.8413700523459875,
+      "raw_effective_height_mm": 3.3721602420968195,
+      "raw_free_edge_height_mm": 3.853001396758328,
+      "hinge_point_count": 47,
+      "mesh_vertices": 377,
+      "mesh_faces": 762,
+      "status": "detected",
+      "regularized": true
     },
     {
       "leaflet_id": 2,
       "name": "leaflet_2",
-      "voxel_count": 0,
-      "geometric_height_mm": 37.228473500921375,
-      "effective_height_mm": 32.5749143133062,
-      "free_edge_height_mm": 37.228473500921375,
-      "raw_geometric_height_mm": 37.228473500921375,
-      "raw_effective_height_mm": 32.5749143133062,
-      "raw_free_edge_height_mm": 37.228473500921375,
-      "hinge_point_count": 25,
-      "mesh_vertices": 0,
-      "mesh_faces": 0,
-      "status": "fallback",
-      "regularized": false
+      "voxel_count": 70,
+      "geometric_height_mm": 2.307461176213158,
+      "effective_height_mm": 1.626591800437158,
+      "free_edge_height_mm": 1.626591800437158,
+      "raw_geometric_height_mm": 2.307461176213158,
+      "raw_effective_height_mm": 1.626591800437158,
+      "raw_free_edge_height_mm": 1.9812806322367773,
+      "hinge_point_count": 22,
+      "mesh_vertices": 158,
+      "mesh_faces": 312,
+      "status": "detected",
+      "regularized": true
     },
     {
       "leaflet_id": 3,
       "name": "leaflet_3",
-      "voxel_count": 0,
-      "geometric_height_mm": 37.228473500921375,
-      "effective_height_mm": 32.5749143133062,
-      "free_edge_height_mm": 37.228473500921375,
-      "raw_geometric_height_mm": 37.228473500921375,
-      "raw_effective_height_mm": 32.5749143133062,
-      "raw_free_edge_height_mm": 37.228473500921375,
-      "hinge_point_count": 25,
-      "mesh_vertices": 0,
-      "mesh_faces": 0,
-      "status": "fallback",
-      "regularized": false
+      "voxel_count": 223,
+      "geometric_height_mm": 3.9712813259114492,
+      "effective_height_mm": 2.247942737639991,
+      "free_edge_height_mm": 2.247942737639991,
+      "raw_geometric_height_mm": 3.9712813259114492,
+      "raw_effective_height_mm": 2.247942737639991,
+      "raw_free_edge_height_mm": 2.8625054656396056,
+      "hinge_point_count": 26,
+      "mesh_vertices": 482,
+      "mesh_faces": 956,
+      "status": "detected",
+      "regularized": true
     }
   ],
   "mesh": {
-    "vertices": 78,
-    "faces": 72
+    "vertices": 1017,
+    "faces": 2030
   }
 }

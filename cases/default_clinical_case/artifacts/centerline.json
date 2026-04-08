@@ -1,19 +1,19 @@
 {
   "method": "distance_core_fallback+minimum_cost_skeleton_path",
-  "point_count": 128,
-  "annulus_index": 0,
-  "stj_index": 78,
-  "sinus_peak_index": 60,
-  "ascending_reference_index": 100,
+  "point_count": 38,
+  "annulus_index": 8,
+  "stj_index": 26,
+  "sinus_peak_index": 24,
+  "ascending_reference_index": 32,
   "skeletonization": "distance_transform",
   "quality": {
-    "point_count": 128,
-    "total_length_mm": 158.4602705127604,
-    "mean_radius_mm": 12.459407098591328,
-    "min_radius_mm": 9.000265121459961,
-    "smoothness_score": 0.9402217312641539,
+    "point_count": 38,
+    "total_length_mm": 45.04220946540053,
+    "mean_radius_mm": 10.71353857140792,
+    "min_radius_mm": 8.34044075012207,
+    "smoothness_score": 0.9900444835908899,
     "method": "distance_core_fallback+minimum_cost_skeleton_path",
-    "quality_flag": "acceptable",
-    "uncertainty_flag": "LOW_CONFIDENCE"
+    "quality_flag": "good",
+    "uncertainty_flag": "NONE"
   }
 }
