@@ -1,51 +1,238 @@
 {
-  "annulus": {
-    "diameter_short_mm": 19.179662826809004,
-    "diameter_long_mm": 23.37046836185562,
-    "area_mm2": 345.15270314367876,
-    "perimeter_mm": 66.99977733713698,
-    "equivalent_diameter_mm": 20.963350653337084
-  },
-  "lvot": {
-    "diameter_mm": 21.76842677883545,
-    "area_mm2": 372.1722329352294
-  },
-  "sinus_of_valsalva": {
-    "max_diameter_mm": 32.609036124329066,
-    "equivalent_diameter_mm": 27.571372870193883
-  },
-  "stj": {
-    "diameter_mm": 26.483272242264796,
-    "diameter_short_mm": 25.5369060493585,
-    "diameter_long_mm": 27.499840218861262
-  },
-  "ascending_aorta": {
-    "diameter_mm": 29.357486771943783
-  },
-  "coronary_heights_mm": {
-    "left": null,
-    "right": null
-  },
-  "calcium_burden": {
-    "threshold_hu": 130.0,
-    "calc_voxels": 12114,
-    "calc_volume_ml": 13.198168705437261,
-    "method": "contrast_ct_hu_threshold_proxy"
-  },
-  "leaflet_geometry": {
-    "coaptation_height_mm": 1.0145372692243557,
-    "coaptation_surface_area_mm2": 53.16746184788991,
-    "coaptation_level_mm": 2.362722789302404,
-    "raw_coaptation_height_mm": 1.4077921675301832,
-    "effective_height_mean_mm": 2.4155649267246564,
-    "geometric_height_mean_mm": 4.040037518156865,
-    "root_symmetry_index": 0.35730638813353455,
-    "coaptation_reserve_mm": -6.584435073275344,
-    "regularization": {
-      "applied": true,
-      "commissure_height_reference_mm": 16.434609336086382,
-      "stj_height_mm": 20.228891401393458,
-      "raw_coaptation_height_mm": 1.4077921675301832
+  "annulus_equivalent_diameter_mm": {
+    "value": 20.963350653337084,
+    "unit": "mm",
+    "evidence": {
+      "method": "double_oblique_annulus",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
     }
+  },
+  "annulus_short_diameter_mm": {
+    "value": 19.179662826809004,
+    "unit": "mm",
+    "evidence": {
+      "method": "double_oblique_annulus",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "annulus_long_diameter_mm": {
+    "value": 23.37046836185562,
+    "unit": "mm",
+    "evidence": {
+      "method": "double_oblique_annulus",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "annulus_area_mm2": {
+    "value": 345.15270314367876,
+    "unit": "mm²",
+    "evidence": {
+      "method": "double_oblique_annulus",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "annulus_perimeter_mm": {
+    "value": 66.99977733713698,
+    "unit": "mm",
+    "evidence": {
+      "method": "double_oblique_annulus",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "sinus_diameter_mm": {
+    "value": 32.609036124329066,
+    "unit": "mm",
+    "evidence": {
+      "method": "mask_cross_section",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "stj_diameter_mm": {
+    "value": 26.483272242264796,
+    "unit": "mm",
+    "evidence": {
+      "method": "mask_cross_section",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "ascending_aorta_diameter_mm": {
+    "value": 29.357486771943783,
+    "unit": "mm",
+    "evidence": {
+      "method": "mask_cross_section",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "lvot_diameter_mm": {
+    "value": 21.76842677883545,
+    "unit": "mm",
+    "evidence": {
+      "method": "annulus_proxy",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "coronary_height_left_mm": {
+    "value": null,
+    "unit": "mm",
+    "evidence": {
+      "method": "ostia_detection",
+      "confidence": 0.0
+    },
+    "uncertainty": {
+      "flag": "NOT_AVAILABLE",
+      "clinician_review_required": true
+    }
+  },
+  "coronary_height_right_mm": {
+    "value": null,
+    "unit": "mm",
+    "evidence": {
+      "method": "ostia_detection",
+      "confidence": 0.0
+    },
+    "uncertainty": {
+      "flag": "NOT_AVAILABLE",
+      "clinician_review_required": true
+    }
+  },
+  "calcium_burden_ml": {
+    "value": 13.198168705437261,
+    "unit": "mL",
+    "evidence": {
+      "method": "hu_threshold_proxy",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "leaflet_effective_height_mm": {
+    "value": 2.4155649267246564,
+    "unit": "mm",
+    "evidence": {
+      "method": "parametric_leaflet",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "leaflet_coaptation_height_mm": {
+    "value": 1.0145372692243557,
+    "unit": "mm",
+    "evidence": {
+      "method": "parametric_leaflet",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "leaflet_geometric_height_mm": {
+    "value": 4.040037518156865,
+    "unit": "mm",
+    "evidence": {
+      "method": "parametric_leaflet",
+      "confidence": 0.85
+    },
+    "uncertainty": {
+      "flag": "NONE",
+      "clinician_review_required": false
+    }
+  },
+  "_pipeline_raw": {
+    "annulus": {
+      "diameter_short_mm": 19.179662826809004,
+      "diameter_long_mm": 23.37046836185562,
+      "area_mm2": 345.15270314367876,
+      "perimeter_mm": 66.99977733713698,
+      "equivalent_diameter_mm": 20.963350653337084
+    },
+    "lvot": {
+      "diameter_mm": 21.76842677883545,
+      "area_mm2": 372.1722329352294
+    },
+    "sinus_of_valsalva": {
+      "max_diameter_mm": 32.609036124329066,
+      "equivalent_diameter_mm": 27.571372870193883
+    },
+    "stj": {
+      "diameter_mm": 26.483272242264796,
+      "diameter_short_mm": 25.5369060493585,
+      "diameter_long_mm": 27.499840218861262
+    },
+    "ascending_aorta": {
+      "diameter_mm": 29.357486771943783
+    },
+    "coronary_heights_mm": {
+      "left": null,
+      "right": null
+    },
+    "calcium_burden": {
+      "threshold_hu": 130.0,
+      "calc_voxels": 12114,
+      "calc_volume_ml": 13.198168705437261,
+      "method": "contrast_ct_hu_threshold_proxy"
+    },
+    "leaflet_geometry": {
+      "coaptation_height_mm": 1.0145372692243557,
+      "coaptation_surface_area_mm2": 53.16746184788991,
+      "coaptation_level_mm": 2.362722789302404,
+      "raw_coaptation_height_mm": 1.4077921675301832,
+      "effective_height_mean_mm": 2.4155649267246564,
+      "geometric_height_mean_mm": 4.040037518156865,
+      "root_symmetry_index": 0.35730638813353455,
+      "coaptation_reserve_mm": -6.584435073275344,
+      "regularization": {
+        "applied": true,
+        "commissure_height_reference_mm": 16.434609336086382,
+        "stj_height_mm": 20.228891401393458,
+        "raw_coaptation_height_mm": 1.4077921675301832
+      }
+    }
+  },
+  "_conversion_meta": {
+    "converter": "convert_measurements_format.py",
+    "source_format": "pipeline_nested_v3",
+    "target_format": "scalar_measurement_envelope"
   }
 }
