@@ -3818,7 +3818,10 @@ function renderStepPanels(casePayload: WorkstationCasePayload): void {
 
   // Planning data for TAVI size
   const planning = (casePayload as any).planning || {};
-  const taviSize = planning.tavi_recommended_size_mm ?? planning.tavi_size_mm ?? null;
+  const taviSize = planning.tavi?.area_derived_valve_size?.nearest_nominal_size_mm
+    ?? planning.tavi_recommended_size_mm
+    ?? planning.tavi_size_mm
+    ?? null;
   const taviLabel = taviSize != null ? `${taviSize} mm` : '--';
 
   const annulusBody = document.getElementById('step-annulus-body');
