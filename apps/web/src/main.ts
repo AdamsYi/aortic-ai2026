@@ -31,6 +31,7 @@ import {
   synchronizers,
 } from '@cornerstonejs/tools';
 import * as THREE from 'three';
+import * as nifti from 'nifti-reader-js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import zhCN from './i18n/zh-CN';
@@ -43,6 +44,16 @@ declare global {
 }
 
 type Point3 = [number, number, number];
+type ViewportSliceKey = 'axial' | 'sagittal' | 'coronal' | 'aux';
+type NiftiVoxelArray =
+  | Int8Array
+  | Uint8Array
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array
+  | Float64Array;
 
 type VolumeSource = {
   source_kind: 'nifti' | 'dicom_zip';
@@ -326,7 +337,7 @@ const API_BASE = '/api';
 const DEFAULT_CASE_API_PREFIX = `${API_BASE}/cases/default_clinical_case`;
 const SHOWCASE_CASE_ID = 'default_clinical_case';
 const DEFAULT_PRIMARY_TOOL: PrimaryToolMode = 'crosshair';
-const DEFAULT_WINDOW_PRESET: WindowPresetId = 'ctaVessel';
+const DEFAULT_WINDOW_PRESET: WindowPresetId = 'softTissue';
 const DEFAULT_CINE_FPS = 8;
 const VIEWPORT_IDS: Record<ViewportKey, string> = {
   axial: 'mpr-axial',
@@ -429,12 +440,17 @@ let defaultAnnulusPlaneArtifact: Record<string, unknown> | null = null;
 let coronaryReviewBannerAcknowledged = false;
 let currentPlanningTab: 'TAVI' | 'VSRR' | 'PEARS' = 'TAVI';
 let planningPanelCollapsed = false;
-let measurementsPanelCollapsed = false;
+let measurementsPanelCollapsed = true;
 let submitJobPollHandle: number | null = null;
 let activeSubmissionJobId: string | null = null;
 let manualAnnotationRecord: ManualAnnotationRecord | null = null;
 let manualAnnotationCaseId: string | null = null;
-let manualReviewCollapsed = false;
+let manualReviewCollapsed = true;
+let currentReportHref = '';
+let whyMattersCollapsed = false;
+const fallbackPreviewCache = new Map<string, Promise<FallbackPreviewVolume>>();
+let fallbackMprState: FallbackMprState | null = null;
+const viewportSoftwareFallbackReasons: Partial<Record<ViewportKey, string>> = {};
 const activeLandmarkLayers: Record<string, boolean> = {
   annulus: true,
   commissures: true,
@@ -452,10 +468,10 @@ const I18N: Record<Locale, Record<string, string>> = {
 const DOM = {
   headerStatus: null as HTMLDivElement | null,
   bootStage: null as HTMLDivElement | null,
-  demoCaseBadge: null as HTMLSpanElement | null,
   dataSourceBanner: null as HTMLDivElement | null,
   coronaryReviewBanner: null as HTMLDivElement | null,
   coronaryReviewAcknowledge: null as HTMLButtonElement | null,
+  headerCaseInfo: null as HTMLDivElement | null,
   caseInfoLeft: null as HTMLDivElement | null,
   caseInfoCenter: null as HTMLDivElement | null,
   caseInfoRight: null as HTMLDivElement | null,
@@ -534,7 +550,13 @@ const DOM = {
   reportDrawer: null as HTMLDivElement | null,
   reportCloseButton: null as HTMLButtonElement | null,
   reportDownloadLink: null as HTMLAnchorElement | null,
-  reportFrame: null as HTMLIFrameElement | null,
+  reportFrame: null as HTMLDivElement | null,
+  reportEmbed: null as HTMLEmbedElement | null,
+  keyMeasurementCard: null as HTMLDivElement | null,
+  caseInfoCard: null as HTMLDivElement | null,
+  whyMattersCard: null as HTMLDivElement | null,
+  whyMattersToggle: null as HTMLButtonElement | null,
+  whyMattersBody: null as HTMLDivElement | null,
   viewportCardThree: null as HTMLDivElement | null,
   viewportElements: {} as Record<ViewportKey, HTMLDivElement>,
   viewportCards: {} as Record<ViewportKey, HTMLDivElement>,
@@ -544,6 +566,16 @@ const DOM = {
 };
 
 const MANUAL_REVIEW_THRESHOLD_MM = 1.5;
+type FallbackPreviewVolume = {
+  dims: [number, number, number];
+  data: NiftiVoxelArray;
+  min: number;
+  max: number;
+};
+type FallbackMprState = {
+  volume: FallbackPreviewVolume;
+  slices: Record<ViewportSliceKey, number>;
+};
 const MANUAL_REVIEW_FIELDS: Array<{
   key: ManualReviewFieldKey;
   autoKey: string;
@@ -561,39 +593,81 @@ function renderShell(): void {
   document.getElementById('pre-load')?.remove();
   APP_ROOT.innerHTML = `
     <div class="workstation">
-      <div class="case-info-bar">
-        <div class="case-info-left" id="case-info-left">Case default_clinical_case · Scan n/a</div>
-        <div class="case-info-center" id="case-info-center">AorticAI</div>
-        <div class="case-info-right" id="case-info-right">Pipeline n/a · Build ${escapeHtml(BUILD_VERSION)} · <span class="quality-badge quality-needs_review">needs_review</span></div>
-      </div>
+
+      <!-- ── Header ─────────────────────────────────────────────────────── -->
       <header class="app-header">
-        <div class="header-title">
+        <div class="header-brand">
           <h1 data-i18n="app.brand">AorticAI</h1>
-          <p data-i18n="app.subtitle">Structural Heart Planning Platform</p>
+          <p>Structural Heart</p>
         </div>
+
+        <!-- Workflow step tabs (Philips HeartNavigator-style) -->
+        <nav class="header-workflow-tabs">
+          <button id="focus-annulus" class="workflow-tab active" title="Focus: Annulus plane" data-i18n="action.focus_annulus">Annulus</button>
+          <button id="focus-stj"     class="workflow-tab" title="Focus: STJ"               data-i18n="action.focus_stj">STJ</button>
+          <button id="focus-root"    class="workflow-tab" title="Focus: Aortic root"        data-i18n="action.focus_root">Root</button>
+          <button id="focus-coronary" class="workflow-tab" title="Focus: Coronary ostia"   data-i18n="action.focus_coronary">Coronary</button>
+        </nav>
+
+        <div class="header-case-info" id="header-case-info">—</div>
         <div class="header-actions">
-          <div class="gpu-status-chip" id="gpu-status-chip">
-            <span class="gpu-dot gpu-offline" id="gpu-status-dot"></span>
-            <span id="gpu-status-text">GPU offline</span>
+          <div class="header-viewer-controls">
+            <select id="window-preset" class="header-ctrl-select" title="Window preset">
+              <option value="softTissue" selected>Soft Tissue</option>
+              <option value="ctaVessel">CTA Vessel</option>
+              <option value="calcium">Calcium</option>
+              <option value="wide">Wide</option>
+            </select>
+            <button type="button" id="reset-viewport" class="header-ctrl-btn" title="Reset viewports">↺</button>
           </div>
-          <a id="load-showcase" class="case-mode-button" href="/demo?case=showcase" data-i18n="action.open_showcase">Reference</a>
-          <a id="load-latest" class="case-mode-button" href="/demo" data-i18n="action.load_case">Real Default</a>
+          <button id="open-report" class="primary-action-button" data-i18n="action.open_report">Report</button>
           <button id="submit-case" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
-          <button id="run-annotation" class="primary-action-button" data-i18n="action.run_annotation">Run Auto Annotation</button>
-          <button id="open-report" data-i18n="action.open_report">Report</button>
-          <button id="focus-annulus" data-i18n="action.focus_annulus">Annulus</button>
-          <button id="focus-stj" data-i18n="action.focus_stj">STJ</button>
-          <button id="focus-root" data-i18n="action.focus_root">Root</button>
-          <button id="focus-coronary" data-i18n="action.focus_coronary">Coronary</button>
-          <span id="demo-case-badge" class="demo-case-badge hidden" data-i18n="label.demo_case_badge">示范病例 / Demo Case</span>
-          <div class="cluster locale-cluster">
+          <div class="locale-buttons">
             <button type="button" class="locale-button" data-locale-switch="en">EN</button>
             <button type="button" class="locale-button" data-locale-switch="zh-CN">中文</button>
           </div>
-          <div class="status-chip" id="header-status">Initializing...</div>
-          <div class="status-chip" id="boot-stage">loading_shell</div>
         </div>
       </header>
+
+      <!-- ── Toolbar ribbon (secondary controls — spans full width) ──────── -->
+      <div class="viewer-topbar">
+        <div class="tbar-group">
+          <select id="window-preset" class="tbar-select" title="Window preset">
+            <option value="softTissue" selected>Soft Tissue</option>
+            <option value="ctaVessel">CTA Vessel</option>
+            <option value="calcium">Calcium</option>
+            <option value="wide">Wide</option>
+          </select>
+          <button type="button" id="reset-viewport" class="tbar-btn" title="Reset viewports">Reset</button>
+        </div>
+        <span class="tbar-sep"></span>
+        <div class="tbar-group">
+          <select id="aux-mode" class="tbar-select" title="Aux view">
+            <option value="annulus">Annulus</option>
+            <option value="stj">STJ</option>
+            <option value="centerline">Centerline</option>
+            <option value="cpr">CPR</option>
+          </select>
+          <input id="centerline-slider" type="range" min="0" max="0" value="0" step="1" class="tbar-range" title="Centerline" />
+          <span id="centerline-value" class="status-chip">0/0</span>
+        </div>
+        <span class="tbar-sep"></span>
+        <div class="tbar-group">
+          <button type="button" id="cine-toggle" class="tbar-btn" title="Play/pause cine">▶ Cine</button>
+          <select id="cine-speed" class="tbar-select">
+            <option value="4">4 fps</option>
+            <option value="8" selected>8 fps</option>
+            <option value="12">12 fps</option>
+          </select>
+        </div>
+        <div class="tbar-spacer"></div>
+        <div class="tbar-group tbar-right">
+          <span class="tbar-status" id="case-meta">—</span>
+          <span class="tbar-status" id="mpr-status">Ready</span>
+        </div>
+      </div>
+
+      <!-- ── Banners ────────────────────────────────────────────────────── -->
       <div class="coronary-review-banner hidden" id="coronary-review-banner">
         <div class="coronary-review-banner-text" data-i18n="banner.coronary_review_required">⚠️ Coronary ostia detection requires clinician review before use in planning / 冠脉开口检测需要临床医生复核后方可用于规划</div>
         <button type="button" id="coronary-review-ack" data-i18n="action.acknowledged">Acknowledged</button>
@@ -605,84 +679,79 @@ function renderShell(): void {
         </div>
         <div class="job-progress-track"><div id="job-progress-fill"></div></div>
       </div>
+
+      <!-- ── Main workspace: sidebar | viewer | panel ───────────────────── -->
       <main class="workspace-grid">
+
+        <!-- LEFT SIDEBAR — icon tools (direct child of workspace-grid) -->
+        <nav class="mpr-toolbar-unified">
+
+            <!-- Layout -->
+            <div class="tbar-group">
+              <button type="button" id="layout-grid" class="layout-button tbar-icon-btn active" title="2×2 grid">
+                <svg width="14" height="14" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="4.5" height="4.5" rx=".4" fill="currentColor"/><rect x="7.5" y="1" width="4.5" height="4.5" rx=".4" fill="currentColor"/><rect x="1" y="7.5" width="4.5" height="4.5" rx=".4" fill="currentColor"/><rect x="7.5" y="7.5" width="4.5" height="4.5" rx=".4" fill="currentColor"/></svg>
+              </button>
+              <button type="button" id="layout-single" class="layout-button tbar-icon-btn" title="Single view">
+                <svg width="14" height="14" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx=".4" fill="currentColor"/></svg>
+              </button>
+            </div>
+            <span class="tbar-sep"></span>
+
+            <!-- Primary tools -->
+            <div class="tbar-group tool-mode-cluster">
+              <button type="button" class="tool-button tbar-tool-btn active" data-tool-mode="crosshair" title="Crosshair">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><line x1="6.5" y1="1" x2="6.5" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="6.5" x2="12" y2="6.5" stroke="currentColor" stroke-width="1.5"/><circle cx="6.5" cy="6.5" r="1.8" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="windowLevel" title="Window / Level">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.5 1.5 A5 5 0 0 1 6.5 11.5 Z" fill="currentColor" opacity=".8"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="pan" title="Pan">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><path d="M6.5 2v9M2 6.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.5 2 5 4h3L6.5 2ZM6.5 11 5 9h3l-1.5 2ZM2 6.5 4 5v3L2 6.5ZM11 6.5 9 5v3l2-1.5Z" fill="currentColor"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="zoom" title="Zoom">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" stroke-width="1.3" fill="none"/><line x1="8.5" y1="8.5" x2="11.5" y2="11.5" stroke="currentColor" stroke-width="1.5"/><line x1="4" y1="5.5" x2="7" y2="5.5" stroke="currentColor" stroke-width="1.2"/><line x1="5.5" y1="4" x2="5.5" y2="7" stroke="currentColor" stroke-width="1.2"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="length" title="Length">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><line x1="2" y1="6.5" x2="11" y2="6.5" stroke="currentColor" stroke-width="1.4"/><line x1="2" y1="4" x2="2" y2="9" stroke="currentColor" stroke-width="1.4"/><line x1="11" y1="4" x2="11" y2="9" stroke="currentColor" stroke-width="1.4"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="angle" title="Angle">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><line x1="2" y1="10" x2="6.5" y2="3" stroke="currentColor" stroke-width="1.3"/><line x1="6.5" y1="3" x2="11" y2="10" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 8.5 A3 3 0 0 1 8.5 8.5" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="probe" title="HU Probe">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="2.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="6.5" cy="6.5" r=".8" fill="currentColor"/><line x1="6.5" y1="1.5" x2="6.5" y2="4" stroke="currentColor" stroke-width="1.2"/><line x1="6.5" y1="9" x2="6.5" y2="11.5" stroke="currentColor" stroke-width="1.2"/></svg>
+              </button>
+              <button type="button" class="tool-button tbar-tool-btn" data-tool-mode="rectangleRoi" title="ROI">
+                <svg width="15" height="15" viewBox="0 0 13 13" fill="none"><rect x="2" y="3.5" width="9" height="6" rx=".5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-dasharray="2 1.5"/></svg>
+              </button>
+            </div>
+            <span class="tbar-sep"></span>
+
+            <!-- Landmark toggles -->
+            <div class="tbar-group landmark-toolbar">
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="annulus"        title="Annulus">Ann</button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="commissures"    title="Commissures">Com</button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="sinus_peaks"    title="Sinus peaks">Sin</button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="stj"            title="STJ">STJ</button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="coronary_ostia" title="Coronary">Cor</button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="centerline"     title="Centerline">CL</button>
+            </div>
+            <span class="tbar-sep"></span>
+
+            <!-- Annotation edit -->
+            <div class="tbar-group annotation-edit-cluster">
+              <button type="button" id="undo-measurement"   class="tbar-btn" title="Undo">↩</button>
+              <button type="button" id="delete-measurement" class="tbar-btn" title="Delete selected">✕</button>
+              <button type="button" id="clear-measurements" class="tbar-btn" title="Clear all">⊘</button>
+              <button type="button" id="back-to-crosshair"  class="tbar-btn" title="Back to crosshair">✛</button>
+            </div>
+
+          </nav><!-- /mpr-toolbar-unified -->
+
+        <!-- CENTER: Viewer stage (mpr-panel) -->
         <section class="panel mpr-panel">
-          <div class="mpr-toolbar">
-            <div class="cluster">
-              <span class="muted" id="case-meta">No case loaded</span>
-            </div>
-            <div class="cluster">
-              <span class="tool-group-label" data-i18n="toolbar.layout">Layout</span>
-              <button type="button" id="layout-grid" class="layout-button active" data-i18n="layout.grid_2x2">2x2</button>
-              <button type="button" id="layout-single" class="layout-button" data-i18n="layout.single_view">Single</button>
-            </div>
-            <div class="cluster">
-              <label for="aux-mode" data-i18n="label.aux_mode">Aux</label>
-              <select id="aux-mode">
-                <option value="annulus" data-i18n="aux.annulus">Annulus</option>
-                <option value="stj" data-i18n="aux.stj">STJ</option>
-                <option value="centerline" data-i18n="aux.centerline">Centerline</option>
-                <option value="cpr">CPR</option>
-              </select>
-            </div>
-            <div class="cluster">
-              <label for="centerline-slider" data-i18n="label.centerline_short">CL</label>
-              <input id="centerline-slider" type="range" min="0" max="0" value="0" step="1" />
-              <span id="centerline-value" class="status-chip">0/0</span>
-            </div>
-            <div class="cluster">
-              <span class="muted" id="mpr-status">Preparing engine...</span>
-            </div>
-          </div>
-          <div class="mpr-toolrack">
-            <div class="cluster tool-mode-cluster">
-              <span class="tool-group-label" data-i18n="toolbar.tools">Tools</span>
-              <button type="button" class="tool-button active" data-tool-mode="crosshair" data-i18n="tool.crosshair">Crosshair</button>
-              <button type="button" class="tool-button" data-tool-mode="windowLevel" data-i18n="tool.window_level">Window/Level</button>
-              <button type="button" class="tool-button" data-tool-mode="pan" data-i18n="tool.pan">Pan</button>
-              <button type="button" class="tool-button" data-tool-mode="zoom" data-i18n="tool.zoom">Zoom</button>
-              <button type="button" class="tool-button" data-tool-mode="length" data-i18n="tool.length">Length</button>
-              <button type="button" class="tool-button" data-tool-mode="angle" data-i18n="tool.angle">Angle</button>
-              <button type="button" class="tool-button" data-tool-mode="probe" data-i18n="tool.probe">Probe</button>
-              <button type="button" class="tool-button" data-tool-mode="rectangleRoi" data-i18n="tool.rectangle_roi">Rectangle ROI</button>
-            </div>
-            <div class="cluster">
-              <label for="window-preset" data-i18n="toolbar.window_preset">Preset</label>
-              <select id="window-preset">
-                <option value="softTissue" data-i18n="preset.soft_tissue">Soft tissue</option>
-                <option value="ctaVessel" selected data-i18n="preset.cta_vessel">CTA vessel</option>
-                <option value="calcium" data-i18n="preset.calcium">Calcium</option>
-                <option value="wide" data-i18n="preset.wide">Wide</option>
-              </select>
-              <button type="button" id="reset-viewport" data-i18n="action.reset_viewport">Reset</button>
-            </div>
-            <div class="cluster">
-              <label for="cine-speed" data-i18n="toolbar.cine">Cine</label>
-              <button type="button" id="cine-toggle" data-i18n="action.play_cine">Play</button>
-              <select id="cine-speed">
-                <option value="4">4 fps</option>
-                <option value="8" selected>8 fps</option>
-                <option value="12">12 fps</option>
-              </select>
-            </div>
-            <div class="cluster landmark-toolbar">
-              <span class="tool-group-label" data-i18n="toolbar.landmarks">Landmarks</span>
-              <button type="button" class="legend-toggle active" data-landmark-layer="annulus" data-i18n="landmark.annulus">Annulus</button>
-              <button type="button" class="legend-toggle active" data-landmark-layer="commissures" data-i18n="landmark.commissures">Commissures</button>
-              <button type="button" class="legend-toggle active" data-landmark-layer="sinus_peaks" data-i18n="landmark.sinus_peaks">Sinus peaks</button>
-              <button type="button" class="legend-toggle active" data-landmark-layer="stj" data-i18n="landmark.stj">STJ</button>
-              <button type="button" class="legend-toggle active" data-landmark-layer="coronary_ostia" data-i18n="landmark.coronary_ostia">Coronary ostia</button>
-              <button type="button" class="legend-toggle active" data-landmark-layer="centerline" data-i18n="landmark.centerline">Centerline</button>
-            </div>
-            <div class="cluster annotation-edit-cluster">
-              <span class="tool-group-label" data-i18n="toolbar.measurement_edit">Edit</span>
-              <button type="button" id="undo-measurement" data-i18n="action.undo_measurement">Undo</button>
-              <button type="button" id="delete-measurement" data-i18n="action.delete_measurement">Delete Selected</button>
-              <button type="button" id="clear-measurements" data-i18n="action.clear_measurements">Clear All</button>
-              <button type="button" id="back-to-crosshair" data-i18n="action.back_to_crosshair">Back to Crosshair</button>
-            </div>
-          </div>
           <div class="viewer-stage">
+
+            <!-- 4-up MPR + 3D -->
             <div class="mpr-grid layout-grid-2x2" id="mpr-grid">
               ${renderViewportCard('axial', 'Axial')}
               ${renderViewportCard('coronal', 'Coronal')}
@@ -720,108 +789,118 @@ function renderShell(): void {
               </div>
             </div>
             <div class="aux-hidden-runtime">${renderViewportCard('aux', 'Aux')}</div>
-          </div>
-        </section>
+          </div><!-- /viewer-stage -->
+        </section><!-- /mpr-panel -->
+
+        <!-- RIGHT: Clinical data panel -->
         <aside class="panel side-panel">
-          <div class="panel-head">
-            <div>
-              <h2 data-i18n="panel.analysis_title">Clinical Review</h2>
-              <div class="muted" data-i18n="panel.analysis_subtitle">Measurements, planning, review, downloads</div>
-            </div>
-          </div>
           <div class="side-scroll">
-            <section class="info-card capability-card case-overview-card">
-              <h4 data-i18n="panel.showcase_title">Case Overview</h4>
-              <div class="case-overview-summary" id="case-overview-summary"></div>
-              <div class="capability-grid" id="capability-grid">
-                <div class="capability-item">
-                  <div class="capability-title-row"><span class="capability-name">Cpr</span><span class="capability-pill capability-danger">Unavailable</span></div>
-                  <div class="capability-source">unavailable</div>
-                  <div class="capability-reason">cpr_artifact_missing</div>
+
+            <!-- 0. Step panels (contextual per workflow tab) -->
+            <div class="step-panels" id="step-panels">
+              <div class="step-panel active" data-step="annulus">
+                <div class="step-panel-header">① Annulus</div>
+                <div class="step-panel-body" id="step-annulus-body"></div>
+              </div>
+              <div class="step-panel" data-step="stj">
+                <div class="step-panel-header">② STJ &amp; Sinus</div>
+                <div class="step-panel-body" id="step-stj-body"></div>
+              </div>
+              <div class="step-panel" data-step="root">
+                <div class="step-panel-header">③ Root / Leaflets</div>
+                <div class="step-panel-body" id="step-root-body"></div>
+              </div>
+              <div class="step-panel" data-step="coronary">
+                <div class="step-panel-header">④ Coronary</div>
+                <div class="step-panel-body" id="step-coronary-body"></div>
+              </div>
+            </div>
+
+            <!-- 1. Case context strip -->
+            <div class="case-context-strip">
+              <div class="ctx-header">
+                <span class="ctx-badge ctx-demo">Demo Case</span>
+                <div class="ctx-details">
+                  <span class="ctx-item">AVT D1</span>
+                  <span class="ctx-sep">·</span>
+                  <span class="ctx-item">12 landmarks</span>
+                  <span class="ctx-sep">·</span>
+                  <span class="ctx-item">TAVI · VSRR · PEARS</span>
                 </div>
               </div>
-              <div class="annotation-inline">
-                <div class="section-subtitle" data-i18n="panel.annotation_title">Auto Annotation</div>
-                <div class="annotation-status" id="annotation-status">Waiting for case context...</div>
-                <div class="annotation-detail" id="annotation-detail">Root, annulus, sinus, STJ, coronary ostia, and leaflet geometry will be requested together.</div>
+            </div>
+
+            <!-- 2. Hero measurements (JS-populated) -->
+            <section class="info-card key-measurement-card" id="key-measurement-card"></section>
+
+            <!-- 3. Procedure selector + planning (combined) -->
+            <section class="info-card procedure-planning-card">
+              <span class="card-label">Procedure &amp; Planning</span>
+              <div class="proc-tabs">
+                <button type="button" class="procedure-selector planning-tab active" data-planning-tab="TAVI">TAVI</button>
+                <button type="button" class="procedure-selector planning-tab"        data-planning-tab="VSRR">VSRR</button>
+                <button type="button" class="procedure-selector planning-tab"        data-planning-tab="PEARS">PEARS</button>
               </div>
-            </section>
-            <section class="info-card">
-              <div class="section-head">
-                <h4 data-i18n="panel.measurements_title">Measurements</h4>
-                <div class="section-head-actions">
-                  <button type="button" id="export-measurements-csv">Export CSV</button>
-                  <button type="button" id="toggle-measurements-panel">Hide</button>
-                </div>
-              </div>
-              <div id="data-source-banner" class="data-source-banner hidden"></div>
-              <div class="metric-grid" id="measurement-grid">
-                <div class="metric-row skeleton-shimmer">
-                  <div class="metric-name">Annulus Equivalent Diameter</div>
-                  <div class="metric-value">-- <span class="metric-unit">mm</span></div>
-                </div>
-              </div>
-            </section>
-            <section class="info-card" id="planning-panel-section">
-              <div class="section-head">
-                <h4 data-i18n="panel.planning_title">Surgical Planning</h4>
-                <div class="section-head-actions">
-                  <button type="button" id="toggle-planning-panel">Hide</button>
-                </div>
-              </div>
-              <div class="manual-review-section" id="manual-review-section">
-                <div class="section-head">
-                  <h5 data-i18n="panel.manual_review_title">人工核查 / Manual Review</h5>
-                  <div class="section-head-actions">
-                    <button type="button" id="toggle-manual-review">Hide</button>
+              <div id="planning-panel-section">
+                <div id="planning-grid" class="planning-summary-content">
+                  <div class="planning-item skeleton-shimmer">
+                    <div class="planning-item-title">Loading planning results…</div>
+                    <div class="planning-item-value">—</div>
                   </div>
                 </div>
-                <div class="metric-grid manual-review-grid" id="manual-review-grid"></div>
-                <div class="manual-review-status muted" id="manual-review-status"></div>
               </div>
-              <div class="planning-tabs">
-                <button type="button" class="planning-tab active" data-planning-tab="TAVI">TAVI</button>
-                <button type="button" class="planning-tab" data-planning-tab="VSRR">VSRR</button>
-                <button type="button" class="planning-tab" data-planning-tab="PEARS">PEARS</button>
+            </section>
+
+            <!-- 4. All measurements (collapsible) -->
+            <section class="info-card all-measurements-card">
+              <div class="card-label expandable-header">
+                <span>All Measurements</span>
+                <button type="button" class="expand-toggle" id="toggle-measurements-panel">▼</button>
               </div>
-              <div class="metric-grid" id="planning-grid">
-                <div class="metric-row skeleton-shimmer">
-                  <div class="metric-name">TAVI · Access Route Assessment</div>
-                  <div class="metric-value">--</div>
+              <div id="data-source-banner" class="data-source-banner hidden"></div>
+              <div id="measurement-grid-wrap" class="measurement-grid-expanded hidden">
+                <div class="section-head minimal-section-head">
+                  <h4 data-i18n="panel.measurements_title">Measurements</h4>
+                  <div class="section-head-actions">
+                    <button type="button" id="export-measurements-csv">Export CSV</button>
+                  </div>
                 </div>
-                <div class="metric-row skeleton-shimmer">
-                  <div class="metric-name">TAVI · Coronary Obstruction Risk</div>
-                  <div class="metric-value">--</div>
+                <div class="metric-grid" id="measurement-grid">
+                  <div class="metric-row skeleton-shimmer">
+                    <div class="metric-name">Annulus Equivalent Diameter</div>
+                    <div class="metric-value">— <span class="metric-unit">mm</span></div>
+                  </div>
                 </div>
               </div>
             </section>
-            <section class="info-card clinical-review-card">
-              <h4 data-i18n="panel.acceptance_title">Acceptance Review</h4>
-              <div class="acceptance-summary" id="acceptance-summary">Review Required · Awaiting acceptance context...</div>
-              <ul class="qa-list acceptance-list" id="acceptance-list"></ul>
-              <div class="section-subtitle" data-i18n="panel.qa_title">Landmark QA</div>
-              <ul class="qa-list" id="qa-list">
-                <li class="qa-item qa-warning">
-                  <div class="qa-header"><span class="qa-category">Case</span><span class="qa-tone">reference</span></div>
-                  <div class="qa-title">Showcase reference</div>
-                </li>
-                <li class="qa-item qa-warning">
-                  <div class="qa-header"><span class="qa-category">Warning</span><span class="qa-tone">warning</span></div>
-                  <div class="qa-title">Cpr Artifact Missing</div>
-                </li>
-              </ul>
+
+            <!-- 5. Case / platform context (JS-populated) -->
+            <section class="info-card case-info-investor-card" id="case-info-card"></section>
+
+            <!-- 6. Why this matters (JS-populated, collapsible) -->
+            <section class="info-card why-matters-card" id="why-matters-card">
+              <div class="card-label expandable-header">
+                <span>Platform Context</span>
+                <button type="button" class="expand-toggle" id="toggle-why-matters">▼</button>
+              </div>
+              <div class="why-matters-body" id="why-matters-body"></div>
             </section>
-            <section class="info-card">
-              <h4 data-i18n="panel.downloads_title">Downloads</h4>
+
+            <!-- 7. Downloads -->
+            <section class="info-card downloads-card">
+              <span class="card-label">Export</span>
               <div class="download-list" id="download-list"></div>
             </section>
+
           </div>
-        </aside>
+        </aside><!-- /side-panel -->
       </main>
+
+      <!-- ── Boot overlay ─────────────────────────────────────────────────── -->
       <div class="boot-overlay hidden" id="boot-overlay">
         <div class="boot-card skeleton-shimmer">
           <h2 id="boot-overlay-title">AorticAI</h2>
-          <p id="boot-overlay-text">Initializing workstation...</p>
+          <p id="boot-overlay-text">Initializing workstation…</p>
           <div class="boot-build-version">Build: ${escapeHtml(BUILD_VERSION)}</div>
           <pre class="code-block hidden" id="boot-overlay-detail"></pre>
           <div class="boot-actions">
@@ -829,6 +908,8 @@ function renderShell(): void {
           </div>
         </div>
       </div>
+
+      <!-- ── Report drawer ────────────────────────────────────────────────── -->
       <aside class="report-drawer" id="report-drawer">
         <div class="report-drawer-head">
           <strong data-i18n="panel.report_title">Report</strong>
@@ -837,9 +918,15 @@ function renderShell(): void {
             <button id="close-report" data-i18n="action.close_report">Close</button>
           </div>
         </div>
-        <iframe id="report-frame" src="${defaultCaseReportUrl('report.pdf')}" title="AorticAI report"></iframe>
+        <div id="report-frame" style="width:100%;height:100%;background:#f0f4f8">
+          <embed id="report-embed" type="application/pdf" style="width:100%;height:100%;border:none" />
+        </div>
       </aside>
-      <div class="shortcut-hint-bar">1 四格 | 2 全屏 | W/L 窗宽 | +/- 缩放 | R 重置 | P 规划 | M 测量 | ESC 关闭 | <span data-i18n="footer.research_only">仅供研究使用，不作为临床诊断依据 / For research use only</span></div>
+
+      <!-- ── Footer shortcut bar ──────────────────────────────────────────── -->
+      <div class="shortcut-hint-bar">1 Grid · 2 Single · W/L Window · +/- Zoom · R Reset · ESC Close · <span data-i18n="footer.research_only">For research use only / 仅供研究使用</span></div>
+
+      <!-- ── Submit case modal ────────────────────────────────────────────── -->
       <div class="submit-case-modal hidden" id="submit-case-modal">
         <div class="submit-case-modal-card">
           <div class="submit-case-modal-head">
@@ -855,15 +942,16 @@ function renderShell(): void {
           </form>
         </div>
       </div>
+
     </div>
   `;
 
   DOM.headerStatus = document.getElementById('header-status') as HTMLDivElement;
   DOM.bootStage = document.getElementById('boot-stage') as HTMLDivElement;
-  DOM.demoCaseBadge = document.getElementById('demo-case-badge') as HTMLSpanElement;
   DOM.dataSourceBanner = document.getElementById('data-source-banner') as HTMLDivElement;
   DOM.coronaryReviewBanner = document.getElementById('coronary-review-banner') as HTMLDivElement;
   DOM.coronaryReviewAcknowledge = document.getElementById('coronary-review-ack') as HTMLButtonElement;
+  DOM.headerCaseInfo = document.getElementById('header-case-info') as HTMLDivElement;
   DOM.caseInfoLeft = document.getElementById('case-info-left') as HTMLDivElement;
   DOM.caseInfoCenter = document.getElementById('case-info-center') as HTMLDivElement;
   DOM.caseInfoRight = document.getElementById('case-info-right') as HTMLDivElement;
@@ -908,10 +996,11 @@ function renderShell(): void {
   DOM.clearMeasurementsButton = document.getElementById('clear-measurements') as HTMLButtonElement;
   DOM.backToCrosshairButton = document.getElementById('back-to-crosshair') as HTMLButtonElement;
   DOM.localeButtons = Array.from(document.querySelectorAll('[data-locale-switch]')) as HTMLButtonElement[];
+  DOM.keyMeasurementCard = document.getElementById('key-measurement-card') as HTMLDivElement;
   DOM.measurementGrid = document.getElementById('measurement-grid') as HTMLDivElement;
   DOM.planningGrid = document.getElementById('planning-grid') as HTMLDivElement;
   DOM.planningPanelSection = document.getElementById('planning-panel-section');
-  DOM.measurementPanelSection = DOM.measurementGrid?.closest('.info-card') as HTMLElement | null;
+  DOM.measurementPanelSection = document.getElementById('measurement-grid-wrap') as HTMLElement | null;
   DOM.planningPanelToggle = document.getElementById('toggle-planning-panel') as HTMLButtonElement;
   DOM.manualReviewToggle = document.getElementById('toggle-manual-review') as HTMLButtonElement;
   DOM.measurementPanelToggle = document.getElementById('toggle-measurements-panel') as HTMLButtonElement;
@@ -943,7 +1032,12 @@ function renderShell(): void {
   DOM.reportDrawer = document.getElementById('report-drawer') as HTMLDivElement;
   DOM.reportCloseButton = document.getElementById('close-report') as HTMLButtonElement;
   DOM.reportDownloadLink = document.getElementById('report-download') as HTMLAnchorElement;
-  DOM.reportFrame = document.getElementById('report-frame') as HTMLIFrameElement;
+  DOM.reportFrame = document.getElementById('report-frame') as HTMLDivElement;
+  DOM.reportEmbed = document.getElementById('report-embed') as HTMLEmbedElement;
+  DOM.caseInfoCard = document.getElementById('case-info-card') as HTMLDivElement;
+  DOM.whyMattersCard = document.getElementById('why-matters-card') as HTMLDivElement;
+  DOM.whyMattersToggle = document.getElementById('toggle-why-matters') as HTMLButtonElement;
+  DOM.whyMattersBody = document.getElementById('why-matters-body') as HTMLDivElement;
 
   (['axial', 'sagittal', 'coronal', 'aux'] as ViewportKey[]).forEach((key) => {
     DOM.viewportElements[key] = document.getElementById(`viewport-${key}`) as HTMLDivElement;
@@ -953,16 +1047,6 @@ function renderShell(): void {
     DOM.viewportPlaceholders[key] = document.getElementById(`viewport-placeholder-${key}`) as HTMLDivElement;
   });
 
-  DOM.loadShowcaseButton?.addEventListener('click', (event) => {
-    event.preventDefault();
-    void loadShowcaseCase({ updateUrl: true });
-  });
-  DOM.loadLatestButton?.addEventListener('click', (event) => {
-    event.preventDefault();
-    if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Case Auto Annotation · loading...';
-    if (DOM.annotationStatus) DOM.annotationStatus.textContent = 'ready';
-    void loadLatestCase({ updateUrl: true });
-  });
   DOM.submitCaseButton?.addEventListener('click', () => setSubmitCaseModalOpen(true));
   DOM.submitCaseClose?.addEventListener('click', () => setSubmitCaseModalOpen(false));
   DOM.submitCaseModal?.addEventListener('click', (event) => {
@@ -977,7 +1061,10 @@ function renderShell(): void {
   DOM.retryLatestButton?.addEventListener('click', () => void retryLatestCase());
   DOM.reportOpenButton?.addEventListener('click', () => setReportDrawerOpen(true));
   DOM.reportCloseButton?.addEventListener('click', () => setReportDrawerOpen(false));
-  DOM.planningPanelToggle?.addEventListener('click', () => togglePlanningPanelVisibility());
+  DOM.whyMattersToggle?.addEventListener('click', () => {
+    whyMattersCollapsed = !whyMattersCollapsed;
+    renderWhyMattersCard(activeCase);
+  });
   DOM.manualReviewToggle?.addEventListener('click', () => toggleManualReviewVisibility());
   DOM.measurementPanelToggle?.addEventListener('click', () => toggleMeasurementsPanelVisibility());
   DOM.exportMeasurementsCsv?.addEventListener('click', () => exportMeasurementsCsv());
@@ -989,13 +1076,33 @@ function renderShell(): void {
     if (!fieldKey) return;
     void saveManualReviewField(fieldKey);
   });
-  DOM.annotationButton?.addEventListener('click', () => {
-    void startAutoAnnotation();
+  DOM.focusAnnulusButton?.addEventListener('click', () => {
+    focusPlane('annulus');
+    void setAxialToAnatomicPlane('annulus');
+    setActiveWorkflowStep('annulus');
   });
-  DOM.focusAnnulusButton?.addEventListener('click', () => focusPlane('annulus'));
-  DOM.focusStjButton?.addEventListener('click', () => focusPlane('stj'));
-  DOM.focusRootButton?.addEventListener('click', () => focusRoot());
-  DOM.focusCoronaryButton?.addEventListener('click', () => focusCoronaryOstium());
+  DOM.focusStjButton?.addEventListener('click', () => {
+    focusPlane('stj');
+    void setAxialToAnatomicPlane('stj');
+    setActiveWorkflowStep('stj');
+  });
+  DOM.focusRootButton?.addEventListener('click', () => {
+    focusRoot();
+    setActiveWorkflowStep('root');
+  });
+  DOM.focusCoronaryButton?.addEventListener('click', () => {
+    focusCoronaryOstium();
+    setActiveWorkflowStep('coronary');
+  });
+  DOM.measurementGrid?.addEventListener('click', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-plane]');
+    if (!row) return;
+    const plane = row.dataset.plane as string;
+    if (plane === 'annulus' || plane === 'stj') {
+      void setAxialToAnatomicPlane(plane as 'annulus' | 'stj');
+      setActiveWorkflowStep(plane);
+    }
+  });
   DOM.undoMeasurementButton?.addEventListener('click', () => undoLastMeasurementAction());
   DOM.deleteMeasurementButton?.addEventListener('click', () => deleteSelectedMeasurements());
   DOM.clearMeasurementsButton?.addEventListener('click', () => clearAllMeasurements());
@@ -1159,11 +1266,12 @@ function renderViewportFallback(key: ViewportKey, reason: string): string {
   const tags = viewportFallbackTags(key);
   return `
     <div class="viewport-placeholder-backdrop viewport-placeholder-${key}">
+      <canvas class="viewport-fallback-canvas" data-fallback-canvas="${key}" width="360" height="360"></canvas>
       <div class="viewport-crosshair viewport-crosshair-v"></div>
       <div class="viewport-crosshair viewport-crosshair-h"></div>
       <div class="viewport-placeholder-card">
         <div class="viewport-placeholder-kicker">${escapeHtml(viewportFallbackTitle(key))}</div>
-        <div class="viewport-placeholder-text">Viewer fallback remains visible while live volume rendering is unavailable.</div>
+        <div class="viewport-placeholder-text">Software MPR active</div>
         <div class="viewport-placeholder-tags">
           ${tags.map((tag) => `<span class="viewport-placeholder-tag">${escapeHtml(tag)}</span>`).join('')}
         </div>
@@ -1175,16 +1283,29 @@ function renderViewportFallback(key: ViewportKey, reason: string): string {
 
 function setViewportPlaceholderState(enabled: boolean, reason: string): void {
   (Object.keys(DOM.viewportPlaceholders) as ViewportKey[]).forEach((key) => {
-    const placeholder = DOM.viewportPlaceholders[key];
-    if (!placeholder) return;
-    if (!enabled) {
-      placeholder.classList.add('hidden');
-      placeholder.innerHTML = '';
-      return;
-    }
-    placeholder.innerHTML = renderViewportFallback(key, reason);
-    placeholder.classList.remove('hidden');
+    setViewportPlaceholderForKey(key, enabled ? reason : null);
   });
+}
+
+function setViewportPlaceholderForKey(key: ViewportKey, reason: string | null): void {
+  const placeholder = DOM.viewportPlaceholders[key];
+  const card = DOM.viewportCards[key];
+  if (!placeholder) return;
+  if (!reason) {
+    delete viewportSoftwareFallbackReasons[key];
+    placeholder.classList.add('hidden');
+    placeholder.innerHTML = '';
+    card?.classList.remove('software-fallback-active');
+    return;
+  }
+  viewportSoftwareFallbackReasons[key] = reason;
+  placeholder.innerHTML = renderViewportFallback(key, reason);
+  placeholder.classList.remove('hidden');
+  card?.classList.add('software-fallback-active');
+}
+
+function viewportUsesSoftwareFallback(key: ViewportKey): boolean {
+  return Boolean(viewportSoftwareFallbackReasons[key]);
 }
 
 function t(key: string): string {
@@ -1267,39 +1388,248 @@ function showFatalError(error: unknown, detail?: string): void {
   DOM.bootOverlay?.classList.remove('hidden');
   setStatus(`Failed: ${detail || 'bootstrap error'}`);
   DOM.bootOverlay?.classList.add('interactive');
-  console.error(error);
 }
 
 function showMprFailure(error: unknown): void {
   clearMprWatchdog();
   stopCine();
-  const text = error instanceof Error ? error.message : String(error);
+  const text = humanizeViewerError(error);
   lastMprError = text;
-  if (DOM.mprStatus) DOM.mprStatus.textContent = `Live MPR unavailable. The workstation remains visible with a fallback overlay.`;
+  if (DOM.mprStatus) DOM.mprStatus.textContent = `Live MPR unavailable. Software MPR mode is active.`;
   (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
-    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'double-oblique preview' : 'fallback preview';
+    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'double-oblique mpr' : 'software mpr';
     if (DOM.viewportFooters[key]) {
-      DOM.viewportFooters[key].innerHTML = `<span>Fallback preview</span><span>${escapeHtml(text)}</span>`;
+      DOM.viewportFooters[key].innerHTML = `<span>Software MPR</span><span>${escapeHtml(text)}</span>`;
     }
   });
   setViewportPlaceholderState(true, text);
+  void renderFallbackVolumePreview(activeCase);
   updateViewerState();
 }
 
 function showThreeFailure(error: unknown): void {
-  const text = error instanceof Error ? error.message : String(error);
+  const text = humanizeThreeError(error);
   lastThreeError = text;
   if (DOM.threeFallback) {
     DOM.threeFallback.innerHTML = `
       <div class="three-fallback-card">
         <h3>3D model unavailable</h3>
-        <p>⚠ Data unavailable</p>
-        <pre class="code-block">${escapeHtml(text)}</pre>
+        <p>${escapeHtml(text)}</p>
       </div>
     `;
     DOM.threeFallback.classList.remove('hidden');
   }
   updateViewerState();
+}
+
+function humanizeViewerError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (message.includes('VolumeViewports cannot be used whilst CPU Fallback Rendering is enabled')) {
+    return 'Interactive volume rendering is unavailable in this browser. Showing software MPR instead.';
+  }
+  if (message.includes('timeout')) {
+    return 'Interactive volume rendering timed out. Showing software MPR instead.';
+  }
+  return 'Interactive volume rendering is unavailable. Showing software MPR instead.';
+}
+
+function humanizeThreeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (message.toLowerCase().includes('webgl')) {
+    return '3D preview is unavailable in this browser.';
+  }
+  return '3D preview is temporarily unavailable.';
+}
+
+function readNiftiTypedArray(header: any, raw: ArrayBuffer): NiftiVoxelArray {
+  switch (header.datatypeCode) {
+    case 2: return new Uint8Array(raw);
+    case 4: return new Int16Array(raw);
+    case 8: return new Int32Array(raw);
+    case 16: return new Float32Array(raw);
+    case 64: return new Float64Array(raw);
+    case 256: return new Int8Array(raw);
+    case 512: return new Uint16Array(raw);
+    case 768: return new Uint32Array(raw);
+    default: return new Float32Array(raw);
+  }
+}
+
+async function loadFallbackPreviewVolume(source: VolumeSource | null | undefined): Promise<FallbackPreviewVolume | null> {
+  if (!source || source.loader_kind !== 'cornerstone-nifti' || !source.signed_url) return null;
+  const resolvedUrl = resolveAbsoluteUrl(source.signed_url);
+  if (!fallbackPreviewCache.has(resolvedUrl)) {
+    fallbackPreviewCache.set(resolvedUrl, (async () => {
+      let data = await fetchArrayBuffer(resolvedUrl);
+      if (nifti.isCompressed(data)) {
+        data = nifti.decompress(data) as ArrayBuffer;
+      }
+      if (!nifti.isNIFTI(data)) {
+        throw new Error('nifti_preview_parse_failed');
+      }
+      const header = nifti.readHeader(data) as any;
+      const image = nifti.readImage(header, data);
+      const values = readNiftiTypedArray(header, image);
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (let i = 0; i < values.length; i += Math.max(1, Math.floor(values.length / 50000))) {
+        const value = Number(values[i]);
+        if (Number.isFinite(value)) {
+          if (value < min) min = value;
+          if (value > max) max = value;
+        }
+      }
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        min = -1000;
+        max = 1000;
+      }
+      return {
+        dims: [Number(header.dims[1] || 1), Number(header.dims[2] || 1), Number(header.dims[3] || 1)],
+        data: values,
+        min,
+        max,
+      };
+    })());
+  }
+  return fallbackPreviewCache.get(resolvedUrl) || null;
+}
+
+function slicePixelValue(volume: FallbackPreviewVolume, x: number, y: number, z: number): number {
+  const [dx, dy] = volume.dims;
+  const index = x + (y * dx) + (z * dx * dy);
+  return Number(volume.data[index] ?? 0);
+}
+
+function windowedPixel(value: number): number {
+  const preset = WINDOW_PRESETS[currentWindowPreset];
+  const lower = preset.lower;
+  const upper = preset.upper;
+  const normalized = Math.max(0, Math.min(1, (value - lower) / (upper - lower)));
+  return Math.round(normalized * 255);
+}
+
+function fallbackSliceCountForKey(volume: FallbackPreviewVolume, key: ViewportSliceKey): number {
+  const [dx, dy, dz] = volume.dims;
+  if (key === 'sagittal') return dx;
+  if (key === 'coronal') return dy;
+  return dz;
+}
+
+function resetFallbackMprState(volume: FallbackPreviewVolume): void {
+  const [dx, dy, dz] = volume.dims;
+  fallbackMprState = {
+    volume,
+    slices: {
+      axial: Math.floor(dz / 2),
+      coronal: Math.floor(dy / 2),
+      sagittal: Math.floor(dx / 2),
+      aux: Math.floor(dz / 2),
+    },
+  };
+}
+
+function drawFallbackSlice(
+  canvas: HTMLCanvasElement,
+  key: ViewportSliceKey,
+  volume: FallbackPreviewVolume,
+  sliceIndex: number
+): void {
+  const [dx, dy, dz] = volume.dims;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const width = key === 'sagittal' ? dy : dx;
+  const height = key === 'axial' || key === 'aux' ? dy : dz;
+  const imageData = context.createImageData(width, height);
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) {
+      let value = 0;
+      if (key === 'axial' || key === 'aux') value = slicePixelValue(volume, col, dy - row - 1, sliceIndex);
+      else if (key === 'coronal') value = slicePixelValue(volume, col, sliceIndex, dz - row - 1);
+      else value = slicePixelValue(volume, sliceIndex, col, dz - row - 1);
+      const pixel = windowedPixel(value);
+      const offset = (row * width + col) * 4;
+      imageData.data[offset] = pixel;
+      imageData.data[offset + 1] = pixel;
+      imageData.data[offset + 2] = pixel;
+      imageData.data[offset + 3] = 255;
+    }
+  }
+  const staging = document.createElement('canvas');
+  staging.width = width;
+  staging.height = height;
+  const stagingContext = staging.getContext('2d');
+  if (!stagingContext) return;
+  stagingContext.putImageData(imageData, 0, 0);
+  context.imageSmoothingEnabled = true;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(staging, 0, 0, canvas.width, canvas.height);
+}
+
+function drawAllFallbackSlices(): void {
+  if (!fallbackMprState) return;
+  const state = fallbackMprState;
+  (Object.keys(DOM.viewportPlaceholders) as ViewportKey[]).forEach((key) => {
+    const canvas = DOM.viewportPlaceholders[key]?.querySelector(`[data-fallback-canvas="${key}"]`) as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const total = fallbackSliceCountForKey(state.volume, key);
+    if (!total) return;
+    const safeIndex = clampNumber(Number(state.slices[key] ?? Math.floor(total / 2)), 0, total - 1);
+    state.slices[key] = safeIndex;
+    drawFallbackSlice(canvas, key, state.volume, safeIndex);
+  });
+}
+
+function setFallbackSliceIndex(key: ViewportSliceKey, nextIndex: number): void {
+  if (!fallbackMprState) return;
+  const total = fallbackSliceCountForKey(fallbackMprState.volume, key);
+  if (!total) return;
+  const safeIndex = clampNumber(Math.round(nextIndex), 0, total - 1);
+  fallbackMprState.slices[key] = safeIndex;
+  if (key === 'axial') fallbackMprState.slices.aux = safeIndex;
+  if (key === 'aux') fallbackMprState.slices.axial = safeIndex;
+  drawAllFallbackSlices();
+  refreshViewportPresentation();
+}
+
+function syncFallbackSlicesFromPoint(key: ViewportSliceKey, xRatio: number, yRatio: number): void {
+  if (!fallbackMprState) return;
+  const [dx, dy, dz] = fallbackMprState.volume.dims;
+  const xIndex = clampNumber(Math.round(xRatio * (dx - 1)), 0, dx - 1);
+  const yIndex = clampNumber(Math.round((1 - yRatio) * (dy - 1)), 0, dy - 1);
+  const zIndex = clampNumber(Math.round((1 - yRatio) * (dz - 1)), 0, dz - 1);
+  if (key === 'axial' || key === 'aux') {
+    fallbackMprState.slices.sagittal = xIndex;
+    fallbackMprState.slices.coronal = yIndex;
+  } else if (key === 'coronal') {
+    fallbackMprState.slices.sagittal = xIndex;
+    fallbackMprState.slices.axial = zIndex;
+    fallbackMprState.slices.aux = zIndex;
+  } else {
+    fallbackMprState.slices.coronal = clampNumber(Math.round(xRatio * (dy - 1)), 0, dy - 1);
+    fallbackMprState.slices.axial = zIndex;
+    fallbackMprState.slices.aux = zIndex;
+  }
+  drawAllFallbackSlices();
+  refreshViewportPresentation();
+}
+
+async function renderFallbackVolumePreview(casePayload: WorkstationCasePayload | null): Promise<void> {
+  if (!casePayload) return;
+  try {
+    const volume = await loadFallbackPreviewVolume(casePayload.volume_source);
+    if (!volume) return;
+    if (
+      !fallbackMprState
+      || fallbackMprState.volume !== volume
+      || fallbackMprState.volume.dims.join('x') !== volume.dims.join('x')
+    ) {
+      resetFallbackMprState(volume);
+    }
+    drawAllFallbackSlices();
+    refreshViewportPresentation();
+  } catch {
+    // Keep the textual fallback if preview extraction fails.
+  }
 }
 
 async function retryLatestCase(): Promise<void> {
@@ -1775,6 +2105,9 @@ function resolvePresetRange(
 }
 
 function viewportSliceCount(key: ViewportKey): number {
+  if ((!session || viewportUsesSoftwareFallback(key)) && fallbackMprState) {
+    return fallbackSliceCountForKey(fallbackMprState.volume, key);
+  }
   if (key === 'aux' && currentAuxMode === 'cpr') {
     return Array.isArray(session?.cprImageIds) ? session!.cprImageIds.length : 0;
   }
@@ -1782,7 +2115,20 @@ function viewportSliceCount(key: ViewportKey): number {
 }
 
 function viewportSliceIndex(key: ViewportKey): number | null {
-  if (!session) return null;
+  if (!session || viewportUsesSoftwareFallback(key)) {
+    if (!fallbackMprState) return null;
+    const total = fallbackSliceCountForKey(fallbackMprState.volume, key);
+    if (!total) return null;
+    const raw = Number(fallbackMprState.slices[key]);
+    if (!Number.isFinite(raw)) {
+      const midpoint = Math.floor(total / 2);
+      fallbackMprState.slices[key] = midpoint;
+      return midpoint;
+    }
+    const safeIndex = clampNumber(Math.trunc(raw), 0, total - 1);
+    if (safeIndex !== raw) fallbackMprState.slices[key] = safeIndex;
+    return safeIndex;
+  }
   const total = viewportSliceCount(key);
   if (!total) return null;
   const viewport = session.renderingEngine.getViewport(VIEWPORT_IDS[key]) as any;
@@ -1808,8 +2154,48 @@ function viewportSliceIndex(key: ViewportKey): number | null {
 }
 
 function refreshViewportPresentation(): void {
+  updateViewportFallbackModes();
   refreshViewportBadges();
   updateViewerState();
+}
+
+function updateViewportFallbackModes(): void {
+  if (!session) return;
+  const fallbackReason = 'Live MPR is unavailable in this plane. Software MPR mode is active.';
+  let needsFallbackVolume = false;
+  (['axial', 'coronal', 'sagittal', 'aux'] as ViewportKey[]).forEach((key) => {
+    const total = key === 'aux' && currentAuxMode === 'cpr'
+      ? (Array.isArray(session?.cprImageIds) ? session.cprImageIds.length : 0)
+      : (Array.isArray(session?.volumeImageIds) ? session.volumeImageIds.length : 0);
+    const viewport = session?.renderingEngine.getViewport(VIEWPORT_IDS[key]) as any;
+    if (!total || !viewport?.getCurrentImageIdIndex) {
+      if (fallbackMprState) setViewportPlaceholderForKey(key, fallbackReason);
+      else needsFallbackVolume = true;
+      return;
+    }
+    let rawIndex: number | null = null;
+    try {
+      rawIndex = key === 'aux' && currentAuxMode === 'cpr' && session?.cprVolumeId
+        ? Number(viewport.getCurrentImageIdIndex(session.cprVolumeId))
+        : Number(viewport.getCurrentImageIdIndex(session?.volumeId));
+    } catch {
+      try {
+        rawIndex = Number(viewport.getCurrentImageIdIndex());
+      } catch {
+        rawIndex = null;
+      }
+    }
+    if (!Number.isFinite(rawIndex) || rawIndex == null || rawIndex < 0 || rawIndex >= total) {
+      if (fallbackMprState) setViewportPlaceholderForKey(key, fallbackReason);
+      else needsFallbackVolume = true;
+      return;
+    }
+    setViewportPlaceholderForKey(key, null);
+  });
+  if (needsFallbackVolume && activeCase) {
+    void renderFallbackVolumePreview(activeCase);
+  }
+  if (fallbackMprState) drawAllFallbackSlices();
 }
 
 function refreshViewportBadges(): void {
@@ -1834,7 +2220,9 @@ function refreshViewportBadges(): void {
             : currentAuxMode === 'cpr'
               ? `cl ${currentCenterlineIndex + 1}`
               : `${humanize(currentAuxMode)}`
-      : 'position n/a';
+      : fallbackMprState
+        ? 'software mpr'
+        : 'position n/a';
     const activeLabel = key === currentActiveViewport ? 'active' : 'idle';
     badge.textContent = key === 'aux'
       ? `${currentAuxMode} · ${activeLabel}`
@@ -1922,9 +2310,18 @@ function syncPanelVisibilityButtons(): void {
   if (DOM.planningPanelSection) DOM.planningPanelSection.classList.toggle('hidden', planningPanelCollapsed);
   if (DOM.measurementPanelSection) DOM.measurementPanelSection.classList.toggle('hidden', measurementsPanelCollapsed);
   if (DOM.manualReviewSection) DOM.manualReviewSection.classList.toggle('hidden', manualReviewCollapsed);
-  if (DOM.planningPanelToggle) DOM.planningPanelToggle.textContent = planningPanelCollapsed ? 'Show' : 'Hide';
-  if (DOM.measurementPanelToggle) DOM.measurementPanelToggle.textContent = measurementsPanelCollapsed ? 'Show' : 'Hide';
+  if (DOM.planningPanelToggle) DOM.planningPanelToggle.textContent = planningPanelCollapsed ? '▼' : '▲';
+  if (DOM.measurementPanelToggle) {
+    DOM.measurementPanelToggle.textContent = measurementsPanelCollapsed ? '▼' : '▲';
+    DOM.measurementPanelToggle.classList.toggle('open', !measurementsPanelCollapsed);
+    DOM.measurementPanelToggle.setAttribute('aria-expanded', String(!measurementsPanelCollapsed));
+  }
   if (DOM.manualReviewToggle) DOM.manualReviewToggle.textContent = manualReviewCollapsed ? 'Show' : 'Hide';
+  if (DOM.whyMattersToggle) {
+    DOM.whyMattersToggle.textContent = whyMattersCollapsed ? '▼' : '▲';
+    DOM.whyMattersToggle.classList.toggle('open', !whyMattersCollapsed);
+    DOM.whyMattersToggle.setAttribute('aria-expanded', String(!whyMattersCollapsed));
+  }
 }
 
 function togglePlanningPanelVisibility(): void {
@@ -2067,9 +2464,11 @@ function handleGlobalShortcuts(event: KeyboardEvent): void {
 function requestedCaseMode(): CaseMode {
   const current = new URL(window.location.href);
   if (current.pathname === '/demo/showcase' || current.pathname === '/demo/reference') return 'showcase';
+  if (current.pathname === '/' || current.pathname === '/demo') return 'showcase';
   const explicit = (current.searchParams.get('case') || '').trim().toLowerCase();
   if (explicit === 'showcase' || explicit === 'reference') return 'showcase';
-  return 'latest';
+  if (explicit === 'latest') return 'latest';
+  return 'showcase';
 }
 
 function updateCaseModeUrl(mode: CaseMode, replace = false): void {
@@ -2084,6 +2483,13 @@ function updateCaseModeUrl(mode: CaseMode, replace = false): void {
 function setReportDrawerOpen(open: boolean): void {
   if (!DOM.reportDrawer) return;
   DOM.reportDrawer.classList.toggle('open', open);
+  if (!open) {
+    DOM.reportEmbed?.removeAttribute('src');
+    return;
+  }
+  if (DOM.reportEmbed && currentReportHref) {
+    DOM.reportEmbed.src = currentReportHref;
+  }
 }
 
 function updateReportLinks(casePayload: WorkstationCasePayload | null): void {
@@ -2092,11 +2498,12 @@ function updateReportLinks(casePayload: WorkstationCasePayload | null): void {
     || casePayload?.links?.planning_report_pdf
     || normalizeDownloadEntry(casePayload?.downloads?.pdf, 'PDF report')?.href
     || defaultCaseReportUrl('report.pdf');
-  if (DOM.reportFrame && DOM.reportFrame.src !== resolveAbsoluteUrl(reportHref)) {
-    DOM.reportFrame.src = resolveAbsoluteUrl(reportHref);
-  }
+  currentReportHref = resolveAbsoluteUrl(reportHref);
   if (DOM.reportDownloadLink) {
     DOM.reportDownloadLink.href = reportHref;
+  }
+  if (DOM.reportDrawer?.classList.contains('open') && DOM.reportEmbed && DOM.reportEmbed.src !== currentReportHref) {
+    DOM.reportEmbed.src = currentReportHref;
   }
 }
 
@@ -2149,7 +2556,6 @@ async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boole
     }
   } catch (error) {
     if (options.allowFallback === false) throw error;
-    console.warn('latest case load failed, falling back to showcase case', error);
     try {
       await loadCase('latest_case_fixture');
       return;
@@ -2186,6 +2592,7 @@ async function loadCase(jobId: string): Promise<void> {
     if (loadSerial !== caseLoadSerial) return;
     handleViewportResize();
     attachViewportInteractions();
+    setBootStage('ready', `Case ${jobId} ready`);
     await syncCrosshair(getBootstrapWorldPoint(activeCase));
     if (loadSerial !== caseLoadSerial) return;
     await applyAuxViewportMode();
@@ -2197,6 +2604,8 @@ async function loadCase(jobId: string): Promise<void> {
     if (loadSerial !== caseLoadSerial) return;
     handleViewportResize();
   } else if (volumeFailure) {
+    handleViewportResize();
+    attachViewportInteractions();
     setBootStage('ready', 'Planning outputs loaded while MPR is unavailable');
     if (DOM.headerStatus) {
       DOM.headerStatus.textContent = `Case ${jobId} loaded with MPR unavailable`;
@@ -2469,7 +2878,6 @@ async function unzipDicomZip(buffer: ArrayBuffer): Promise<{ entries: Array<{ na
 }
 
 function attachViewportInteractions(): void {
-  if (!session) return;
   (Object.keys(VIEWPORT_IDS) as ViewportKey[]).forEach((key) => {
     const element = DOM.viewportElements[key];
     element.onpointerdown = async (evt) => {
@@ -2477,6 +2885,14 @@ function attachViewportInteractions(): void {
       currentActiveViewport = key;
       if (key !== 'aux') currentDisplayViewport = key;
       setActiveViewport(key);
+      if ((!session || viewportUsesSoftwareFallback(key)) && fallbackMprState) {
+        if (evt.button !== 0) return;
+        const rect = element.getBoundingClientRect();
+        const xRatio = rect.width > 0 ? clampNumber((evt.clientX - rect.left) / rect.width, 0, 1) : 0.5;
+        const yRatio = rect.height > 0 ? clampNumber((evt.clientY - rect.top) / rect.height, 0, 1) : 0.5;
+        syncFallbackSlicesFromPoint(key, xRatio, yRatio);
+        return;
+      }
       if (evt.button !== 0 || currentPrimaryTool !== 'crosshair') return;
       const viewport = session?.renderingEngine.getViewport(VIEWPORT_IDS[key]) as any;
       if (!viewport?.canvasToWorld) return;
@@ -2491,6 +2907,10 @@ function attachViewportInteractions(): void {
       currentActiveViewport = key;
       if (key !== 'aux') currentDisplayViewport = key;
       setActiveViewport(key);
+      if ((!session || viewportUsesSoftwareFallback(key)) && fallbackMprState) {
+        setFallbackSliceIndex(key, fallbackMprState.slices[key] + (evt.deltaY > 0 ? 1 : -1));
+        return;
+      }
       if (!safeScrollViewport(key, evt.deltaY > 0 ? 1 : -1)) return;
       refreshViewportPresentation();
     };
@@ -2499,6 +2919,10 @@ function attachViewportInteractions(): void {
       currentActiveViewport = key;
       if (key !== 'aux') currentDisplayViewport = key;
       setActiveViewport(key);
+      if ((!session || viewportUsesSoftwareFallback(key)) && fallbackMprState) {
+        setFallbackSliceIndex(key, Math.floor(fallbackSliceCountForKey(fallbackMprState.volume, key) / 2));
+        return;
+      }
       resetActiveViewport();
     };
   });
@@ -2625,6 +3049,35 @@ async function applyAuxViewportMode(): Promise<void> {
   renderAllViewports(session.renderingEngine);
   refreshViewportPresentation();
   if (threeRuntime) updateThreePlaneHighlights();
+}
+
+async function setAxialToAnatomicPlane(mode: 'annulus' | 'stj'): Promise<void> {
+  if (!session || !activeCase) return;
+  const plane = planeForMode(activeCase, mode, currentCenterlineIndex);
+  if (!plane) return;
+  const axialViewport = session.renderingEngine.getViewport(VIEWPORT_IDS.axial) as any;
+  if (!axialViewport) return;
+  const orientation = planeToOrientation(plane);
+  try { axialViewport.setOrientation(orientation, true); } catch { /* best effort */ }
+  try {
+    axialViewport.resetCamera?.({ resetPan: true, resetZoom: true, resetToCenter: true, resetCameraRotation: true });
+  } catch { /* best effort */ }
+  const target = plane.origin_world ? clampWorldToSessionBounds(toPoint3(plane.origin_world)) : currentCrosshairWorld;
+  if (target && axialViewport.jumpToWorld) {
+    try { axialViewport.jumpToWorld(clampWorldToViewport(axialViewport, target)); } catch { /* best effort */ }
+  }
+  axialViewport.render();
+  renderAllViewports(session.renderingEngine);
+  refreshViewportPresentation();
+  if (threeRuntime) updateThreePlaneHighlights();
+}
+
+function setActiveWorkflowStep(step: string): void {
+  document.querySelectorAll('.workflow-tab').forEach(b => b.classList.remove('active'));
+  document.getElementById(`focus-${step}`)?.classList.add('active');
+  document.querySelectorAll<HTMLElement>('.step-panel').forEach(p => {
+    p.classList.toggle('active', p.dataset.step === step);
+  });
 }
 
 async function applyCprViewportMode(auxViewport: any): Promise<void> {
@@ -2909,12 +3362,31 @@ function applyClinicalViewportFraming(casePayload: WorkstationCasePayload | null
   });
 }
 
+function isMeaningfulWorldPoint(point: unknown): point is Point3 {
+  if (!Array.isArray(point) || point.length !== 3) return false;
+  const normalized = toPoint3(point);
+  const magnitude = Math.sqrt(
+    normalized[0] * normalized[0]
+    + normalized[1] * normalized[1]
+    + normalized[2] * normalized[2]
+  );
+  return Number.isFinite(magnitude) && magnitude > 20;
+}
+
 function getBootstrapWorldPoint(casePayload: WorkstationCasePayload | null): Point3 {
-  if (casePayload?.viewer_bootstrap?.focus_world) return toPoint3(casePayload.viewer_bootstrap.focus_world);
   const annulus = casePayload?.display_planes?.annulus?.origin_world;
-  if (annulus) return toPoint3(annulus);
+  if (isMeaningfulWorldPoint(annulus)) return toPoint3(annulus);
+  const annulusModelOrigin = pickObject(pickObject(casePayload?.aortic_root_model)?.annulus_ring)?.origin_world;
+  if (isMeaningfulWorldPoint(annulusModelOrigin)) return toPoint3(annulusModelOrigin);
+  const showcaseAnnulusOrigin = pickObject(defaultAnnulusPlaneArtifact)?.origin_world;
+  if (Array.isArray(casePayload?.case_role) && casePayload.case_role.includes('showcase') && isMeaningfulWorldPoint(showcaseAnnulusOrigin)) {
+    return toPoint3(showcaseAnnulusOrigin);
+  }
+  if (isMeaningfulWorldPoint(casePayload?.viewer_bootstrap?.focus_world)) {
+    return toPoint3(casePayload.viewer_bootstrap.focus_world);
+  }
   const centerlineFirst = casePayload?.centerline?.points_world?.[0];
-  if (centerlineFirst) return toPoint3(centerlineFirst);
+  if (isMeaningfulWorldPoint(centerlineFirst)) return toPoint3(centerlineFirst);
   if (isHistoricalInferredCase(casePayload)) {
     const sessionCenter = getSessionWorldCenter();
     if (sessionCenter) return sessionCenter;
@@ -2939,45 +3411,20 @@ function preferredDisplayName(casePayload: WorkstationCasePayload): string {
 }
 
 function updateHeaderMeta(casePayload: WorkstationCasePayload): void {
-  const overallStatusRaw = String(casePayload.acceptance_review?.overall_status || casePayload.clinical_review?.overall_status || 'needs_review').toLowerCase();
-  const statusClass = overallStatusRaw === 'pass'
-    ? 'quality-pass'
-    : overallStatusRaw === 'blocked'
-      ? 'quality-blocked'
-      : 'quality-needs_review';
-  const scanDate = String(
-    casePayload.study_meta?.scan_date
-    || casePayload.study_meta?.acquired_at
-    || defaultCaseManifestArtifact?.scan_date
-    || 'n/a'
-  );
-  const caseId = String(casePayload.case_id || casePayload.job.id || 'default_clinical_case');
-  const pipelineVersion = String(casePayload.pipeline_run?.pipeline_version || defaultCaseManifestArtifact?.pipeline_version || 'n/a');
-  if (DOM.caseInfoLeft) {
-    DOM.caseInfoLeft.textContent = `Case ${caseId} · Scan ${scanDate}`;
-  }
-  if (DOM.caseInfoCenter) {
-    DOM.caseInfoCenter.textContent = 'AorticAI';
-  }
-  if (DOM.caseInfoRight) {
-    DOM.caseInfoRight.innerHTML = `Pipeline ${escapeHtml(pipelineVersion)} · Build ${escapeHtml(BUILD_VERSION)} · <span class="quality-badge ${statusClass}">${escapeHtml(overallStatusRaw)}</span>`;
+  const dataSource = resolveCaseDataSource(casePayload).toLowerCase();
+  const pipelineLabel = dataSource === 'real_ct_pipeline_output' ? 'Live Pipeline' : 'Demo';
+  const shortCaseLabel = String(casePayload.study_meta?.source_dataset || 'AVT D1').replace('AVT-Dongyang-D1', 'AVT D1');
+  const displayName = preferredDisplayName(casePayload) || shortCaseLabel;
+  if (DOM.headerCaseInfo) {
+    DOM.headerCaseInfo.textContent = `${shortCaseLabel} · ${pipelineLabel}`;
   }
   if (DOM.caseMeta) {
-    const displayName = preferredDisplayName(casePayload);
-    const acceptanceStatus = acceptanceStatusLabel(casePayload.acceptance_review?.overall_status);
+    const acceptanceStatus = acceptanceStatusLabel(casePayload.acceptance_review?.overall_status) || 'Review';
     DOM.caseMeta.textContent = [
-      String(displayName || casePayload.job.id || '-'),
-      `Dataset ${String(casePayload.study_meta?.source_dataset || 'unknown')}`,
-      `Phase ${String(casePayload.study_meta?.phase || casePayload.pipeline_run?.selected_phase || 'unknown')}`,
-      `Input ${casePayload.volume_source.source_kind}`,
-      acceptanceStatus ? `Acceptance ${acceptanceStatus}` : null,
-      Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase') ? 'Gold showcase reference' : null,
-      casePayload.pipeline_run?.inferred ? 'Historical inferred provenance' : null,
+      shortCaseLabel,
+      pipelineLabel,
+      acceptanceStatus,
     ].filter(Boolean).join(' · ');
-  }
-  if (DOM.demoCaseBadge) {
-    const isDemoCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
-    DOM.demoCaseBadge.classList.toggle('hidden', !isDemoCase);
   }
 }
 
@@ -3361,10 +3808,85 @@ function renderPearsPanel(casePayload: WorkstationCasePayload): void {
   `;
 }
 
+function renderStepPanels(casePayload: WorkstationCasePayload): void {
+  const m = currentMeasurementsEnvelopeMap(casePayload);
+  const val = (key: string): string => {
+    const v = envelopeNumber(m[key]);
+    return v != null ? v.toFixed(1) : '--';
+  };
+  const unit = (key: string): string => String(m[key]?.unit || '');
+
+  // Planning data for TAVI size
+  const planning = (casePayload as any).planning || {};
+  const taviSize = planning.tavi_recommended_size_mm ?? planning.tavi_size_mm ?? null;
+  const taviLabel = taviSize != null ? `${taviSize} mm` : '--';
+
+  const annulusBody = document.getElementById('step-annulus-body');
+  if (annulusBody) {
+    annulusBody.innerHTML = `
+      <div class="step-primary-metric">
+        <div class="step-metric-label">Equiv. Diameter</div>
+        <div class="step-metric-value">${val('annulus_equivalent_diameter_mm')}<span class="step-metric-unit">mm</span></div>
+      </div>
+      <div class="step-metric-grid">
+        <div class="step-metric-item"><span class="step-metric-item-label">Short axis</span><span class="step-metric-item-value">${val('annulus_short_diameter_mm')} ${unit('annulus_short_diameter_mm')}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">Long axis</span><span class="step-metric-item-value">${val('annulus_long_diameter_mm')} ${unit('annulus_long_diameter_mm')}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">Area</span><span class="step-metric-item-value">${val('annulus_area_mm2')} ${unit('annulus_area_mm2')}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">Perimeter</span><span class="step-metric-item-value">${val('annulus_perimeter_mm')} ${unit('annulus_perimeter_mm')}</span></div>
+      </div>
+      <div class="step-recommendation">
+        <span class="step-rec-label">TAVI Recommendation</span>
+        <span class="step-rec-value">${escapeHtml(taviLabel)}</span>
+      </div>
+    `;
+  }
+
+  const stjBody = document.getElementById('step-stj-body');
+  if (stjBody) {
+    stjBody.innerHTML = `
+      <div class="step-primary-metric">
+        <div class="step-metric-label">STJ Diameter</div>
+        <div class="step-metric-value">${val('stj_diameter_mm')}<span class="step-metric-unit">mm</span></div>
+      </div>
+      <div class="step-metric-grid">
+        <div class="step-metric-item"><span class="step-metric-item-label">Sinus (max)</span><span class="step-metric-item-value">${val('sinus_diameter_mm')} ${unit('sinus_diameter_mm')}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">Ascending</span><span class="step-metric-item-value">${val('ascending_aorta_diameter_mm')} ${unit('ascending_aorta_diameter_mm')}</span></div>
+      </div>
+    `;
+  }
+
+  const rootBody = document.getElementById('step-root-body');
+  if (rootBody) {
+    rootBody.innerHTML = `
+      <div class="step-metric-grid">
+        <div class="step-metric-item"><span class="step-metric-item-label">Eff. leaflet height</span><span class="step-metric-item-value">${val('leaflet_effective_height_mm')} ${unit('leaflet_effective_height_mm')}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">Coaptation height</span><span class="step-metric-item-value">${val('leaflet_coaptation_height_mm')} ${unit('leaflet_coaptation_height_mm')}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">Calcium burden</span><span class="step-metric-item-value">${val('calcium_burden_ml')} ${unit('calcium_burden_ml')}</span></div>
+      </div>
+    `;
+  }
+
+  const coronaryBody = document.getElementById('step-coronary-body');
+  if (coronaryBody) {
+    const lca = val('coronary_height_left_mm');
+    const rca = val('coronary_height_right_mm');
+    const missing = lca === '--' || rca === '--';
+    coronaryBody.innerHTML = `
+      <div class="step-metric-grid">
+        <div class="step-metric-item"><span class="step-metric-item-label">LCA height</span><span class="step-metric-item-value">${lca} ${lca !== '--' ? unit('coronary_height_left_mm') : ''}</span></div>
+        <div class="step-metric-item"><span class="step-metric-item-label">RCA height</span><span class="step-metric-item-value">${rca} ${rca !== '--' ? unit('coronary_height_right_mm') : ''}</span></div>
+      </div>
+      ${missing ? `<div class="step-warning">⚠ Manual coronary measurement required before TAVI planning</div>` : ''}
+    `;
+  }
+}
+
 function renderSidePanels(casePayload: WorkstationCasePayload): void {
   if (!casePayload) return;
+  renderStepPanels(casePayload);
   renderCoronaryReviewBanner(casePayload);
   renderDataSourceBanner(casePayload);
+  renderInvestorCaseInfo(casePayload);
   renderCaseOverviewSummary(casePayload);
   renderCapabilitySummary(casePayload);
   renderAnnotationPanel(casePayload);
@@ -3373,20 +3895,89 @@ function renderSidePanels(casePayload: WorkstationCasePayload): void {
   renderPlanningPanel(casePayload);
 
   renderAcceptancePanel(casePayload);
-  const qaItems = collectQaItems(casePayload);
-  DOM.qaList!.innerHTML = qaItems.map(renderQaItem).join('') || `<li class="muted">${escapeHtml(t('message.no_qa'))}</li>`;
+  if (DOM.qaList) {
+    const qaItems = collectQaItems(casePayload);
+    DOM.qaList.innerHTML = qaItems.map(renderQaItem).join('') || `<li class="muted">${escapeHtml(t('message.no_qa'))}</li>`;
+  }
   renderDownloadPanel(casePayload);
+  renderWhyMattersCard(casePayload);
 
   updateViewerState();
 }
 
+function displayNameText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  const record = pickObject(value);
+  if (record) return String(record.en || record['zh-CN'] || Object.values(record)[0] || 'Default Clinical Case');
+  return 'Default Clinical Case';
+}
+
+function renderInvestorCaseInfo(casePayload: WorkstationCasePayload): void {
+  if (!DOM.caseInfoCard) return;
+  const manifest = defaultCaseManifestArtifact || {};
+  const displayName = String(casePayload.study_meta?.source_dataset || displayNameText(casePayload.display_name || manifest.display_name)).replace('AVT-Dongyang-D1', 'AVT D1');
+  const dataSource = resolveCaseDataSource(casePayload);
+  const acquisition = dataSource === 'real_ct_pipeline_output' ? 'Real CT Pipeline' : 'Reference Pipeline Output';
+  const overallStatus = String(casePayload.acceptance_review?.overall_status || casePayload.clinical_review?.overall_status || 'needs_review').toLowerCase();
+  const statusText = overallStatus === 'pass' ? 'Complete' : overallStatus === 'blocked' ? 'Blocked' : 'Review Required';
+  const modality = typeof (manifest as Record<string, unknown>).modality === 'string' && String((manifest as Record<string, unknown>).modality).trim()
+    ? String((manifest as Record<string, unknown>).modality)
+    : 'CTA (Aortic Root)';
+  DOM.caseInfoCard.innerHTML = `
+    <h4>Patient Case</h4>
+    <div class="case-info-investor-grid">
+      <div class="case-info-investor-row"><span>Case ID</span><strong>${escapeHtml(displayName)}</strong></div>
+      <div class="case-info-investor-row"><span>Modality</span><strong>${escapeHtml(modality)}</strong></div>
+      <div class="case-info-investor-row"><span>Acquisition</span><strong>${escapeHtml(acquisition)}</strong></div>
+      <div class="case-info-investor-row"><span>Status</span><strong>${overallStatus === 'pass' ? '✓ ' : ''}${escapeHtml(statusText)}</strong></div>
+    </div>
+    <p class="case-info-investor-note">This is real aortic CTA data processed through the pipeline. Measurements are derived from the anatomical model and clearly flagged when manual review is required.</p>
+  `;
+}
+
+function renderWhyMattersCard(casePayload: WorkstationCasePayload | null): void {
+  if (!DOM.whyMattersBody || !DOM.whyMattersToggle) return;
+  DOM.whyMattersToggle.textContent = whyMattersCollapsed ? '▼' : '▲';
+  DOM.whyMattersToggle.classList.toggle('open', !whyMattersCollapsed);
+  DOM.whyMattersBody.classList.toggle('hidden', whyMattersCollapsed);
+  if (whyMattersCollapsed) return;
+  const annulus = envelopeNumber(currentMeasurementsEnvelopeMap(casePayload).annulus_equivalent_diameter_mm);
+  DOM.whyMattersBody.innerHTML = `
+    <div class="why-matters-columns">
+      <div>
+        <div class="why-matters-heading">Current state-of-the-art</div>
+        <ul class="why-matters-list">
+          <li>• TAVI sizing only</li>
+          <li>• Manual 2D measurement</li>
+          <li>• No VSRR/PEARS support</li>
+        </ul>
+      </div>
+      <div>
+        <div class="why-matters-heading">AorticAI</div>
+        <ul class="why-matters-list">
+          <li>✓ Automated 3D digital twin</li>
+          <li>✓ TAVI / VSRR / PEARS in one workstation</li>
+          <li>✓ Evidence-tracked measurements</li>
+          <li>✓ Real case annulus ${annulus == null ? 'available' : `${annulus.toFixed(1)} mm`}</li>
+        </ul>
+      </div>
+    </div>
+  `;
+}
+
 function resolveCoronaryReviewRequired(casePayload: WorkstationCasePayload): boolean {
-  const artifactCoronary = pickObject(defaultMeasurementsArtifact)?.coronary_detection;
+  const isShowcaseCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
+  const artifactCoronary = isShowcaseCase ? pickObject(defaultMeasurementsArtifact)?.coronary_detection : null;
   const payloadCoronary = pickObject(casePayload.measurements)?.coronary_detection
     || pickObject(pickObject(casePayload.measurements)?.measurements)?.coronary_detection;
   if (Boolean(pickObject(artifactCoronary)?.clinician_review_required) || Boolean(pickObject(payloadCoronary)?.clinician_review_required)) {
     return true;
   }
+
+  const measurementMap = currentMeasurementsEnvelopeMap(casePayload);
+  const leftReview = Boolean(pickObject(measurementMap.coronary_height_left_mm?.uncertainty)?.clinician_review_required);
+  const rightReview = Boolean(pickObject(measurementMap.coronary_height_right_mm?.uncertainty)?.clinician_review_required);
+  if (leftReview || rightReview) return true;
 
   const fromMeasurementPayload = pickObject(casePayload.measurements);
   const riskFlags = Array.isArray(fromMeasurementPayload?.risk_flags)
@@ -3440,9 +4031,47 @@ function renderDataSourceBanner(casePayload: WorkstationCasePayload | null): voi
   DOM.dataSourceBanner.textContent = '';
 }
 
+function renderKeyMeasurementCard(casePayload: WorkstationCasePayload): void {
+  if (!DOM.keyMeasurementCard) return;
+  const measurementMap = currentMeasurementsEnvelopeMap(casePayload);
+  const annulus = envelopeNumber(measurementMap.annulus_equivalent_diameter_mm);
+  const sinus = envelopeNumber(measurementMap.sinus_diameter_mm);
+  const stj = envelopeNumber(measurementMap.stj_diameter_mm);
+  const annulusEnvelope = measurementMap.annulus_equivalent_diameter_mm;
+  const annulusFlag = String(pickObject(annulusEnvelope?.uncertainty)?.flag || 'NOT_AVAILABLE');
+  const confidence = pickObject(annulusEnvelope?.evidence)?.confidence;
+  const confidenceLabel =
+    annulusFlag === 'NONE' ? 'High confidence'
+    : annulusFlag === 'LOW_CONFIDENCE' ? 'Review required'
+    : annulusFlag === 'NOT_AVAILABLE' ? 'Not available'
+    : humanize(annulusFlag);
+  const confidenceText = typeof confidence === 'number' && Number.isFinite(confidence)
+    ? `${confidenceLabel} · ${Math.round(confidence * 100)}% confidence`
+    : confidenceLabel;
+
+  DOM.keyMeasurementCard.innerHTML = `
+    <div class="measurement-display">
+      <div class="measurement-label">Aortic Annulus</div>
+      <div class="measurement-value">${annulus == null ? '—' : annulus.toFixed(1)}<span class="unit">mm</span></div>
+      <div class="measurement-subtext">Equiv. diameter · ${escapeHtml(annulus == null ? 'Not available' : confidenceText)}</div>
+    </div>
+    <div class="measurement-grid">
+      <div class="measurement-mini">
+        <div class="mini-label">Sinus</div>
+        <div class="mini-value">${sinus == null ? '—' : sinus.toFixed(1)}</div>
+      </div>
+      <div class="measurement-mini">
+        <div class="mini-label">STJ</div>
+        <div class="mini-value">${stj == null ? '—' : stj.toFixed(1)}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderMeasurementsPanel(casePayload: WorkstationCasePayload): void {
   if (!DOM.measurementGrid) return;
   DOM.measurementGrid.classList.remove('skeleton-shimmer');
+  renderKeyMeasurementCard(casePayload);
   const isShowcaseCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
   if ((isShowcaseCase && !defaultMeasurementsArtifact) || (!defaultMeasurementsArtifact && !casePayload.measurements)) {
     DOM.measurementGrid.innerHTML = '<div class="muted">⚠ Data unavailable</div>';
@@ -3636,7 +4265,8 @@ async function saveManualReviewField(fieldKey: ManualReviewFieldKey): Promise<vo
 
 function currentMeasurementsEnvelopeMap(casePayload: WorkstationCasePayload | null): Record<string, Record<string, unknown>> {
   if (!casePayload) return {};
-  const artifactRoot = pickObject(defaultMeasurementsArtifact)?.measurements ? pickObject(defaultMeasurementsArtifact) : null;
+  const isShowcaseCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
+  const artifactRoot = isShowcaseCase && pickObject(defaultMeasurementsArtifact)?.measurements ? pickObject(defaultMeasurementsArtifact) : null;
   const measurementRoot = pickObject(artifactRoot?.measurements)
     || pickObject(pickObject(casePayload.measurements)?.measurements)
     || pickObject(casePayload.measurements)
@@ -3653,6 +4283,7 @@ function currentMeasurementsEnvelopeMap(casePayload: WorkstationCasePayload | nu
       || pickObject(casePayload.measurements);
     const contractRoot = pickObject(pickObject(casePayload.measurements)?.measurement_contract) || {};
     if (groupedRoot) {
+      const grouped = groupedRoot as any;
       const buildEnvelope = (
         value: unknown,
         unit: string,
@@ -3678,18 +4309,18 @@ function currentMeasurementsEnvelopeMap(casePayload: WorkstationCasePayload | nu
         };
       };
       return {
-        annulus_equivalent_diameter_mm: buildEnvelope(groupedRoot.annulus?.equivalent_diameter_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus equivalent diameter is not available in this case.'),
-        annulus_short_diameter_mm: buildEnvelope(groupedRoot.annulus?.diameter_short_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus short diameter is not available in this case.'),
-        annulus_long_diameter_mm: buildEnvelope(groupedRoot.annulus?.diameter_long_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus long diameter is not available in this case.'),
-        annulus_area_mm2: buildEnvelope(groupedRoot.annulus?.area_mm2, 'mm²', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus area is not available in this case.'),
-        annulus_perimeter_mm: buildEnvelope(groupedRoot.annulus?.perimeter_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus perimeter is not available in this case.'),
-        stj_diameter_mm: buildEnvelope(groupedRoot.stj?.diameter_mm, 'mm', String(pickObject(contractRoot.stj)?.method || 'stj_section'), 'STJ diameter is not available in this case.'),
-        sinus_diameter_mm: buildEnvelope(groupedRoot.sinus_of_valsalva?.max_diameter_mm ?? groupedRoot.sinus_of_valsalva?.equivalent_diameter_mm, 'mm', String(pickObject(contractRoot.sinus_of_valsalva)?.method || 'sinus_section'), 'Sinus diameter is not available in this case.'),
-        ascending_aorta_diameter_mm: buildEnvelope(groupedRoot.ascending_aorta?.diameter_mm, 'mm', String(pickObject(contractRoot.ascending_aorta)?.method || 'ascending_section'), 'Ascending aorta diameter is not available in this case.'),
-        coronary_height_left_mm: buildEnvelope(groupedRoot.coronary_heights_mm?.left, 'mm', String(pickObject(contractRoot.coronary_heights_mm)?.method || 'coronary_height'), 'Left coronary height is not available in this case.', true),
-        coronary_height_right_mm: buildEnvelope(groupedRoot.coronary_heights_mm?.right, 'mm', String(pickObject(contractRoot.coronary_heights_mm)?.method || 'coronary_height'), 'Right coronary height is not available in this case.', true),
-        leaflet_effective_height_mm: buildEnvelope(groupedRoot.leaflet_geometry?.effective_height_mean_mm, 'mm', String(pickObject(contractRoot.leaflet_geometry)?.method || 'leaflet_geometry'), 'Leaflet effective height is not available in this case.', true),
-        calcium_burden_ml: buildEnvelope(groupedRoot.calcium_burden?.calc_volume_ml, 'ml', String(pickObject(contractRoot.calcium_burden)?.method || 'calcium_proxy'), 'Calcium burden proxy is not available in this case.', true),
+        annulus_equivalent_diameter_mm: buildEnvelope(grouped.annulus?.equivalent_diameter_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus equivalent diameter is not available in this case.'),
+        annulus_short_diameter_mm: buildEnvelope(grouped.annulus?.diameter_short_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus short diameter is not available in this case.'),
+        annulus_long_diameter_mm: buildEnvelope(grouped.annulus?.diameter_long_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus long diameter is not available in this case.'),
+        annulus_area_mm2: buildEnvelope(grouped.annulus?.area_mm2, 'mm²', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus area is not available in this case.'),
+        annulus_perimeter_mm: buildEnvelope(grouped.annulus?.perimeter_mm, 'mm', String(pickObject(contractRoot.annulus)?.method || 'annulus_section'), 'Annulus perimeter is not available in this case.'),
+        stj_diameter_mm: buildEnvelope(grouped.stj?.diameter_mm, 'mm', String(pickObject(contractRoot.stj)?.method || 'stj_section'), 'STJ diameter is not available in this case.'),
+        sinus_diameter_mm: buildEnvelope(grouped.sinus_of_valsalva?.max_diameter_mm ?? grouped.sinus_of_valsalva?.equivalent_diameter_mm, 'mm', String(pickObject(contractRoot.sinus_of_valsalva)?.method || 'sinus_section'), 'Sinus diameter is not available in this case.'),
+        ascending_aorta_diameter_mm: buildEnvelope(grouped.ascending_aorta?.diameter_mm, 'mm', String(pickObject(contractRoot.ascending_aorta)?.method || 'ascending_section'), 'Ascending aorta diameter is not available in this case.'),
+        coronary_height_left_mm: buildEnvelope(grouped.coronary_heights_mm?.left, 'mm', String(pickObject(contractRoot.coronary_heights_mm)?.method || 'coronary_height'), 'Left coronary height is not available in this case.', true),
+        coronary_height_right_mm: buildEnvelope(grouped.coronary_heights_mm?.right, 'mm', String(pickObject(contractRoot.coronary_heights_mm)?.method || 'coronary_height'), 'Right coronary height is not available in this case.', true),
+        leaflet_effective_height_mm: buildEnvelope(grouped.leaflet_geometry?.effective_height_mean_mm, 'mm', String(pickObject(contractRoot.leaflet_geometry)?.method || 'leaflet_geometry'), 'Leaflet effective height is not available in this case.', true),
+        calcium_burden_ml: buildEnvelope(grouped.calcium_burden?.calc_volume_ml, 'ml', String(pickObject(contractRoot.calcium_burden)?.method || 'calcium_proxy'), 'Calcium burden proxy is not available in this case.', true),
       };
     }
   }
@@ -3758,6 +4389,13 @@ function exportMeasurementsCsv(): void {
   URL.revokeObjectURL(url);
 }
 
+function measurementFieldToPlane(fieldKey: string): string {
+  if (fieldKey.startsWith('annulus') || fieldKey.startsWith('lvot') || fieldKey.startsWith('leaflet') || fieldKey === 'calcium_burden_ml') return 'annulus';
+  if (fieldKey.startsWith('stj') || fieldKey.startsWith('sinus') || fieldKey.startsWith('ascending')) return 'stj';
+  if (fieldKey.startsWith('coronary')) return 'coronary';
+  return 'annulus';
+}
+
 function measurementPanelRow(fieldKey: string, value: unknown): string | null {
   const envelope = pickObject(value);
   if (!envelope) return null;
@@ -3765,17 +4403,25 @@ function measurementPanelRow(fieldKey: string, value: unknown): string | null {
   const flag = String(uncertainty?.flag || 'NOT_AVAILABLE').toUpperCase();
   const tone = measurementToneFromFlag(flag);
   const reviewRequired = Boolean(uncertainty?.clinician_review_required);
-  const displayValue = formatMetricDisplayValue(fieldKey, envelope, inferUnitFromValue(fieldKey, envelope));
+  const unavailable = envelope.value == null;
+  const displayValue = unavailable ? '--' : formatMetricDisplayValue(fieldKey, envelope, inferUnitFromValue(fieldKey, envelope));
   const unit = String(envelope.unit || inferUnitFromValue(fieldKey, envelope) || '');
   const confidence = pickObject(envelope.evidence)?.confidence;
   const confidenceText = confidence == null || Number.isNaN(Number(confidence))
     ? 'n/a'
     : `${Math.round(Number(confidence) * 100)}%`;
+  const missingMessage = unavailable
+    ? fieldKey.includes('coronary_height')
+      ? '⚠ Manual measurement required'
+      : '⚠ Not available'
+    : null;
+  const plane = measurementFieldToPlane(fieldKey);
   return `
-    <div class="metric-row tone-${tone} measurement-row ${reviewRequired ? 'review-required' : ''}">
+    <div class="metric-row tone-${tone} measurement-row ${reviewRequired ? 'review-required' : ''}" data-plane="${plane}" style="cursor:pointer" title="Click to navigate to ${plane} plane">
       <div class="metric-label">
         <span class="metric-label-text"><span class="confidence-dot tone-${tone}"></span>${escapeHtml(humanize(fieldKey))}</span>
         <span class="metric-meta">${escapeHtml(flag)} · conf ${escapeHtml(confidenceText)}</span>
+        ${missingMessage ? `<span class="metric-meta metric-inline-warning">${escapeHtml(missingMessage)}</span>` : ''}
       </div>
       <div class="metric-value">${escapeHtml(displayValue)}${unit ? `<span class="metric-unit">${escapeHtml(unit)}</span>` : ''}</div>
     </div>
@@ -3785,13 +4431,18 @@ function measurementPanelRow(fieldKey: string, value: unknown): string | null {
 function renderPlanningPanel(casePayload: WorkstationCasePayload): void {
   if (!DOM.planningGrid) return;
   DOM.planningGrid.classList.remove('skeleton-shimmer');
-  DOM.planningGrid.classList.add('planning-grid');
+  DOM.planningGrid.classList.add('planning-summary-content');
+  DOM.planningTabButtons.forEach((entry) => {
+    entry.classList.toggle('active', String(entry.dataset.planningTab || '').toUpperCase() === currentPlanningTab);
+  });
   const isShowcaseCase = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase');
   if ((isShowcaseCase && !defaultPlanningArtifact) || (!defaultPlanningArtifact && !casePayload.planning)) {
     DOM.planningGrid.innerHTML = '<div class="muted">⚠ Data unavailable</div>';
     return;
   }
-  const planningRoot = pickObject(defaultPlanningArtifact) || pickObject(casePayload.planning) || {};
+  const planningRoot = isShowcaseCase
+    ? pickObject(defaultPlanningArtifact) || pickObject(casePayload.planning) || {}
+    : pickObject(casePayload.planning) || {};
   const tabKey = currentPlanningTab.toLowerCase();
   const section = pickObject(planningRoot[tabKey]);
   const measurementMap = currentMeasurementsEnvelopeMap(casePayload);
@@ -3836,14 +4487,11 @@ function planningPanelRow(
     uncertainty?.message ? `uncertainty: ${String(uncertainty.message)}` : null,
   ].filter(Boolean).join(' | ');
   return `
-    <div class="metric-row tone-${tone}" title="${escapeHtml(tooltip || 'No evidence metadata')}">
-      <div class="metric-label">
-        <span class="metric-group tone-${tone}">${escapeHtml(tab)}</span>
-        <span class="metric-label-text"><span class="confidence-dot tone-${tone}"></span>${escapeHtml(humanize(key))}</span>
-        <span class="metric-meta">${escapeHtml(`method: ${String(evidence?.method || 'not_available')} · flag: ${flag}`)}</span>
-        <span class="metric-meta">${escapeHtml(`${t('planning.recommendation_reason')}: ${String(overrideReason || evidence?.method || 'not_available')}`)}</span>
-      </div>
-      <div class="metric-value">${escapeHtml(displayValue)}</div>
+    <div class="planning-item tone-${tone}" title="${escapeHtml(tooltip || 'No evidence metadata')}">
+      <div class="planning-item-eyebrow">${escapeHtml(tab)}</div>
+      <div class="planning-item-title">${escapeHtml(humanize(key))}</div>
+      <div class="planning-item-value">${escapeHtml(displayValue)}</div>
+      <div class="planning-item-meta">${escapeHtml(`${t('planning.recommendation_reason')}: ${String(overrideReason || evidence?.method || 'not_available')}`)}</div>
     </div>
   `;
 }
@@ -3898,7 +4546,7 @@ function buildVsrrPlanningRows(
   measurements: Record<string, Record<string, unknown>>
 ): string[] {
   const rows: Array<string | null> = [];
-  const graftEntry = section?.recommended_graft_diameter_mm ?? section?.graft_sizing;
+  const graftEntry = section?.recommended_graft_diameter_mm ?? section?.recommended_graft_size_mm ?? section?.graft_sizing;
   const graftNum = envelopeNumber(graftEntry);
   const graftDisplay = graftNum == null ? (pickObject(graftEntry)?.value != null ? JSON.stringify(pickObject(graftEntry)?.value) : 'Unavailable') : `${graftNum} mm`;
   rows.push(planningPanelRow('VSRR', 'recommended_graft_diameter', graftEntry, graftDisplay, graftNum == null ? 'warn' : 'ok', 'David procedure graft sizing guidance'));
@@ -3953,7 +4601,7 @@ function renderCaseOverviewSummary(casePayload: WorkstationCasePayload): void {
   const review = casePayload.clinical_review || casePayload.acceptance_review;
   const overall = acceptanceStatusLabel(review?.overall_status);
   const sourceLabel = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase')
-    ? 'Reference'
+    ? 'Showcase'
     : isHistoricalInferredCase(casePayload)
       ? 'Latest / Legacy'
       : 'Real Default';
@@ -5405,10 +6053,10 @@ function numericValueAbsent(value: unknown): boolean {
 
 function formatMetricDisplayValue(key: string, value: unknown, unit: string): string {
   const numeric = readMetricValue(value);
-  if (numeric !== null) return `${numeric.toFixed(unit === 'mm²' ? 2 : 2)} ${unit}`.trim();
+  if (numeric !== null) return `${numeric.toFixed(unit === 'mm²' ? 1 : 1)}`.trim();
   const envelope = pickObject(value);
   if (envelope && 'value' in envelope) {
-    if (envelope.value == null) return unit && unit !== 'status' && unit !== 'category' ? `Unavailable · ${unit}` : 'Unavailable';
+    if (envelope.value == null) return '--';
     if (typeof envelope.value === 'string') return `${envelope.value}${unit && unit !== 'status' && unit !== 'category' ? ` ${unit}` : ''}`.trim();
     if (typeof envelope.value === 'number') return `${envelope.value} ${unit}`.trim();
     if (typeof envelope.value === 'object') return summarizeStructuredValue(envelope.value);
