@@ -601,12 +601,12 @@ function renderShell(): void {
           <p>Structural Heart</p>
         </div>
 
-        <!-- Workflow step tabs (Philips HeartNavigator-style) -->
+        <!-- Workflow step tabs (3mensio numbered step style) -->
         <nav class="header-workflow-tabs">
-          <button id="focus-annulus" class="workflow-tab active" title="Focus: Annulus plane" data-i18n="action.focus_annulus">Annulus</button>
-          <button id="focus-stj"     class="workflow-tab" title="Focus: STJ"               data-i18n="action.focus_stj">STJ</button>
-          <button id="focus-root"    class="workflow-tab" title="Focus: Aortic root"        data-i18n="action.focus_root">Root</button>
-          <button id="focus-coronary" class="workflow-tab" title="Focus: Coronary ostia"   data-i18n="action.focus_coronary">Coronary</button>
+          <button id="focus-annulus" class="workflow-tab active" data-step-num="1" title="Focus: Annulus plane" data-i18n="action.focus_annulus">Annulus</button>
+          <button id="focus-stj"     class="workflow-tab" data-step-num="2" title="Focus: STJ"               data-i18n="action.focus_stj">STJ</button>
+          <button id="focus-root"    class="workflow-tab" data-step-num="3" title="Focus: Aortic root"        data-i18n="action.focus_root">Root</button>
+          <button id="focus-coronary" class="workflow-tab" data-step-num="4" title="Focus: Coronary ostia"   data-i18n="action.focus_coronary">Coronary</button>
         </nav>
 
         <div class="header-case-info" id="header-case-info">—</div>
@@ -898,9 +898,10 @@ function renderShell(): void {
 
       <!-- ── Boot overlay ─────────────────────────────────────────────────── -->
       <div class="boot-overlay hidden" id="boot-overlay">
-        <div class="boot-card skeleton-shimmer">
+        <div class="boot-card">
           <h2 id="boot-overlay-title">AorticAI</h2>
           <p id="boot-overlay-text">Initializing workstation…</p>
+          <div class="boot-progress-bar"><div class="boot-progress-fill" id="boot-progress-fill" style="width:0%"></div></div>
           <div class="boot-build-version">Build: ${escapeHtml(BUILD_VERSION)}</div>
           <pre class="code-block hidden" id="boot-overlay-detail"></pre>
           <div class="boot-actions">
@@ -924,7 +925,18 @@ function renderShell(): void {
       </aside>
 
       <!-- ── Footer shortcut bar ──────────────────────────────────────────── -->
-      <div class="shortcut-hint-bar">1 Grid · 2 Single · W/L Window · +/- Zoom · R Reset · ESC Close · <span data-i18n="footer.research_only">For research use only / 仅供研究使用</span></div>
+      <div class="shortcut-hint-bar">
+        <span>Space Fullscreen</span>
+        <span>1 Grid</span>
+        <span>2 Single</span>
+        <span>W Window/Level</span>
+        <span>L Length</span>
+        <span>P Pan</span>
+        <span>Z Zoom</span>
+        <span>R Reset</span>
+        <span>ESC Exit</span>
+        <span style="margin-left:auto" data-i18n="footer.research_only">For research use only</span>
+      </div>
 
       <!-- ── Submit case modal ────────────────────────────────────────────── -->
       <div class="submit-case-modal hidden" id="submit-case-modal">
@@ -1345,6 +1357,14 @@ function setBootStage(stage: BootStage, detail?: string): void {
   if (DOM.bootStage) DOM.bootStage.textContent = stage;
   setStatus(detail ? `${label}: ${detail}` : label);
   updateViewerActionAvailability();
+  // Update progress bar
+  const progressMap: Record<string, number> = {
+    loading_shell: 10, loading_case_index: 20, loading_case_payload: 35,
+    loading_runtime: 50, initializing_volume: 70, initializing_viewports: 85,
+    ready: 100, failed: 0,
+  };
+  const fill = document.getElementById('boot-progress-fill');
+  if (fill) fill.style.width = `${progressMap[stage] || 0}%`;
   DOM.bootOverlay?.classList.remove('interactive');
   if (stage === 'failed') {
     DOM.bootOverlay?.classList.add('interactive');
@@ -2409,56 +2429,99 @@ function shouldIgnoreShortcutEvent(event: KeyboardEvent): boolean {
 function handleGlobalShortcuts(event: KeyboardEvent): void {
   if (shouldIgnoreShortcutEvent(event)) return;
   const key = event.key;
+
+  // Escape: exit fullscreen or close report
   if (key === 'Escape') {
-    setReportDrawerOpen(false);
+    if (fullscreenViewportKey) {
+      event.preventDefault();
+      toggleViewportFullscreen(null);
+    } else {
+      setReportDrawerOpen(false);
+    }
     return;
   }
+
+  // Spacebar: toggle fullscreen on active viewport
+  if (key === ' ') {
+    event.preventDefault();
+    toggleViewportFullscreen(fullscreenViewportKey ? null : activeViewportKey);
+    return;
+  }
+
   if (!viewerInteractive()) return;
 
-  if (key === '1') {
-    event.preventDefault();
-    setLayoutMode('grid-2x2');
+  // Layout shortcuts
+  if (key === '1') { event.preventDefault(); setLayoutMode('grid-2x2'); return; }
+  if (key === '2') { event.preventDefault(); setLayoutMode('single'); return; }
+
+  // Tool shortcuts (uppercase letter = tool activation)
+  if (key === 'w' || key === 'W') { event.preventDefault(); activateToolMode('windowLevel'); showShortcutToast('Window/Level'); return; }
+  if (key === 'l' || key === 'L') { event.preventDefault(); activateToolMode('length'); showShortcutToast('Length'); return; }
+  if (key === 'p' || key === 'P') { event.preventDefault(); activateToolMode('pan'); showShortcutToast('Pan'); return; }
+  if (key === 'z' || key === 'Z') { event.preventDefault(); activateToolMode('zoom'); showShortcutToast('Zoom'); return; }
+  if (key === 'c' || key === 'C') { event.preventDefault(); activateToolMode('crosshair'); showShortcutToast('Crosshair'); return; }
+  if (key === 'a' || key === 'A') { event.preventDefault(); activateToolMode('angle'); showShortcutToast('Angle'); return; }
+
+  // Zoom
+  if (key === '+' || key === '=') { event.preventDefault(); adjustViewportZoom(true); return; }
+  if (key === '-') { event.preventDefault(); adjustViewportZoom(false); return; }
+
+  // Reset
+  if (key === 'r' || key === 'R') { event.preventDefault(); resetActiveViewport(); return; }
+
+  // Workflow step shortcuts (Fn keys)
+  if (key === 'F1') { event.preventDefault(); document.getElementById('focus-annulus')?.click(); return; }
+  if (key === 'F2') { event.preventDefault(); document.getElementById('focus-stj')?.click(); return; }
+  if (key === 'F3') { event.preventDefault(); document.getElementById('focus-root')?.click(); return; }
+  if (key === 'F4') { event.preventDefault(); document.getElementById('focus-coronary')?.click(); return; }
+}
+
+/** Active viewport key for fullscreen */
+let fullscreenViewportKey: string | null = null;
+let activeViewportKey: string = 'axial';
+
+/** Toggle viewport fullscreen (spacebar) */
+function toggleViewportFullscreen(viewportKey: string | null): void {
+  const workstation = document.querySelector('.workstation');
+
+  // Exit fullscreen
+  if (!viewportKey || fullscreenViewportKey) {
+    const prev = document.querySelector('.viewport-fullscreen');
+    if (prev) prev.classList.remove('viewport-fullscreen');
+    workstation?.classList.remove('viewport-fullscreen-active');
+    fullscreenViewportKey = null;
+    // Trigger resize so cornerstone re-renders
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
     return;
   }
-  if (key === '2') {
-    event.preventDefault();
-    setLayoutMode('single');
-    return;
-  }
-  if (key === 'w' || key === 'W') {
-    event.preventDefault();
-    adjustWindowWidth(100);
-    return;
-  }
-  if (key === 'l' || key === 'L') {
-    event.preventDefault();
-    adjustWindowWidth(-100);
-    return;
-  }
-  if (key === '+' || key === '=') {
-    event.preventDefault();
-    adjustViewportZoom(true);
-    return;
-  }
-  if (key === '-') {
-    event.preventDefault();
-    adjustViewportZoom(false);
-    return;
-  }
-  if (key === 'r' || key === 'R') {
-    event.preventDefault();
-    resetActiveViewport();
-    return;
-  }
-  if (key === 'p' || key === 'P') {
-    event.preventDefault();
-    togglePlanningPanelVisibility();
-    return;
-  }
-  if (key === 'm' || key === 'M') {
-    event.preventDefault();
-    toggleMeasurementsPanelVisibility();
-  }
+
+  // Enter fullscreen
+  const card = document.getElementById(`viewport-card-${viewportKey}`)
+    || document.querySelector(`.viewport-card-${viewportKey}`)
+    || (viewportKey === 'three' ? document.getElementById('viewport-card-three') : null);
+  if (!card) return;
+
+  fullscreenViewportKey = viewportKey;
+  card.classList.add('viewport-fullscreen');
+  workstation?.classList.add('viewport-fullscreen-active');
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+}
+
+/** Show a brief toast when a shortcut is activated */
+function showShortcutToast(label: string): void {
+  const existing = document.querySelector('.shortcut-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'shortcut-toast';
+  toast.textContent = label;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 1600);
+}
+
+/** Activate a tool mode by key name */
+function activateToolMode(mode: string): void {
+  const btn = document.querySelector(`[data-tool-mode="${mode}"]`) as HTMLButtonElement | null;
+  if (btn) btn.click();
 }
 
 function requestedCaseMode(): CaseMode {
@@ -2944,6 +3007,7 @@ function setActiveViewport(key: ViewportKey): void {
   if (key !== 'aux') {
     currentDisplayViewport = key;
   }
+  activeViewportKey = key;
   refreshLayoutMode();
   refreshViewportPresentation();
 }
@@ -3884,9 +3948,33 @@ function renderStepPanels(casePayload: WorkstationCasePayload): void {
   }
 }
 
+function updateWorkflowStepStates(casePayload: WorkstationCasePayload): void {
+  const m = currentMeasurementsEnvelopeMap(casePayload);
+  const hasValue = (key: string): boolean => envelopeNumber(m[key]) != null;
+
+  const annulusOk = hasValue('annulus_equivalent_diameter_mm');
+  const stjOk = hasValue('stj_diameter_mm');
+  const rootOk = hasValue('leaflet_effective_height_mm') || hasValue('calcium_burden_ml');
+  const coronaryOk = hasValue('coronary_height_left_mm') && hasValue('coronary_height_right_mm');
+
+  const tabs = [
+    { id: 'focus-annulus', completed: annulusOk },
+    { id: 'focus-stj', completed: stjOk },
+    { id: 'focus-root', completed: rootOk },
+    { id: 'focus-coronary', completed: coronaryOk },
+  ];
+
+  for (const { id, completed } of tabs) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.classList.toggle('completed', completed && !el.classList.contains('active'));
+  }
+}
+
 function renderSidePanels(casePayload: WorkstationCasePayload): void {
   if (!casePayload) return;
   renderStepPanels(casePayload);
+  updateWorkflowStepStates(casePayload);
   renderCoronaryReviewBanner(casePayload);
   renderDataSourceBanner(casePayload);
   renderInvestorCaseInfo(casePayload);

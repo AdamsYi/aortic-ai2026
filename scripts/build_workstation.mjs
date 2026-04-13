@@ -14,6 +14,7 @@ const wranglerPath = path.join(repoRoot, 'wrangler.toml');
 
 const appEntry = path.join(repoRoot, 'apps/web/src/main.ts');
 const workerEntry = path.join(repoRoot, 'apps/web/src/dicomZip.worker.ts');
+const decodeWorkerEntry = path.join(repoRoot, 'node_modules/@cornerstonejs/dicom-image-loader/dist/esm/decodeImageFrameWorker.js');
 const cssPath = path.join(repoRoot, 'apps/web/src/styles.css');
 const outputPath = path.join(repoRoot, 'src/generated/workstationAssets.ts');
 const buildVersionInputPaths = [
@@ -161,14 +162,33 @@ const workerBuild = await esbuild.build({
   logLevel: 'silent',
 });
 
+const decodeWorkerBuild = await esbuild.build({
+  entryPoints: [decodeWorkerEntry],
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  target: ['es2022'],
+  write: false,
+  logLevel: 'silent',
+  loader: { '.wasm': 'dataurl' },
+  plugins: [browserBuiltinShimPlugin],
+  conditions: ['browser'],
+  mainFields: ['browser', 'module', 'main'],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
+});
+
 const css = await readFile(cssPath, 'utf8');
 const appJs = appBuild.outputFiles[0].text;
 const workerJs = workerBuild.outputFiles[0].text;
+const decodeWorkerJs = decodeWorkerBuild.outputFiles[0].text;
 const buildVersion = await computeBuildVersion();
 const styleSha256 = sha256Hex(css);
 const appSha256 = sha256Hex(appJs);
 const workerSha256 = sha256Hex(workerJs);
-const assetDigest = sha256Hex(`${buildVersion}:${styleSha256}:${appSha256}:${workerSha256}`);
+const decodeWorkerSha256 = sha256Hex(decodeWorkerJs);
+const assetDigest = sha256Hex(`${buildVersion}:${styleSha256}:${appSha256}:${workerSha256}:${decodeWorkerSha256}`);
 
 await rm(distAssetsRoot, { recursive: true, force: true });
 await mkdir(distAssetsRoot, { recursive: true });
@@ -176,10 +196,12 @@ await mkdir(distAssetsRoot, { recursive: true });
 const styleFileName = `style.${buildVersion}.css`;
 const appFileName = `app.${buildVersion}.js`;
 const dicomWorkerFileName = `dicom-zip-worker.${buildVersion}.js`;
+const decodeWorkerFileName = 'decodeImageFrameWorker.js';
 
 await writeFile(path.join(distAssetsRoot, styleFileName), css, 'utf8');
 await writeFile(path.join(distAssetsRoot, appFileName), appJs, 'utf8');
 await writeFile(path.join(distAssetsRoot, dicomWorkerFileName), workerJs, 'utf8');
+await writeFile(path.join(distAssetsRoot, decodeWorkerFileName), decodeWorkerJs, 'utf8');
 
 await buildDefaultCaseBundle({ buildVersion });
 
@@ -208,10 +230,12 @@ export const WORKSTATION_BUILD_VERSION = ${JSON.stringify(buildVersion)};
 export const WORKSTATION_STYLE_SHA256 = ${JSON.stringify(styleSha256)};
 export const WORKSTATION_APP_SHA256 = ${JSON.stringify(appSha256)};
 export const WORKSTATION_DICOM_WORKER_SHA256 = ${JSON.stringify(workerSha256)};
+export const WORKSTATION_DECODE_WORKER_SHA256 = ${JSON.stringify(decodeWorkerSha256)};
 export const WORKSTATION_ASSET_DIGEST = ${JSON.stringify(assetDigest)};
 export const WORKSTATION_STYLE_PATH = ${JSON.stringify(`/assets/${styleFileName}`)};
 export const WORKSTATION_APP_PATH = ${JSON.stringify(`/assets/${appFileName}`)};
 export const WORKSTATION_DICOM_WORKER_PATH = ${JSON.stringify(`/assets/${dicomWorkerFileName}`)};
+export const WORKSTATION_DECODE_WORKER_PATH = ${JSON.stringify(`/assets/${decodeWorkerFileName}`)};
 `;
 
 await writeFile(outputPath, moduleSource, 'utf8');

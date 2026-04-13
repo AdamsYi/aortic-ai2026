@@ -1217,9 +1217,8 @@ export default {
       }
 
       if ((request.method === "GET" || request.method === "HEAD") && path.startsWith("/default-case/")) {
-        // Cloudflare Workers Assets refuses to serve .nii.gz (unknown MIME type).
-        // Build script stores imaging as .nii.gz.bin; rewrite the URL so ASSETS finds it.
-        if (path.includes("/imaging_hidden/") && (path.endsWith(".nii.gz") || path.endsWith(".nii"))) {
+        // Build script stores default-case imaging assets as *.bin for stable asset serving.
+        if (path.includes("/imaging_hidden/") && !path.endsWith(".bin")) {
           const rewritten = new URL(request.url);
           rewritten.pathname = path + ".bin";
           return env.ASSETS.fetch(new Request(rewritten.toString(), request));
@@ -7730,14 +7729,14 @@ function renderDemoHtml(buildVersion: string): string {
 </head>
 <body>
   <style>
-    body { background: #080c12; color: #f1f5f9; margin: 0; font-family: system-ui, sans-serif; }
+    body { background: #f0f4f8; color: #0f172a; margin: 0; font-family: "Inter", "IBM Plex Sans", "SF Pro Text", -apple-system, sans-serif; }
     #pre-load { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 16px; }
-    .spin { width: 40px; height: 40px; border: 3px solid #1e2738; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .spin { width: 40px; height: 40px; border: 3px solid rgba(15, 23, 42, 0.10); border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
   <div id="pre-load">
     <div class="spin"></div>
-    <div style="font-size:14px;color:#8b9fc5">AorticAI — Loading workstation...</div>
+    <div style="font-size:14px;color:#475569">AorticAI — Loading workstation...</div>
   </div>
   <div id="app"></div>
   <script>window.__AORTIC_BUILD_VERSION__=${JSON.stringify(buildVersion)};</script>
