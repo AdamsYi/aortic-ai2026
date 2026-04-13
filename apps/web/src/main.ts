@@ -726,14 +726,14 @@ function renderShell(): void {
             </div>
             <span class="tbar-sep"></span>
 
-            <!-- Landmark toggles -->
+            <!-- Landmark toggles (icon-only, tooltip on hover) -->
             <div class="tbar-group landmark-toolbar">
-              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="annulus"        title="Annulus">Ann</button>
-              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="commissures"    title="Commissures">Com</button>
-              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="sinus_peaks"    title="Sinus peaks">Sin</button>
-              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="stj"            title="STJ">STJ</button>
-              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="coronary_ostia" title="Coronary">Cor</button>
-              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="centerline"     title="Centerline">CL</button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="annulus"        title="Annulus"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><ellipse cx="7" cy="7" rx="5.5" ry="4" stroke="currentColor" stroke-width="1.4"/></svg></button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="commissures"    title="Commissures"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="2.5" r="1.3" fill="currentColor"/><circle cx="3" cy="11" r="1.3" fill="currentColor"/><circle cx="11" cy="11" r="1.3" fill="currentColor"/></svg></button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="sinus_peaks"    title="Sinus peaks"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 10 Q4 3 7 7 Q10 11 12 4" stroke="currentColor" stroke-width="1.4" fill="none"/></svg></button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="stj"            title="STJ"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><line x1="2" y1="5" x2="12" y2="5" stroke="currentColor" stroke-width="1.4"/><path d="M4 5V11M10 5V11" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg></button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="coronary_ostia" title="Coronary ostia"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="5" cy="7" r="2" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="6" r="1.5" stroke="currentColor" stroke-width="1.2"/></svg></button>
+              <button type="button" class="legend-toggle tbar-lm-btn active" data-landmark-layer="centerline"     title="Centerline"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5V12.5" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/></svg></button>
             </div>
             <span class="tbar-sep"></span>
 
@@ -763,28 +763,34 @@ function renderShell(): void {
                   <div class="three-root" id="three-root"></div>
                   <div class="three-fallback hidden" id="three-fallback"></div>
                 </div>
-                <div class="three-layer-controls">
-                  <div class="three-layer-row">
-                    <label><input type="checkbox" data-three-mesh-toggle="aortic_root" checked /> Root</label>
-                    <input type="range" data-three-mesh-opacity="aortic_root" min="0" max="100" value="60" />
+                <div class="three-layer-controls collapsed" id="three-layer-controls">
+                  <button type="button" class="three-layer-toggle-btn" id="three-layer-toggle-btn" title="Toggle layers">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 4h10M1 8h10" stroke="currentColor" stroke-width="1.2"/><circle cx="4" cy="4" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>
+                    <span>Layers</span>
+                  </button>
+                  <div class="three-layer-body">
+                    <div class="three-layer-row">
+                      <label><input type="checkbox" data-three-mesh-toggle="aortic_root" checked /> Root</label>
+                      <input type="range" data-three-mesh-opacity="aortic_root" min="0" max="100" value="60" />
+                    </div>
+                    <div class="three-layer-row">
+                      <label><input type="checkbox" data-three-mesh-toggle="leaflets" checked /> Leaflets</label>
+                      <input type="range" data-three-mesh-opacity="leaflets" min="0" max="100" value="80" />
+                    </div>
+                    <div class="three-layer-row">
+                      <label><input type="checkbox" data-three-mesh-toggle="ascending_aorta" checked /> Ascending</label>
+                      <input type="range" data-three-mesh-opacity="ascending_aorta" min="0" max="100" value="40" />
+                    </div>
+                    <div class="three-layer-row">
+                      <label><input type="checkbox" data-three-mesh-toggle="annulus_ring" checked /> Annulus ring</label>
+                      <input type="range" data-three-mesh-opacity="annulus_ring" min="0" max="100" value="100" />
+                    </div>
+                    <div class="three-layer-row">
+                      <label><input type="checkbox" data-three-layer-toggle="annulus_plane" checked /> Annulus Plane</label>
+                      <span class="three-layer-note">plane + normal</span>
+                    </div>
+                    <button type="button" id="three-screenshot" data-i18n="action.export_png">Export PNG</button>
                   </div>
-                  <div class="three-layer-row">
-                    <label><input type="checkbox" data-three-mesh-toggle="leaflets" checked /> Leaflets</label>
-                    <input type="range" data-three-mesh-opacity="leaflets" min="0" max="100" value="80" />
-                  </div>
-                  <div class="three-layer-row">
-                    <label><input type="checkbox" data-three-mesh-toggle="ascending_aorta" checked /> Ascending</label>
-                    <input type="range" data-three-mesh-opacity="ascending_aorta" min="0" max="100" value="40" />
-                  </div>
-                  <div class="three-layer-row">
-                    <label><input type="checkbox" data-three-mesh-toggle="annulus_ring" checked /> Annulus ring</label>
-                    <input type="range" data-three-mesh-opacity="annulus_ring" min="0" max="100" value="100" />
-                  </div>
-                  <div class="three-layer-row">
-                    <label><input type="checkbox" data-three-layer-toggle="annulus_plane" checked /> Annulus Plane</label>
-                    <span class="three-layer-note">plane + normal</span>
-                  </div>
-                  <button type="button" id="three-screenshot" data-i18n="action.export_png">Export PNG</button>
                 </div>
               </div>
             </div>
@@ -1041,6 +1047,16 @@ function renderShell(): void {
   DOM.threeMeshOpacity = Array.from(document.querySelectorAll('[data-three-mesh-opacity]')) as HTMLInputElement[];
   DOM.threeLayerToggles = Array.from(document.querySelectorAll('[data-three-layer-toggle]')) as HTMLInputElement[];
   DOM.threeScreenshotButton = document.getElementById('three-screenshot') as HTMLButtonElement;
+
+  // 3D layer panel collapse/expand toggle
+  const layerToggleBtn = document.getElementById('three-layer-toggle-btn');
+  const layerControls = document.getElementById('three-layer-controls');
+  if (layerToggleBtn && layerControls) {
+    layerToggleBtn.addEventListener('click', () => {
+      layerControls.classList.toggle('collapsed');
+    });
+  }
+
   DOM.reportDrawer = document.getElementById('report-drawer') as HTMLDivElement;
   DOM.reportCloseButton = document.getElementById('close-report') as HTMLButtonElement;
   DOM.reportDownloadLink = document.getElementById('report-download') as HTMLAnchorElement;
