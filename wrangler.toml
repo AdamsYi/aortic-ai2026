@@ -18,7 +18,7 @@ INFERENCE_SKIP_SEGMENTATION = "true"
 API_BASE_URL = "https://aortic-ai-api.we085197.workers.dev"
 PROVIDER_URL = "https://api.heartvalvepro.edu.kg/infer"
 PROVIDER_HEALTH_URL = "https://api.heartvalvepro.edu.kg/health"
-BUILD_VERSION = "2ca579bdbe74"
+BUILD_VERSION = "37ec7696a3de"
 
 [[r2_buckets]]
 binding = "R2_RAW"

@@ -181,6 +181,21 @@ const DOM = {
   submitCaseButton: null as HTMLButtonElement | null,
   submitCaseModal: null as HTMLDivElement | null,
   submitCaseClose: null as HTMLButtonElement | null,
+  annotateOpenButton: null as HTMLButtonElement | null,
+  annotatePasswordModal: null as HTMLDivElement | null,
+  annotatePasswordClose: null as HTMLButtonElement | null,
+  annotatePasswordForm: null as HTMLFormElement | null,
+  annotatePasswordInput: null as HTMLInputElement | null,
+  annotatePasswordError: null as HTMLDivElement | null,
+  annotatePanel: null as HTMLDivElement | null,
+  annotatePanelMode: null as HTMLSpanElement | null,
+  annotateExitButton: null as HTMLButtonElement | null,
+  annotateClearButton: null as HTMLButtonElement | null,
+  annotateSaveButton: null as HTMLButtonElement | null,
+  annotateSaveStatus: null as HTMLDivElement | null,
+  annotateNote: null as HTMLTextAreaElement | null,
+  annotateHeightLeft: null as HTMLElement | null,
+  annotateHeightRight: null as HTMLElement | null,
   submitCaseForm: null as HTMLFormElement | null,
   submitCaseFile: null as HTMLInputElement | null,
   submitCasePatientId: null as HTMLInputElement | null,
@@ -300,6 +315,7 @@ function renderShell(): void {
             <button type="button" id="reset-viewport" class="header-ctrl-btn" title="Reset viewports">↺</button>
           </div>
           <button id="open-report" class="primary-action-button" data-i18n="action.open_report">Report</button>
+          <button id="open-annotate" class="primary-action-button annotate-button" data-i18n="action.annotate">Annotate</button>
           <button id="submit-case" class="primary-action-button" data-i18n="action.submit_case">Submit Case</button>
           <div class="locale-buttons">
             <button type="button" class="locale-button" data-locale-switch="en">EN</button>
@@ -640,6 +656,53 @@ function renderShell(): void {
         </div>
       </div>
 
+      <!-- ── Annotation password gate modal ──────────────────────────────── -->
+      <div class="submit-case-modal hidden" id="annotate-password-modal">
+        <div class="submit-case-modal-card">
+          <div class="submit-case-modal-head">
+            <h3>Enter Annotation Password</h3>
+            <button type="button" id="annotate-password-close">Close</button>
+          </div>
+          <form id="annotate-password-form" class="submit-case-form">
+            <label>Password</label>
+            <input type="password" id="annotate-password-input" autocomplete="off" required />
+            <div id="annotate-password-error" style="color:var(--danger);font-size:12px;min-height:14px;"></div>
+            <button type="submit" class="primary-action-button">Enter Annotation Mode</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- ── Annotation mode panel (floating) ───────────────────────────── -->
+      <div class="annotate-panel hidden" id="annotate-panel">
+        <div class="annotate-panel-head">
+          <strong>Manual Annotation</strong>
+          <span class="annotate-panel-mode" id="annotate-panel-mode">Click on MPR to place landmark</span>
+          <button type="button" id="annotate-exit" title="Exit annotation mode">✕</button>
+        </div>
+        <div class="annotate-panel-body">
+          <div class="annotate-target-row">
+            <button type="button" class="annotate-target-btn active" data-annotate-target="left_ostium">
+              <span class="dot" style="background:#22d3ee;"></span>Left Coronary Ostium
+              <span class="annotate-coord" id="annotate-coord-left_ostium">—</span>
+            </button>
+            <button type="button" class="annotate-target-btn" data-annotate-target="right_ostium">
+              <span class="dot" style="background:#f59e0b;"></span>Right Coronary Ostium
+              <span class="annotate-coord" id="annotate-coord-right_ostium">—</span>
+            </button>
+          </div>
+          <div class="annotate-computed" id="annotate-computed">
+            <div>Left coronary height: <strong id="annotate-height-left">—</strong></div>
+            <div>Right coronary height: <strong id="annotate-height-right">—</strong></div>
+          </div>
+          <textarea id="annotate-note" placeholder="Optional note (clinician findings)..." rows="2"></textarea>
+          <div class="annotate-actions">
+            <button type="button" id="annotate-clear">Clear</button>
+            <button type="button" id="annotate-save" class="primary-action-button">Save Annotation</button>
+          </div>
+          <div id="annotate-save-status"></div>
+        </div>
+      </div>
+
     </div>
   `;
 
@@ -658,6 +721,21 @@ function renderShell(): void {
   DOM.submitCaseModal = document.getElementById('submit-case-modal') as HTMLDivElement;
   DOM.submitCaseClose = document.getElementById('submit-case-close') as HTMLButtonElement;
   DOM.submitCaseForm = document.getElementById('submit-case-form') as HTMLFormElement;
+  DOM.annotateOpenButton = document.getElementById('open-annotate') as HTMLButtonElement;
+  DOM.annotatePasswordModal = document.getElementById('annotate-password-modal') as HTMLDivElement;
+  DOM.annotatePasswordClose = document.getElementById('annotate-password-close') as HTMLButtonElement;
+  DOM.annotatePasswordForm = document.getElementById('annotate-password-form') as HTMLFormElement;
+  DOM.annotatePasswordInput = document.getElementById('annotate-password-input') as HTMLInputElement;
+  DOM.annotatePasswordError = document.getElementById('annotate-password-error') as HTMLDivElement;
+  DOM.annotatePanel = document.getElementById('annotate-panel') as HTMLDivElement;
+  DOM.annotatePanelMode = document.getElementById('annotate-panel-mode') as HTMLSpanElement;
+  DOM.annotateExitButton = document.getElementById('annotate-exit') as HTMLButtonElement;
+  DOM.annotateClearButton = document.getElementById('annotate-clear') as HTMLButtonElement;
+  DOM.annotateSaveButton = document.getElementById('annotate-save') as HTMLButtonElement;
+  DOM.annotateSaveStatus = document.getElementById('annotate-save-status') as HTMLDivElement;
+  DOM.annotateNote = document.getElementById('annotate-note') as HTMLTextAreaElement;
+  DOM.annotateHeightLeft = document.getElementById('annotate-height-left') as HTMLElement;
+  DOM.annotateHeightRight = document.getElementById('annotate-height-right') as HTMLElement;
   DOM.submitCaseFile = document.getElementById('submit-case-file') as HTMLInputElement;
   DOM.submitCasePatientId = document.getElementById('submit-case-patient-id') as HTMLInputElement;
   DOM.submitCaseSubmit = document.getElementById('submit-case-submit') as HTMLButtonElement;
@@ -758,6 +836,40 @@ function renderShell(): void {
   DOM.submitCaseClose?.addEventListener('click', () => setSubmitCaseModalOpen(false));
   DOM.submitCaseModal?.addEventListener('click', (event) => {
     if (event.target === DOM.submitCaseModal) setSubmitCaseModalOpen(false);
+  });
+
+  // Annotation flow
+  DOM.annotateOpenButton?.addEventListener('click', () => setAnnotatePasswordModalOpen(true));
+  DOM.annotatePasswordClose?.addEventListener('click', () => setAnnotatePasswordModalOpen(false));
+  DOM.annotatePasswordModal?.addEventListener('click', (event) => {
+    if (event.target === DOM.annotatePasswordModal) setAnnotatePasswordModalOpen(false);
+  });
+  DOM.annotatePasswordForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const pwd = DOM.annotatePasswordInput?.value || '';
+    if (!pwd) return;
+    const ok = await submitAnnotationPassword(pwd);
+    if (ok) {
+      setAnnotatePasswordModalOpen(false);
+      enterAnnotationMode();
+    } else if (DOM.annotatePasswordError) {
+      DOM.annotatePasswordError.textContent = 'Incorrect password';
+    }
+  });
+  DOM.annotateExitButton?.addEventListener('click', () => exitAnnotationMode());
+  DOM.annotateClearButton?.addEventListener('click', () => {
+    annotationState.points = {};
+    annotationState.currentTarget = 'left_ostium';
+    updateAnnotateTargetButtons();
+    updateAnnotateComputed();
+    if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = '';
+  });
+  DOM.annotateSaveButton?.addEventListener('click', () => { void saveAnnotation(); });
+  document.querySelectorAll<HTMLButtonElement>('[data-annotate-target]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      annotationState.currentTarget = btn.dataset.annotateTarget as AnnotateTarget;
+      updateAnnotateTargetButtons();
+    });
   });
   DOM.submitCaseForm?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -2648,6 +2760,15 @@ function attachViewportInteractions(): void {
         const rect = element.getBoundingClientRect();
         const xRatio = rect.width > 0 ? clampNumber((evt.clientX - rect.left) / rect.width, 0, 1) : 0.5;
         const yRatio = rect.height > 0 ? clampNumber((evt.clientY - rect.top) / rect.height, 0, 1) : 0.5;
+        if (annotationState.active) {
+          // Fallback mode: record normalized voxel coords as pseudo-world
+          const [dx, dy, dz] = fallbackMprState.volume.dims;
+          const voxX = xRatio * (dx - 1);
+          const voxY = (1 - yRatio) * (dy - 1);
+          const voxZ = (1 - yRatio) * (dz - 1);
+          recordAnnotationPoint([voxX, voxY, voxZ], `${key}_fallback`);
+          return;
+        }
         syncFallbackSlicesFromPoint(key, xRatio, yRatio);
         return;
       }
@@ -2657,6 +2778,12 @@ function attachViewportInteractions(): void {
       const rect = element.getBoundingClientRect();
       const canvasPoint: [number, number] = [evt.clientX - rect.left, evt.clientY - rect.top];
       const world = viewport.canvasToWorld(canvasPoint) as Point3;
+      // Annotation mode intercepts click to record landmark
+      if (annotationState.active) {
+        const clamped = clampWorldToSessionBounds(toPoint3(world));
+        recordAnnotationPoint([clamped[0], clamped[1], clamped[2]], key);
+        return;
+      }
       await syncCrosshair(clampWorldToSessionBounds(toPoint3(world)));
     };
     element.onwheel = (evt) => {
@@ -5866,6 +5993,177 @@ function setStatus(text: string): void {
 
 function setSubmitCaseModalOpen(open: boolean): void {
   DOM.submitCaseModal?.classList.toggle('hidden', !open);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MANUAL ANNOTATION — coronary ostia click-to-place
+// ═══════════════════════════════════════════════════════════════════════════
+type AnnotateTarget = 'left_ostium' | 'right_ostium';
+interface AnnotatePoint { world: [number, number, number]; viewport: string; t: number; }
+const annotationState: {
+  active: boolean;
+  token: string | null;
+  currentTarget: AnnotateTarget;
+  points: Partial<Record<AnnotateTarget, AnnotatePoint>>;
+} = { active: false, token: null, currentTarget: 'left_ostium', points: {} };
+
+function setAnnotatePasswordModalOpen(open: boolean): void {
+  DOM.annotatePasswordModal?.classList.toggle('hidden', !open);
+  if (open && DOM.annotatePasswordInput) {
+    DOM.annotatePasswordInput.value = '';
+    if (DOM.annotatePasswordError) DOM.annotatePasswordError.textContent = '';
+    setTimeout(() => DOM.annotatePasswordInput?.focus(), 50);
+  }
+}
+
+async function submitAnnotationPassword(pwd: string): Promise<boolean> {
+  try {
+    const resp = await fetch('/api/annotations/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd })
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json() as { ok?: boolean; token?: string };
+    if (data.ok && data.token) {
+      annotationState.token = data.token;
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
+function enterAnnotationMode(): void {
+  annotationState.active = true;
+  annotationState.currentTarget = 'left_ostium';
+  DOM.annotatePanel?.classList.remove('hidden');
+  document.body.classList.add('annotate-mode');
+  updateAnnotateTargetButtons();
+  updateAnnotateComputed();
+  if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = '';
+}
+
+function exitAnnotationMode(): void {
+  annotationState.active = false;
+  annotationState.token = null;
+  annotationState.points = {};
+  DOM.annotatePanel?.classList.add('hidden');
+  document.body.classList.remove('annotate-mode');
+  updateAnnotateTargetButtons();
+  updateAnnotateComputed();
+}
+
+function updateAnnotateTargetButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>('[data-annotate-target]').forEach((btn) => {
+    const target = btn.dataset.annotateTarget as AnnotateTarget;
+    btn.classList.toggle('active', target === annotationState.currentTarget);
+    const coord = document.getElementById(`annotate-coord-${target}`);
+    if (coord) {
+      const p = annotationState.points[target];
+      coord.textContent = p
+        ? `[${p.world[0].toFixed(1)}, ${p.world[1].toFixed(1)}, ${p.world[2].toFixed(1)}]`
+        : '—';
+    }
+  });
+  if (DOM.annotatePanelMode) {
+    const label = annotationState.currentTarget === 'left_ostium' ? 'left coronary ostium' : 'right coronary ostium';
+    DOM.annotatePanelMode.textContent = `Click MPR to place ${label}`;
+  }
+}
+
+function recordAnnotationPoint(world: [number, number, number], viewportKey: string): void {
+  annotationState.points[annotationState.currentTarget] = { world, viewport: viewportKey, t: Date.now() };
+  // auto-advance to next empty target
+  const next: AnnotateTarget = annotationState.currentTarget === 'left_ostium' ? 'right_ostium' : 'left_ostium';
+  if (!annotationState.points[next]) annotationState.currentTarget = next;
+  updateAnnotateTargetButtons();
+  updateAnnotateComputed();
+}
+
+function computeCoronaryHeight(world: [number, number, number]): number | null {
+  const plane = (activeCase as any)?.annulus_plane;
+  if (!plane) return null;
+  const origin: number[] | undefined = plane.origin || plane.center || plane.centroid;
+  const normal: number[] | undefined = plane.normal || plane.plane_normal;
+  if (!origin || !normal || origin.length < 3 || normal.length < 3) return null;
+  const dx = world[0] - origin[0];
+  const dy = world[1] - origin[1];
+  const dz = world[2] - origin[2];
+  const len = Math.hypot(normal[0], normal[1], normal[2]);
+  if (len === 0) return null;
+  const dot = (dx * normal[0] + dy * normal[1] + dz * normal[2]) / len;
+  return Math.abs(dot);
+}
+
+function updateAnnotateComputed(): void {
+  const left = annotationState.points.left_ostium;
+  const right = annotationState.points.right_ostium;
+  if (DOM.annotateHeightLeft) {
+    const h = left ? computeCoronaryHeight(left.world) : null;
+    DOM.annotateHeightLeft.textContent = h != null ? `${h.toFixed(2)} mm` : '—';
+    DOM.annotateHeightLeft.style.color = h != null && h < 10 ? 'var(--danger, #ef4444)' : h != null && h < 12 ? 'var(--warn, #f59e0b)' : '';
+  }
+  if (DOM.annotateHeightRight) {
+    const h = right ? computeCoronaryHeight(right.world) : null;
+    DOM.annotateHeightRight.textContent = h != null ? `${h.toFixed(2)} mm` : '—';
+    DOM.annotateHeightRight.style.color = h != null && h < 10 ? 'var(--danger, #ef4444)' : h != null && h < 12 ? 'var(--warn, #f59e0b)' : '';
+  }
+}
+
+async function saveAnnotation(): Promise<void> {
+  if (!annotationState.token) {
+    if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = 'Session expired. Re-enter password.';
+    return;
+  }
+  const caseId = (activeCase as any)?.case_id || 'default_clinical_case';
+  const left = annotationState.points.left_ostium;
+  const right = annotationState.points.right_ostium;
+  const leftHeight = left ? computeCoronaryHeight(left.world) : null;
+  const rightHeight = right ? computeCoronaryHeight(right.world) : null;
+  const payload = {
+    case_id: caseId,
+    annotator: `clinician_${annotationState.token.substring(0, 8)}`,
+    annotation_date: new Date().toISOString(),
+    measurements: {
+      coronary_height_left_mm: { value: leftHeight, method: 'manual_mpr_click', source_type: 'manual_annotation' },
+      coronary_height_right_mm: { value: rightHeight, method: 'manual_mpr_click', source_type: 'manual_annotation' },
+      annulus_diameter_mm: { value: null, method: 'not_annotated' },
+      sinus_diameter_mm: { value: null, method: 'not_annotated' },
+      stj_diameter_mm: { value: null, method: 'not_annotated' },
+    },
+    comparison: {
+      auto_vs_manual_diff_mm: {
+        coronary_height_left_mm: null,
+        coronary_height_right_mm: null,
+      },
+      acceptable_threshold_mm: 2.0,
+    },
+    raw_points: {
+      left_ostium: left ? { world: left.world, viewport: left.viewport } : null,
+      right_ostium: right ? { world: right.world, viewport: right.viewport } : null,
+    },
+    note: DOM.annotateNote?.value || '',
+  };
+  if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = 'Saving...';
+  try {
+    const resp = await fetch(`/api/cases/${encodeURIComponent(caseId)}/annotations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Annotation-Token': annotationState.token,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json() as { ok?: boolean; id?: string; github_commit?: string; error?: string };
+    if (resp.ok && data.ok) {
+      const gh = data.github_commit ? ` · GitHub: ${data.github_commit.substring(0, 7)}` : '';
+      if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = `✓ Saved to CF D1 (id ${data.id?.substring(0, 8)})${gh}`;
+    } else {
+      if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = `Error: ${data.error || resp.status}`;
+    }
+  } catch (err) {
+    if (DOM.annotateSaveStatus) DOM.annotateSaveStatus.textContent = `Network error: ${(err as Error).message}`;
+  }
 }
 
 const STAGE_LABELS: Record<string, { zh: string; en: string }> = {
