@@ -45,6 +45,8 @@ interface Env {
   API_BASE_URL?: string;
   ARTIFACT_LINK_SECRET?: string;
   ARTIFACT_LINK_TTL_SECONDS?: string;
+  ANNOTATION_PASSWORD?: string;
+  ANNOTATION_TOKEN_TTL_SECONDS?: string;
 }
 
 type JobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -139,6 +141,21 @@ function getArtifactLinkSecret(env?: Env): string {
 
 function getArtifactLinkTtlSeconds(env?: Env): number {
   return parsePositiveInt(env?.ARTIFACT_LINK_TTL_SECONDS, DEFAULT_SIGNED_LINK_TTL_SECONDS);
+}
+
+function getAnnotationPassword(env?: Env): string {
+  return String(env?.ANNOTATION_PASSWORD || "").trim();
+}
+
+function getAnnotationTokenTtlSeconds(env?: Env): number {
+  return parsePositiveInt(env?.ANNOTATION_TOKEN_TTL_SECONDS, 3600);
+}
+
+function getAnnotationTokenSecret(env?: Env): string {
+  // Prefer a dedicated secret; fall back to ARTIFACT_LINK_SECRET so deployments
+  // that only set one secret still get a distinct signature (passphrase-prefixed).
+  const dedicated = getArtifactLinkSecret(env);
+  return dedicated ? `annotation:${dedicated}` : "";
 }
 
 function getInferenceHealthUrl(env?: Env): string | null {
@@ -1270,9 +1287,15 @@ export default {
         return respond(json(buildLatestCaseSummaryFromWorkstationPayload(workstationPayload)));
       }
 
+      if (request.method === "POST" && path === "/api/annotations/auth") {
+        return respond(await handleAnnotationAuth(request, env));
+      }
+
       if (request.method === "POST" && /^\/api\/cases\/[^/]+\/annotations$/.test(path)) {
         const parts = path.split("/");
         const caseId = decodeURIComponent(parts[3] || "");
+        const authError = await requireAnnotationToken(request, env);
+        if (authError) return respond(authError);
         const payload = await readJson(request);
         return respond(await saveManualAnnotation(caseId, payload, env));
       }
@@ -1291,6 +1314,16 @@ export default {
         const parts = path.split("/");
         const caseId = decodeURIComponent(parts[3] || "");
         const rawName = parts[5] || "";
+        // Measurements go through the manual-annotation merge pipeline so the
+        // coronary-height P0 fallback actually surfaces to the UI.
+        const normalizedArtifact = decodeURIComponent(rawName || "").trim().toLowerCase();
+        if (normalizedArtifact === "measurements" || normalizedArtifact === "measurements.json") {
+          const mergedResponse = await handleCaseMeasurementsWithOverrides(caseId, env, request);
+          if (mergedResponse.status !== 404) {
+            return respond(mergedResponse);
+          }
+          return respond(await handleCaseResultArtifact(caseId, rawName, env));
+        }
         const defaultArtifactResponse = await handleCaseArtifactById(
           getDefaultCaseStore(env, request),
           getBuildVersion(),
@@ -2908,6 +2941,192 @@ async function saveManualAnnotation(caseId: string, payload: unknown, env: Env):
     annotator,
     created_at: createdAt,
   });
+}
+
+// ── Annotation auth ────────────────────────────────────────────────────────
+// Simple signed-token scheme. Frontend POSTs the shared password to
+// /api/annotations/auth, gets back a short-lived HMAC token, and sends it back
+// as X-Annotation-Token on subsequent annotation writes. Stateless — no D1
+// session row. Keeps the surface small and survives Worker instance churn.
+
+async function buildAnnotationToken(env: Env): Promise<string | null> {
+  const secret = getAnnotationTokenSecret(env);
+  if (!secret) return null;
+  const exp = Math.floor(Date.now() / 1000) + getAnnotationTokenTtlSeconds(env);
+  const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  const payload = `${exp}.${nonce}`;
+  const sig = await hmacSha256Hex(secret, payload);
+  return `${payload}.${sig}`;
+}
+
+async function verifyAnnotationToken(token: string, env: Env): Promise<boolean> {
+  const secret = getAnnotationTokenSecret(env);
+  if (!secret || !token) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [expRaw, nonce, sig] = parts;
+  const exp = Number.parseInt(expRaw, 10);
+  if (!Number.isFinite(exp) || exp <= 0) return false;
+  if (Math.floor(Date.now() / 1000) > exp) return false;
+  if (!nonce) return false;
+  const expected = await hmacSha256Hex(secret, `${expRaw}.${nonce}`);
+  return timingSafeHexEqual(sig, expected);
+}
+
+async function handleAnnotationAuth(request: Request, env: Env): Promise<Response> {
+  const expected = getAnnotationPassword(env);
+  if (!expected) {
+    return json(
+      { ok: false, error: "annotation_password_not_configured" },
+      503,
+    );
+  }
+  const body = await readJson(request);
+  const candidate =
+    body && typeof body === "object"
+      ? nullableString((body as Record<string, unknown>).password) || ""
+      : "";
+  if (!candidate) return json({ ok: false, error: "missing_password" }, 400);
+  // Timing-safe compare over equal-length strings.
+  const aPadded = candidate.padEnd(Math.max(candidate.length, expected.length), "\0");
+  const bPadded = expected.padEnd(aPadded.length, "\0");
+  let diff = candidate.length ^ expected.length;
+  for (let i = 0; i < aPadded.length; i += 1) {
+    diff |= aPadded.charCodeAt(i) ^ bPadded.charCodeAt(i);
+  }
+  if (diff !== 0) return json({ ok: false, error: "invalid_password" }, 401);
+
+  const token = await buildAnnotationToken(env);
+  if (!token) {
+    return json(
+      { ok: false, error: "annotation_token_secret_missing" },
+      503,
+    );
+  }
+  return json({
+    ok: true,
+    token,
+    ttl_seconds: getAnnotationTokenTtlSeconds(env),
+  });
+}
+
+async function requireAnnotationToken(request: Request, env: Env): Promise<Response | null> {
+  // Allow unguarded writes only when no password is configured (local/dev).
+  if (!getAnnotationPassword(env)) return null;
+  const token = (request.headers.get("X-Annotation-Token") || "").trim();
+  if (!token) return json({ error: "annotation_token_required" }, 401);
+  const ok = await verifyAnnotationToken(token, env);
+  if (!ok) return json({ error: "invalid_annotation_token" }, 401);
+  return null;
+}
+
+// ── Summary merge: manual annotation overrides null auto values ──────────────
+// Rules:
+//   1. Only overwrite when auto value is null (never clobber a non-null auto).
+//   2. Stamp evidence.source_type='manual_annotation' and provenance.
+//   3. Flip uncertainty.flag NOT_AVAILABLE -> MANUAL_OVERRIDE; clear review flag.
+// This is route-level glue; keeps defaultCaseHandlers pure (no D1 dep).
+
+const MANUAL_MERGEABLE_KEYS = [
+  "coronary_height_left_mm",
+  "coronary_height_right_mm",
+] as const;
+
+async function getLatestManualAnnotation(
+  caseId: string,
+  env: Env,
+): Promise<Record<string, unknown> | null> {
+  try {
+    await ensureManualAnnotationsTable(env);
+    const row = await safeFirst(
+      env.DB.prepare(
+        `SELECT id, annotator, annotation_json, created_at
+         FROM manual_annotations
+         WHERE case_id = ?1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      )
+        .bind(caseId)
+        .first<Record<string, unknown>>(),
+    );
+    if (!row) return null;
+    const parsed = parseJsonColumn(row.annotation_json);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      id: row.id,
+      annotator: row.annotator,
+      created_at: row.created_at,
+      ...parsed,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeManualIntoMeasurements(
+  measurements: Record<string, unknown>,
+  manual: Record<string, unknown>,
+): Record<string, unknown> {
+  const manualMeasurements = (manual.measurements as Record<string, unknown>) || {};
+  const out: Record<string, unknown> = { ...measurements };
+  const overrides: Array<{ key: string; value: number }> = [];
+  for (const key of MANUAL_MERGEABLE_KEYS) {
+    const autoEntry = out[key] as Record<string, unknown> | undefined;
+    const manualEntry = manualMeasurements[key] as Record<string, unknown> | undefined;
+    if (!manualEntry) continue;
+    const manualValue = manualEntry.value;
+    if (typeof manualValue !== "number" || !Number.isFinite(manualValue)) continue;
+    const autoValue = autoEntry?.value;
+    if (autoValue !== null && autoValue !== undefined) continue; // never clobber auto
+    overrides.push({ key, value: manualValue });
+    out[key] = {
+      value: manualValue,
+      unit: (autoEntry?.unit as string) || "mm",
+      evidence: {
+        method: (manualEntry.method as string) || "manual_mpr_click",
+        confidence: 1.0,
+        source_type: "manual_annotation",
+        source_ref: `manual_annotations:${String(manual.id || "unknown")}`,
+      },
+      uncertainty: {
+        flag: "MANUAL_OVERRIDE",
+        clinician_review_required: false,
+      },
+    };
+  }
+  if (overrides.length) {
+    out._manual_overrides = {
+      annotator: manual.annotator,
+      annotation_date: manual.annotation_date,
+      annotation_id: manual.id,
+      overridden_keys: overrides.map((o) => o.key),
+    };
+  }
+  return out;
+}
+
+async function handleCaseMeasurementsWithOverrides(
+  caseId: string,
+  env: Env,
+  request: Request,
+): Promise<Response> {
+  const store = getDefaultCaseStore(env, request);
+  const baseResponse = await handleCaseArtifactById(
+    store,
+    getBuildVersion(),
+    caseId,
+    "measurements",
+  );
+  if (baseResponse.status !== 200) return baseResponse;
+  let measurements: Record<string, unknown>;
+  try {
+    measurements = (await baseResponse.clone().json()) as Record<string, unknown>;
+  } catch {
+    return baseResponse; // non-JSON or parse failure — return raw
+  }
+  const manual = await getLatestManualAnnotation(caseId, env);
+  if (!manual) return json(measurements);
+  return json(mergeManualIntoMeasurements(measurements, manual));
 }
 
 async function getManualAnnotations(caseId: string, env: Env): Promise<Response> {

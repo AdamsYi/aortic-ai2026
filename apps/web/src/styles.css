@@ -2013,3 +2013,161 @@ hr, .divider { border: none; height: 1px; background: var(--border); margin: 8px
   .side-panel { display: none; }
   .workspace-grid { grid-template-columns: 56px 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Annotation mode — floating panel + MPR crosshair override
+   Reference: Syngo.via structural-heart landmark edit panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Body-level state: tint the MPR viewports so clinician knows annotate is live. */
+body.annotate-mode .viewport-mpr { box-shadow: inset 0 0 0 2px var(--accent-light); cursor: crosshair; }
+
+/* Header "Annotate" button variant — sits next to Report / Submit Case. */
+.annotate-button {
+  background: var(--accent);
+  color: var(--white);
+  border-color: var(--accent-dim);
+}
+.annotate-button:hover { background: var(--accent-dim); }
+
+/* Floating panel anchored bottom-right, above status bar. */
+.annotate-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  width: 320px;
+  background: var(--bg-panel);
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(15,23,42,0.18);
+  color: var(--text-dark);
+  z-index: 1200;
+  font-size: 12px;
+}
+.annotate-panel.hidden { display: none; }
+
+.annotate-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--gray-50);
+  border-radius: 6px 6px 0 0;
+}
+.annotate-panel-head strong { font-size: 13px; color: var(--text-dark); }
+.annotate-panel-mode {
+  flex: 1;
+  color: var(--text-dark-2);
+  font-size: 11px;
+  text-align: right;
+}
+.annotate-panel-head button {
+  background: transparent;
+  border: none;
+  color: var(--text-dark-2);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.annotate-panel-head button:hover { background: var(--gray-100); color: var(--text-dark); }
+
+.annotate-panel-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.annotate-target-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.annotate-target-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dark);
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+.annotate-target-btn:hover { background: var(--bg-hover); }
+.annotate-target-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+.annotate-target-btn .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.annotate-target-btn .annotate-coord {
+  margin-left: auto;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-dark-2);
+}
+
+.annotate-computed {
+  padding: 8px 10px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.annotate-computed strong { color: var(--text-dark); font-weight: 600; }
+
+#annotate-note {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  background: var(--white);
+  color: var(--text-dark);
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+#annotate-note:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+
+.annotate-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.annotate-actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--gray-300);
+  background: var(--white);
+  color: var(--text-dark);
+  font-size: 12px;
+  cursor: pointer;
+}
+.annotate-actions button:hover { background: var(--gray-50); }
+.annotate-actions .primary-action-button {
+  background: var(--accent);
+  border-color: var(--accent-dim);
+  color: var(--white);
+}
+.annotate-actions .primary-action-button:hover { background: var(--accent-dim); }
+
+#annotate-save-status {
+  font-size: 11px;
+  color: var(--text-dark-2);
+  min-height: 14px;
+  text-align: right;
+}
