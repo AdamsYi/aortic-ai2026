@@ -16,7 +16,7 @@
           "properties": {
             "method": { "type": "string" },
             "confidence": { "type": "number" },
-            "source_type": { "type": "string" },
+            "source_type": { "type": "string", "enum": ["auto_pipeline", "manual_annotation", "hybrid", "external"] },
             "source_ref": { "type": "string" }
           },
           "additionalProperties": true

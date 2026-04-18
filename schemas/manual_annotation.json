@@ -59,7 +59,8 @@
       "required": ["value"],
       "properties": {
         "value": { "type": ["number", "null"] },
-        "method": { "type": "string" }
+        "method": { "type": "string" },
+        "source_type": { "type": "string", "enum": ["manual_annotation"], "default": "manual_annotation" }
       },
       "additionalProperties": true
     }
