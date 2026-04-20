@@ -10,6 +10,7 @@ const en = {
   'action.focus_coronary': 'Coronary',
   'action.retry': 'Retry',
   'action.run_annotation': 'Run Auto Annotation',
+  'action.annotate': 'Annotate',
   'action.submit_case': 'Submit Case',
   'action.open_report': 'Report',
   'action.close_report': 'Close',

@@ -10,6 +10,7 @@ const zhCN = {
   'action.focus_coronary': '冠脉',
   'action.retry': '重试',
   'action.run_annotation': '运行自动标注',
+  'action.annotate': '人工标注',
   'action.submit_case': '提交病例',
   'action.open_report': '报告',
   'action.close_report': '关闭',

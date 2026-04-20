@@ -4994,14 +4994,35 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
 
 function positionThreeCameraForCase(runtime: ThreeRuntime, casePayload: WorkstationCasePayload): void {
   const box = new THREE.Box3().setFromObject(runtime.rootGroup);
-  const center = box.isEmpty() ? new THREE.Vector3(0, 0, 0) : box.getCenter(new THREE.Vector3());
-  const size = box.isEmpty() ? 80 : Math.max(60, box.getSize(new THREE.Vector3()).length());
+  const sceneCenter = box.isEmpty() ? new THREE.Vector3(0, 0, 0) : box.getCenter(new THREE.Vector3());
+  const sceneSize = box.isEmpty() ? 80 : Math.max(60, box.getSize(new THREE.Vector3()).length());
   const annulusOrigin = casePayload.display_planes?.annulus?.origin_world
     ? toPoint3(casePayload.display_planes.annulus.origin_world)
     : null;
   const stjOrigin = casePayload.display_planes?.stj?.origin_world
     ? toPoint3(casePayload.display_planes.stj.origin_world)
     : null;
+  // Clinical framing: when annulus + STJ landmarks are known, frame the camera
+  // around the aortic root itself (ignore ascending aorta tail), otherwise fall
+  // back to the whole-scene bounding box so generic cases still render.
+  let center = sceneCenter;
+  let size = sceneSize;
+  if (annulusOrigin && stjOrigin) {
+    const rootLength = Math.hypot(
+      stjOrigin[0] - annulusOrigin[0],
+      stjOrigin[1] - annulusOrigin[1],
+      stjOrigin[2] - annulusOrigin[2]
+    );
+    if (rootLength > 5) {
+      center = new THREE.Vector3(
+        (annulusOrigin[0] + stjOrigin[0]) / 2,
+        (annulusOrigin[1] + stjOrigin[1]) / 2,
+        (annulusOrigin[2] + stjOrigin[2]) / 2
+      );
+      // Tight root framing: clamp so we always see leaflets + coronary ostia.
+      size = Math.max(55, rootLength * 3);
+    }
+  }
   const rootAxis = annulusOrigin && stjOrigin
     ? normalize3([
         stjOrigin[0] - annulusOrigin[0],
