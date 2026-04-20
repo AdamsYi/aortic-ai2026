@@ -104,6 +104,8 @@ const zhCN = {
   'banner.coronary_review_required': '⚠️ Coronary ostia detection requires clinician review before use in planning / 冠脉开口检测需要临床医生复核后方可用于规划',
   'banner.reference_case_warning': '⚠️ 当前展示为参考示范病例，测量值为临床参考估算，非真实CT管线输出。',
   'banner.real_ct_pipeline_output': '✅ 真实CT管线输出 | Real CT pipeline output',
+  'banner.data_quality_gate_failed_title': '⛔ 数据质量门未通过 — sizing 工作流已锁定',
+  'banner.data_quality_gate_failed_tooltip': '数据质量门未通过；在源 CTA 达到 TAVI 采集标准之前，sizing 相关操作均被禁用。',
   'layout.grid_2x2': '2x2',
   'layout.single_view': '单视图',
   'section.annulus': '瓣环',

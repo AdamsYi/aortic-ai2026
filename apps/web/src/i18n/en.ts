@@ -104,6 +104,8 @@ const en = {
   'banner.coronary_review_required': '⚠️ Coronary ostia detection requires clinician review before use in planning / 冠脉开口检测需要临床医生复核后方可用于规划',
   'banner.reference_case_warning': '⚠️ Demo case: values are reference estimates, not from a real CT pipeline run.',
   'banner.real_ct_pipeline_output': '✅ Real CT pipeline output | Real CT pipeline output',
+  'banner.data_quality_gate_failed_title': '⛔ Data quality gate failed — sizing workflow locked',
+  'banner.data_quality_gate_failed_tooltip': 'Data quality gate failed; sizing actions are disabled until the source CTA meets TAVI acquisition standards.',
   'layout.grid_2x2': '2x2',
   'layout.single_view': 'Single',
   'section.annulus': 'Annulus',

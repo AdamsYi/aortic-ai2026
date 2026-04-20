@@ -72,6 +72,12 @@ export function renderShellHTML(): string {
           <span id="centerline-value" class="status-chip">0/0</span>
         </div>
         <span class="tbar-sep"></span>
+        <div class="tbar-group" id="slab-mip-group" title="Slab MIP — toggle maximum-intensity projection on MPR viewports">
+          <button type="button" id="slab-mip-toggle" class="tbar-btn" aria-pressed="false">Slab MIP</button>
+          <input id="slab-thickness-slider" type="range" min="0" max="40" value="0" step="1" class="tbar-range" title="Slab thickness (mm)" disabled />
+          <span id="slab-thickness-value" class="status-chip">0 mm</span>
+        </div>
+        <span class="tbar-sep"></span>
         <div class="tbar-group">
           <button type="button" id="cine-toggle" class="tbar-btn" title="Play/pause cine">▶ Cine</button>
           <select id="cine-speed" class="tbar-select">
@@ -88,6 +94,13 @@ export function renderShellHTML(): string {
       </div>
 
       <!-- ── Banners ────────────────────────────────────────────────────── -->
+      <div class="data-quality-gate-banner hidden" id="data-quality-gate-banner" role="alert" aria-live="assertive">
+        <div class="data-quality-gate-banner-head">
+          <span class="data-quality-gate-banner-icon" aria-hidden="true">⛔</span>
+          <span class="data-quality-gate-banner-title" data-i18n="banner.data_quality_gate_failed_title">Data quality gate failed — sizing workflow locked</span>
+        </div>
+        <ul class="data-quality-gate-banner-reasons" id="data-quality-gate-banner-reasons"></ul>
+      </div>
       <div class="coronary-review-banner hidden" id="coronary-review-banner">
         <div class="coronary-review-banner-text" data-i18n="banner.coronary_review_required">⚠️ Coronary ostia detection requires clinician review before use in planning / 冠脉开口检测需要临床医生复核后方可用于规划</div>
         <button type="button" id="coronary-review-ack" data-i18n="action.acknowledged">Acknowledged</button>

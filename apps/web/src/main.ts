@@ -17,11 +17,13 @@ import {
 } from '@cornerstonejs/nifti-volume-loader';
 import {
   AngleTool,
+  CrosshairsTool,
   Enums as ToolEnums,
   LengthTool,
   PanTool,
   ProbeTool,
   RectangleROITool,
+  ReferenceLinesTool,
   ToolGroupManager,
   WindowLevelTool,
   ZoomTool,
@@ -116,6 +118,12 @@ let currentWindowPreset: WindowPresetId = DEFAULT_WINDOW_PRESET;
 let cineTimerHandle: number | null = null;
 let fallbackCineActive = false;
 let cineFps = DEFAULT_CINE_FPS;
+// Slab MIP — when enabled, the 3 MPR viewports switch to maximum-intensity
+// blend mode with slabThicknessMm (0–40). Used for calcium / coronary review.
+let slabMipEnabled = false;
+let slabThicknessMm = 0;
+// Cache of latest probe sample (HU + voxel coords) for the status-bar readout.
+let lastProbeHuSample: { hu: number; viewportKey: ViewportKey } | null = null;
 let annotationRunState: AnnotationRunState = {
   status: 'idle',
   studyId: null,
@@ -179,6 +187,8 @@ function renderShell(): void {
   DOM.headerStatus = document.getElementById('header-status') as HTMLDivElement;
   DOM.bootStage = document.getElementById('boot-stage') as HTMLDivElement;
   DOM.dataSourceBanner = document.getElementById('data-source-banner') as HTMLDivElement;
+  DOM.dataQualityGateBanner = document.getElementById('data-quality-gate-banner') as HTMLDivElement;
+  DOM.dataQualityGateReasons = document.getElementById('data-quality-gate-banner-reasons') as HTMLUListElement;
   DOM.coronaryReviewBanner = document.getElementById('coronary-review-banner') as HTMLDivElement;
   DOM.coronaryReviewAcknowledge = document.getElementById('coronary-review-ack') as HTMLButtonElement;
   DOM.headerCaseInfo = document.getElementById('header-case-info') as HTMLDivElement;
@@ -225,6 +235,9 @@ function renderShell(): void {
   DOM.windowPreset = document.getElementById('window-preset') as HTMLSelectElement;
   DOM.cineToggle = document.getElementById('cine-toggle') as HTMLButtonElement;
   DOM.cineSpeed = document.getElementById('cine-speed') as HTMLSelectElement;
+  DOM.slabMipToggle = document.getElementById('slab-mip-toggle') as HTMLButtonElement;
+  DOM.slabThicknessSlider = document.getElementById('slab-thickness-slider') as HTMLInputElement;
+  DOM.slabThicknessValue = document.getElementById('slab-thickness-value') as HTMLSpanElement;
   DOM.resetViewportButton = document.getElementById('reset-viewport') as HTMLButtonElement;
   DOM.auxMode = document.getElementById('aux-mode') as HTMLSelectElement;
   DOM.centerlineSlider = document.getElementById('centerline-slider') as HTMLInputElement;
@@ -428,6 +441,24 @@ function renderShell(): void {
   });
   DOM.cineToggle?.addEventListener('click', () => {
     toggleCine();
+  });
+  DOM.slabMipToggle?.addEventListener('click', () => {
+    if (!viewerInteractive()) return;
+    slabMipEnabled = !slabMipEnabled;
+    if (slabMipEnabled && slabThicknessMm <= 0) {
+      slabThicknessMm = 10;
+      if (DOM.slabThicknessSlider) DOM.slabThicknessSlider.value = '10';
+    }
+    if (DOM.slabThicknessSlider) DOM.slabThicknessSlider.disabled = !slabMipEnabled;
+    applySlabModeToSession();
+    syncSlabUi();
+  });
+  DOM.slabThicknessSlider?.addEventListener('input', () => {
+    if (!viewerInteractive()) return;
+    const raw = Number.parseInt(DOM.slabThicknessSlider?.value || '0', 10);
+    slabThicknessMm = Number.isFinite(raw) ? Math.max(0, Math.min(40, raw)) : 0;
+    if (slabMipEnabled) applySlabModeToSession();
+    syncSlabUi();
   });
   DOM.cineSpeed?.addEventListener('change', () => {
     if (!viewerInteractive()) return;
@@ -1004,6 +1035,8 @@ async function initializeCornerstoneOnce(): Promise<void> {
     addTool(AngleTool);
     addTool(ProbeTool);
     addTool(RectangleROITool);
+    addTool(CrosshairsTool);
+    addTool(ReferenceLinesTool);
     toolsRegistered = true;
   }
   initializeAnnotationBridge();
@@ -1014,7 +1047,7 @@ async function initializeCornerstoneOnce(): Promise<void> {
 
 function primaryToolName(mode: PrimaryToolMode): string | null {
   return {
-    crosshair: null,
+    crosshair: CrosshairsTool.toolName,
     windowLevel: WindowLevelTool.toolName,
     pan: PanTool.toolName,
     zoom: ZoomTool.toolName,
@@ -1042,6 +1075,44 @@ function initializeAnnotationBridge(): void {
   eventTarget.addEventListener(ToolEnums.Events.ANNOTATION_COMPLETED, onAnnotationCompleted as EventListener);
   eventTarget.addEventListener(ToolEnums.Events.ANNOTATION_SELECTION_CHANGE, onAnnotationSelectionChange as EventListener);
   eventTarget.addEventListener(ToolEnums.Events.ANNOTATION_REMOVED, onAnnotationRemoved as EventListener);
+  eventTarget.addEventListener(ToolEnums.Events.ANNOTATION_MODIFIED, onAnnotationModifiedForProbeHu as EventListener);
+}
+
+function onAnnotationModifiedForProbeHu(event: Event): void {
+  // Probe tool bakes the sampled voxel value into annotation.data.cachedStats
+  // keyed by volumeId. We read the first numeric value and surface it in the
+  // viewport footer (see refreshViewportBadges HU span).
+  const detail = (event as CustomEvent<{ annotation?: any; viewportId?: string }>).detail;
+  const ann = detail?.annotation;
+  if (!ann || String(ann?.metadata?.toolName || '') !== ProbeTool.toolName) return;
+  const cachedStats = ann?.data?.cachedStats;
+  if (!cachedStats || typeof cachedStats !== 'object') return;
+  let huValue: number | null = null;
+  for (const statKey of Object.keys(cachedStats)) {
+    const entry = (cachedStats as Record<string, unknown>)[statKey] as any;
+    const candidate = entry?.value ?? entry?.Modality ?? entry?.value?.[0];
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      huValue = candidate;
+      break;
+    }
+    if (Array.isArray(candidate) && candidate.length && typeof candidate[0] === 'number') {
+      huValue = candidate[0];
+      break;
+    }
+  }
+  if (huValue === null) return;
+  const viewportKey = viewportKeyForViewportId(detail?.viewportId);
+  if (!viewportKey) return;
+  lastProbeHuSample = { hu: huValue, viewportKey };
+  refreshViewportBadges();
+}
+
+function viewportKeyForViewportId(viewportId: string | undefined | null): ViewportKey | null {
+  if (!viewportId) return null;
+  for (const [key, id] of Object.entries(VIEWPORT_IDS)) {
+    if (id === viewportId) return key as ViewportKey;
+  }
+  return null;
 }
 
 function onAnnotationCompleted(event: Event): void {
@@ -1254,6 +1325,45 @@ function hasCoronaryJumpTarget(casePayload: WorkstationCasePayload | null | unde
   return Boolean(pickObject(coronary?.left)?.point_world || pickObject(coronary?.right)?.point_world);
 }
 
+function syncSlabUi(): void {
+  if (DOM.slabMipToggle) {
+    DOM.slabMipToggle.classList.toggle('active', slabMipEnabled);
+    DOM.slabMipToggle.setAttribute('aria-pressed', slabMipEnabled ? 'true' : 'false');
+  }
+  if (DOM.slabThicknessValue) {
+    DOM.slabThicknessValue.textContent = `${Math.round(slabThicknessMm)} mm`;
+  }
+  if (DOM.slabThicknessSlider) {
+    DOM.slabThicknessSlider.disabled = !slabMipEnabled;
+  }
+}
+
+function applySlabModeToSession(): void {
+  if (!session) return;
+  const engine = session.renderingEngine;
+  // Only mutate the 3 MPR viewports; aux has its own orientation/state.
+  const mprKeys: ViewportKey[] = ['axial', 'sagittal', 'coronal'];
+  for (const key of mprKeys) {
+    const viewportId = session.viewportIds[key];
+    const viewport = engine.getViewport(viewportId) as any;
+    if (!viewport) continue;
+    try {
+      if (slabMipEnabled) {
+        const blendMode = (CoreEnums as any).BlendModes?.MAXIMUM_INTENSITY_BLEND ?? 1;
+        viewport.setBlendMode?.(blendMode);
+        viewport.setSlabThickness?.(Math.max(0.1, slabThicknessMm));
+      } else {
+        const blendMode = (CoreEnums as any).BlendModes?.COMPOSITE ?? 0;
+        viewport.setBlendMode?.(blendMode);
+        viewport.setSlabThickness?.(0);
+      }
+      viewport.render?.();
+    } catch {
+      // One viewport failing should not take down the whole UI.
+    }
+  }
+}
+
 function applyPrimaryToolBindings(toolGroup = session ? ToolGroupManager.getToolGroup(session.toolGroupId) : undefined): void {
   if (!toolGroup) return;
   const primaryTools = [
@@ -1264,10 +1374,20 @@ function applyPrimaryToolBindings(toolGroup = session ? ToolGroupManager.getTool
     AngleTool.toolName,
     ProbeTool.toolName,
     RectangleROITool.toolName,
+    CrosshairsTool.toolName,
   ];
   primaryTools.forEach((toolName) => {
     toolGroup.setToolPassive(toolName, { removeAllBindings: true });
   });
+  // ReferenceLines stays enabled as a passive overlay at all times so each
+  // MPR viewport always shows where the other two are slicing. Source viewport
+  // is picked per-viewport in the activation pass below (Cornerstone3D needs
+  // a configured sourceViewportId to render lines correctly).
+  try {
+    toolGroup.setToolEnabled(ReferenceLinesTool.toolName);
+  } catch {
+    // Tool group may not have the tool added yet on legacy boot paths.
+  }
   toolGroup.setToolActive(PanTool.toolName, {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Auxiliary }],
   });
@@ -1288,7 +1408,7 @@ function applyPrimaryToolBindings(toolGroup = session ? ToolGroupManager.getTool
         { mouseButton: ToolEnums.MouseBindings.Secondary },
       ],
     });
-  } else if (currentPrimaryTool !== 'crosshair') {
+  } else {
     const toolName = primaryToolName(currentPrimaryTool);
     if (toolName) {
       toolGroup.setToolActive(toolName, {
@@ -1514,7 +1634,11 @@ function refreshViewportBadges(): void {
     badge.textContent = key === 'aux'
       ? `${currentAuxMode} · ${activeLabel}`
       : `${title} · ${activeLabel}`;
-    footer.innerHTML = `<span>${sliceLabel}</span><span>${worldLabel}</span><span>${activeToolLabel}</span><span>${currentPrimaryTool === 'crosshair' ? 'crosshair on' : 'crosshair off'}</span>`;
+    const huLabel = (currentPrimaryTool === 'probe' && lastProbeHuSample && lastProbeHuSample.viewportKey === key && Number.isFinite(lastProbeHuSample.hu))
+      ? `HU ${Math.round(lastProbeHuSample.hu)}`
+      : '';
+    const crosshairLabel = currentPrimaryTool === 'crosshair' ? 'crosshair on' : 'crosshair off';
+    footer.innerHTML = `<span>${sliceLabel}</span><span>${worldLabel}</span><span>${activeToolLabel}</span>${huLabel ? `<span class="footer-hu">${huLabel}</span>` : ''}<span>${crosshairLabel}</span>`;
   });
   if (DOM.mprStatus) {
     DOM.mprStatus.textContent = `Preset ${WINDOW_PRESETS[currentWindowPreset].label} · Tool ${PRIMARY_TOOL_LABELS[currentPrimaryTool]} · ${cineActive ? `cine ${cineFps} fps` : 'cine off'}`;
@@ -2071,6 +2195,13 @@ async function createViewerSession(casePayload: WorkstationCasePayload): Promise
     toolGroup.addTool(AngleTool.toolName);
     toolGroup.addTool(ProbeTool.toolName);
     toolGroup.addTool(RectangleROITool.toolName);
+    toolGroup.addTool(CrosshairsTool.toolName);
+    // ReferenceLines renders a single sourceViewport's plane onto its peers.
+    // Axial is the primary orientation for TAVI sizing so we seed it there;
+    // future work can instance three tool groups for true 3-way reference.
+    toolGroup.addTool(ReferenceLinesTool.toolName, {
+      sourceViewportId: VIEWPORT_IDS.axial,
+    });
 
     syncs.push(
       synchronizers.createVOISynchronizer(`mpr-voi-${Date.now()}`, {
@@ -3258,6 +3389,7 @@ function renderSidePanels(casePayload: WorkstationCasePayload): void {
   renderStepPanels(casePayload);
   updateWorkflowStepStates(casePayload);
   renderCoronaryReviewBanner(casePayload);
+  renderDataQualityGate(casePayload);
   renderDataSourceBanner(casePayload);
   renderInvestorCaseInfo(casePayload);
   renderCaseOverviewSummary(casePayload);
@@ -3381,8 +3513,85 @@ function resolveCaseDataSource(casePayload: WorkstationCasePayload | null): stri
   return '';
 }
 
+interface DataQualityGateSnapshot {
+  passes: boolean;
+  failureReasons: string[];
+}
+
+function resolveDataQualityGate(casePayload: WorkstationCasePayload | null): DataQualityGateSnapshot | null {
+  const candidates: Array<Record<string, unknown> | null | undefined> = [
+    pickObject(casePayload as unknown as Record<string, unknown>),
+    defaultCaseManifestArtifact,
+  ];
+  for (const candidate of candidates) {
+    const gate = pickObject(candidate?.data_quality);
+    if (!gate) continue;
+    if (typeof gate.passes_sizing_gate !== 'boolean') continue;
+    const reasons = Array.isArray(gate.failure_reasons)
+      ? (gate.failure_reasons as unknown[]).filter((r): r is string => typeof r === 'string')
+      : [];
+    return { passes: gate.passes_sizing_gate as boolean, failureReasons: reasons };
+  }
+  return null;
+}
+
+function applySizingLock(locked: boolean): void {
+  const lockableButtons: Array<HTMLButtonElement | null> = [
+    DOM.submitCaseButton,
+    DOM.annotateOpenButton,
+    DOM.annotationButton,
+  ];
+  for (const btn of lockableButtons) {
+    if (!btn) continue;
+    if (locked) {
+      btn.setAttribute('data-sizing-locked', '1');
+      btn.setAttribute('aria-disabled', 'true');
+      if (!btn.dataset.sizingLockedTooltip) {
+        btn.dataset.sizingLockedTooltip = btn.title || '';
+      }
+      btn.title = t('banner.data_quality_gate_failed_tooltip');
+      btn.disabled = true;
+    } else if (btn.getAttribute('data-sizing-locked') === '1') {
+      btn.removeAttribute('data-sizing-locked');
+      btn.removeAttribute('aria-disabled');
+      btn.title = btn.dataset.sizingLockedTooltip || '';
+      delete btn.dataset.sizingLockedTooltip;
+      btn.disabled = false;
+    }
+  }
+}
+
+function renderDataQualityGate(casePayload: WorkstationCasePayload | null): void {
+  if (!DOM.dataQualityGateBanner) return;
+  const snap = resolveDataQualityGate(casePayload);
+  if (!snap || snap.passes) {
+    DOM.dataQualityGateBanner.classList.add('hidden');
+    if (DOM.dataQualityGateReasons) DOM.dataQualityGateReasons.innerHTML = '';
+    applySizingLock(false);
+    return;
+  }
+  DOM.dataQualityGateBanner.classList.remove('hidden');
+  if (DOM.dataQualityGateReasons) {
+    const items = snap.failureReasons.length
+      ? snap.failureReasons
+      : ['unspecified_data_quality_failure'];
+    DOM.dataQualityGateReasons.innerHTML = items
+      .map((reason) => `<li>${escapeHtml(humanize(reason))}</li>`)
+      .join('');
+  }
+  applySizingLock(true);
+}
+
 function renderDataSourceBanner(casePayload: WorkstationCasePayload | null): void {
   if (!DOM.dataSourceBanner) return;
+  // If the data-quality gate has failed, the green "Real CT pipeline output" badge
+  // must never render (safety red-line — see CLAUDE.md §Codex 工作规范 #4).
+  const gate = resolveDataQualityGate(casePayload);
+  if (gate && !gate.passes) {
+    DOM.dataSourceBanner.classList.add('hidden');
+    DOM.dataSourceBanner.textContent = '';
+    return;
+  }
   const source = resolveCaseDataSource(casePayload).toLowerCase();
   if (!source) {
     DOM.dataSourceBanner.classList.add('hidden');
