@@ -110,7 +110,44 @@
 
 ---
 
-## 4. 下一批（未在本次重构中做）
+## 4. PR #4a — 影像观感 + bug 修复（2026-04-20 追加）
+
+> 指挥官一句话："先不说那些牛逼哄哄的功能，基础影像观感要做好，bug 排查好"。
+
+### 4.1 排查方式
+1. `npm run dev` → preview @ 1680×1000
+2. 截图 + DOM inspect + console logs + network requests 全抓一遍
+3. 静态扫 `TODO/FIXME` / `console.error` / catch blocks
+
+### 4.2 发现的三个真实 bug（按用户可见严重度排序）
+
+| # | Bug | 根因 | 修复 |
+|---|-----|------|------|
+| 1 | Header 按钮显示 `action.annotate` 原始 key | PR #1（`f918ad9`）加了按钮但没加词典条目；i18n miss 直接露底 | en/zh-CN 各加一条（"Annotate" / "人工标注"） |
+| 2 | Viewport 方位标签 9px @ 55% 白——远看像脏像素，近看也糊 | 早期 UI 抄了深色 demo 的"克制美感"风格；临床标准是 11-13px 高对比 | 提到 12px @ 92% 白 + 更强 text-shadow |
+| 3 | 3D 主动脉根模型只占画布 ~25%，小而远 | `positionThreeCameraForCase` 用**整场景** bbox 对角线作为相机距离。升主动脉拉长了 bbox，根部被挤到画面一角 | 当 annulus + STJ 原点都已知时，以它们中点为 target、`max(55, rootLength*3)` 为尺度——贴着根部 framing。无 landmark 时回退到旧行为 |
+
+### 4.3 静态审计结论（无需改动）
+
+- **9 个 `catch` 块**：要么 `showMprFailure / showThreeFailure / annotateSaveStatus / providerHealth` 这类更新 UI 的；要么是 `loadLatestCase` 刻意的三层降级（latest → fixture → showcase）；要么是清理 path 里的 best-effort `try/catch {}`。没有会让用户"看不到出错"的静默吞。
+- **全文 0 个 `console.error / console.warn`**：错误一律走 UI 通道（boot overlay / MPR failure card / three fallback card）。评估良好，不改。
+
+### 4.4 遗留但不改（需产品决策）
+
+- **Step tab "completed" ✓ 语义**：当前含义 = "该步骤的测量值已存在于数据集中"。临床 UI（3mensio / Syngo.via）里 ✓ 通常指"医生已审核通过该步骤"。默认病例一载入就看到 STJ / Root 打勾，对新用户传达的是"工作已做完"的错误叙事。
+- 真修需要新增 `step.reviewed_by_clinician` 状态 + 审阅按钮 + 审阅时间戳；这是 clinician workflow 功能，不是观感 bug。记在这里，下次做手动审核流程时一起动。
+
+### 4.5 验证
+
+- 实测：`#open-annotate.text === "Annotate"`；`.viewport-label` 计算样式 = `rgba(255,255,255,0.92)` / `12px`；截图确认 3D 根部填满 ~60% 画布。
+- `npm run check:workstation` ✓
+- commit `ae2cbac fix(ui): imaging workstation observation fixes (PR #4a)`
+
+---
+
+## 5. 下一批（未在本次重构中做）
+
+
 
 按 ROADMAP 与 GAP_ANALYSIS：
 
