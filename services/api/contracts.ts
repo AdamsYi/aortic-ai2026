@@ -117,6 +117,54 @@ export interface AcceptanceReview {
   next_actions: string[];
 }
 
+export type ContrastPhase = "non_contrast" | "arterial" | "venous" | "unknown";
+
+export interface StudyMeta {
+  slice_thickness_mm: number | null;
+  voxel_spacing_mm: [number, number, number] | null;
+  is_cropped: boolean | null;
+  contrast_phase: ContrastPhase | null;
+  fov_mm: [number, number, number] | null;
+  blood_pool_hu_mean: number | null;
+}
+
+export interface DataQualityGate {
+  passes_sizing_gate: boolean;
+  failure_reasons: string[];
+  advisories?: string[];
+}
+
+export interface MeshQaEntry {
+  tri_count: number;
+  non_manifold_edges?: number | null;
+  watertight?: boolean | null;
+  aspect_ratio_p95?: number | null;
+  passes_gate?: boolean | null;
+  failure_reasons?: string[];
+}
+
+export type MeshQaReport = Record<string, MeshQaEntry>;
+
+/**
+ * Clinical data-quality gate thresholds (TAVI-grade sizing).
+ * Keep in lockstep with gpu_provider/geometry/mesh_qa.py and schemas/case_manifest.json.
+ */
+export const DATA_QUALITY_THRESHOLDS = {
+  maxSliceThicknessMm: 0.625,
+  minContrastBloodPoolHu: 250,
+  maxContrastBloodPoolHu: 600,
+} as const;
+
+export const MESH_QA_THRESHOLDS: Record<string, { minTris: number }> = {
+  aortic_root: { minTris: 80000 },
+  ascending_aorta: { minTris: 40000 },
+  annulus_ring: { minTris: 2000 },
+  leaflet_L: { minTris: 20000 },
+  leaflet_N: { minTris: 20000 },
+  leaflet_R: { minTris: 20000 },
+  leaflets: { minTris: 60000 },
+};
+
 export interface DefaultCaseBundle {
   manifest: Record<string, unknown>;
   artifacts: Record<string, string>;

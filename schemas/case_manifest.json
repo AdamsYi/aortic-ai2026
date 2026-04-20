@@ -52,6 +52,69 @@
       "additionalProperties": false
     },
     "planning_summary": { "type": "object" },
+    "study_meta": {
+      "type": "object",
+      "description": "Acquisition metadata for the source CTA. Required for the clinical data-quality gate.",
+      "properties": {
+        "slice_thickness_mm": { "type": ["number", "null"] },
+        "voxel_spacing_mm": {
+          "type": ["array", "null"],
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "is_cropped": { "type": ["boolean", "null"] },
+        "contrast_phase": {
+          "type": ["string", "null"],
+          "enum": ["non_contrast", "arterial", "venous", "unknown", null]
+        },
+        "fov_mm": {
+          "type": ["array", "null"],
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "blood_pool_hu_mean": { "type": ["number", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "data_quality": {
+      "type": "object",
+      "description": "Computed quality gate. UI MUST refuse sizing workflow when passes_sizing_gate is false.",
+      "required": ["passes_sizing_gate", "failure_reasons"],
+      "properties": {
+        "passes_sizing_gate": { "type": "boolean" },
+        "failure_reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "advisories": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "mesh_qa": {
+      "type": "object",
+      "description": "Per-mesh geometry QA. Keys are mesh logical names (e.g. aortic_root, ascending_aorta, leaflet_L).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["tri_count"],
+        "properties": {
+          "tri_count": { "type": "integer", "minimum": 0 },
+          "non_manifold_edges": { "type": ["integer", "null"] },
+          "watertight": { "type": ["boolean", "null"] },
+          "aspect_ratio_p95": { "type": ["number", "null"] },
+          "passes_gate": { "type": ["boolean", "null"] },
+          "failure_reasons": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
     "quality_gates_summary": {
       "type": "object",
       "required": [

@@ -19,6 +19,62 @@
   "last_modified": "2026-04-08T11:38:49Z",
   "scan_date": "2026-02-14",
   "pipeline_version": "aortic_geometry_pipeline_v3",
+  "study_meta": {
+    "slice_thickness_mm": 1.25,
+    "voxel_spacing_mm": [0.93, 0.93, 1.25],
+    "is_cropped": true,
+    "contrast_phase": "non_contrast",
+    "fov_mm": [297.6, 297.6, 275.0],
+    "blood_pool_hu_mean": 73.8
+  },
+  "data_quality": {
+    "passes_sizing_gate": false,
+    "failure_reasons": [
+      "slice_thickness_exceeds_0.625mm",
+      "cropped_roi_excludes_coronary_ostia_and_iliofemoral",
+      "non_contrast_blood_pool_below_250hu"
+    ],
+    "advisories": [
+      "rendering_demo_only_not_for_clinical_sizing"
+    ]
+  },
+  "mesh_qa": {
+    "aortic_root": {
+      "tri_count": 11738,
+      "passes_gate": false,
+      "failure_reasons": ["tri_count_below_80k"]
+    },
+    "ascending_aorta": {
+      "tri_count": 12204,
+      "passes_gate": false,
+      "failure_reasons": ["tri_count_below_40k"]
+    },
+    "annulus_ring": {
+      "tri_count": 192,
+      "passes_gate": false,
+      "failure_reasons": ["tri_count_below_2k"]
+    },
+    "leaflets": {
+      "tri_count": 2030,
+      "passes_gate": false,
+      "failure_reasons": ["tri_count_below_60k"]
+    },
+    "leaflet_L": {
+      "tri_count": 12,
+      "passes_gate": false,
+      "failure_reasons": ["placeholder_hexagonal_cone_not_real_leaflet"]
+    },
+    "leaflet_N": {
+      "tri_count": 12,
+      "passes_gate": false,
+      "failure_reasons": ["placeholder_hexagonal_cone_not_real_leaflet"]
+    },
+    "leaflet_R": {
+      "tri_count": 12,
+      "passes_gate": false,
+      "failure_reasons": ["placeholder_hexagonal_cone_not_real_leaflet"]
+    }
+  },
   "artifact_index": {
     "case_manifest": "artifacts/case_manifest.json",
     "planning": "artifacts/planning.json",
