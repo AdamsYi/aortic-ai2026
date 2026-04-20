@@ -30,9 +30,9 @@
   "data_quality": {
     "passes_sizing_gate": false,
     "failure_reasons": [
-      "slice_thickness_exceeds_0.625mm",
+      "slice_thickness_exceeds_1.0mm_scct2021",
       "cropped_roi_excludes_coronary_ostia_and_iliofemoral",
-      "non_contrast_blood_pool_below_250hu"
+      "non_contrast_blood_pool_below_300hu_scct2021"
     ],
     "advisories": [
       "rendering_demo_only_not_for_clinical_sizing"

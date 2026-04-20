@@ -147,12 +147,26 @@ export type MeshQaReport = Record<string, MeshQaEntry>;
 
 /**
  * Clinical data-quality gate thresholds (TAVI-grade sizing).
- * Keep in lockstep with gpu_provider/geometry/mesh_qa.py and schemas/case_manifest.json.
+ *
+ * Source: SCCT 2021 Expert Consensus on CT for TAVR (Blanke et al.,
+ * J Cardiovasc Comput Tomogr 2019;13:1-20). Section 4 recommends:
+ *   - slice thickness ≤ 1.0 mm reconstructed (isotropic preferred)
+ *   - annular contrast opacification ≥ 300 HU on the targeted phase
+ *   - retrospective ECG-gated acquisition (arterial / cardiac phase)
+ *
+ * These are the mainstream inclusion thresholds used by public TAVI
+ * research datasets (Zenodo, MM-WHS, ASOCA). Values tighter than this
+ * (e.g. 0.625 mm) describe reconstruction hardware, not acquisition
+ * quality, and would reject most legitimate research CTAs.
+ *
+ * Keep in lockstep with gpu_provider/geometry/mesh_qa.py and
+ * schemas/case_manifest.json.
  */
 export const DATA_QUALITY_THRESHOLDS = {
-  maxSliceThicknessMm: 0.625,
-  minContrastBloodPoolHu: 250,
+  maxSliceThicknessMm: 1.0,
+  minContrastBloodPoolHu: 300,
   maxContrastBloodPoolHu: 600,
+  acceptedContrastPhases: ["arterial", "cardiac"] as const,
 } as const;
 
 export const MESH_QA_THRESHOLDS: Record<string, { minTris: number }> = {
