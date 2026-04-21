@@ -621,6 +621,7 @@ _GPU_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _GPU_DIR.parent
 
 _CASE_IDS_RE = re.compile(r"^[0-9]+(,[0-9]+)*$")
+_CASE_ID_RE = re.compile(r"^[0-9]+$")
 
 
 def _validate_ingest_args(args: List[str]) -> List[str]:
@@ -675,10 +676,63 @@ def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return argv, _GPU_DIR
 
 
+def _validate_commit_case_args(args: List[str]) -> str:
+    if len(args) != 2 or args[0] != "--case-id":
+        raise HTTPException(status_code=400, detail="commit_case_requires_case-id")
+    case_id = args[1]
+    if not _CASE_ID_RE.match(case_id):
+        raise HTTPException(status_code=400, detail="case-id_invalid_format")
+    case_dir = _REPO_ROOT / "cases" / f"imagecas_{int(case_id):04d}"
+    if not case_dir.exists():
+        raise HTTPException(status_code=400, detail="case_bundle_missing")
+    return case_id
+
+
+def _cmd_commit_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    case_id = _validate_commit_case_args(args)
+    branch = f"ingest/imagecas-{case_id}"
+    case_dir = f"cases/imagecas_{int(case_id):04d}"
+    message = (
+        f"feat(cases): ImageCAS case {case_id} "
+        "passing SCCT 2021 data-quality gate"
+    )
+    snippet = (
+        "import subprocess, sys\n"
+        "case_dir = sys.argv[1]\n"
+        "branch = sys.argv[2]\n"
+        "message = sys.argv[3]\n"
+        "commands = [\n"
+        "    ['git', 'add', case_dir],\n"
+        "    ['git', 'checkout', '-B', branch],\n"
+        "    ['git', 'commit', '-m', message],\n"
+        "    ['git', 'push', '-u', 'origin', branch],\n"
+        "]\n"
+        "for cmd in commands:\n"
+        "    print('[admin] $ ' + ' '.join(cmd), flush=True)\n"
+        "    proc = subprocess.Popen(\n"
+        "        cmd,\n"
+        "        stdout=subprocess.PIPE,\n"
+        "        stderr=subprocess.STDOUT,\n"
+        "        text=True,\n"
+        "        encoding='utf-8',\n"
+        "        errors='replace',\n"
+        "        bufsize=1,\n"
+        "    )\n"
+        "    assert proc.stdout is not None\n"
+        "    for line in proc.stdout:\n"
+        "        print(line.rstrip(), flush=True)\n"
+        "    code = proc.wait()\n"
+        "    if code != 0:\n"
+        "        raise SystemExit(code)\n"
+    )
+    return [sys.executable, "-u", "-c", snippet, case_dir, branch, message], _REPO_ROOT
+
+
 _ADMIN_WHITELIST = {
     "status": _cmd_status,
     "git_pull": _cmd_git_pull,
     "ingest_imagecas": _cmd_ingest,
+    "commit_case": _cmd_commit_case,
 }
 
 
