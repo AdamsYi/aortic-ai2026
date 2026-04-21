@@ -939,6 +939,66 @@ def _cmd_imagecas_extract_first_split(args: List[str]) -> tuple[List[str], Optio
     return [sys.executable, "-u", "-c", snippet], _GPU_DIR
 
 
+def _cmd_install_7zip(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="install_7zip_takes_no_args")
+    snippet = (
+        "import os\n"
+        "import shutil\n"
+        "import subprocess\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "def find_7z():\n"
+        "    for candidate in (\n"
+        "        shutil.which('7z.exe'),\n"
+        "        shutil.which('7z'),\n"
+        "        str(Path(r'C:\\Program Files\\7-Zip\\7z.exe')),\n"
+        "        str(Path(r'C:\\Program Files (x86)\\7-Zip\\7z.exe')),\n"
+        "    ):\n"
+        "        if candidate and os.path.exists(candidate):\n"
+        "            return candidate\n"
+        "    return None\n"
+        "def print_version(exe):\n"
+        "    proc = subprocess.run([exe], capture_output=True, text=True)\n"
+        "    first = '-'\n"
+        "    for line in proc.stdout.splitlines() + proc.stderr.splitlines():\n"
+        "        if line.strip():\n"
+        "            first = line.strip()\n"
+        "            break\n"
+        "    print(f'seven_zip | {exe}')\n"
+        "    print(f'seven_zip_version | {first}')\n"
+        "existing = find_7z()\n"
+        "if existing:\n"
+        "    print_version(existing)\n"
+        "    raise SystemExit(0)\n"
+        "cmd = [\n"
+        "    'winget',\n"
+        "    'install',\n"
+        "    '-e',\n"
+        "    '--id',\n"
+        "    '7zip.7zip',\n"
+        "    '-h',\n"
+        "    '--accept-source-agreements',\n"
+        "    '--accept-package-agreements',\n"
+        "]\n"
+        "print('[install] $ ' + ' '.join(cmd))\n"
+        "proc = subprocess.run(cmd, capture_output=True, text=True)\n"
+        "if proc.stdout:\n"
+        "    sys.stdout.write(proc.stdout)\n"
+        "installed = find_7z()\n"
+        "if proc.returncode != 0:\n"
+        "    if proc.stderr:\n"
+        "        sys.stderr.write(proc.stderr)\n"
+        "    raise SystemExit(proc.returncode)\n"
+        "if not installed:\n"
+        "    if proc.stderr:\n"
+        "        sys.stderr.write(proc.stderr)\n"
+        "    raise SystemExit(1)\n"
+        "print_version(installed)\n"
+    )
+    return [sys.executable, "-u", "-c", snippet], _GPU_DIR
+
+
 def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
     if args:
         raise HTTPException(status_code=400, detail="pip_sync_takes_no_args")
@@ -1036,6 +1096,7 @@ _ADMIN_WHITELIST = {
     "tcia_probe": _cmd_tcia_probe,
     "imagecas_probe": _cmd_imagecas_probe,
     "imagecas_extract_first_split": _cmd_imagecas_extract_first_split,
+    "install_7zip": _cmd_install_7zip,
     "commit_case": _cmd_commit_case,
 }
 

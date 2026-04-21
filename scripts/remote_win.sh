@@ -14,6 +14,7 @@
 #   ./scripts/remote_win.sh tcia_probe
 #   ./scripts/remote_win.sh imagecas_probe
 #   ./scripts/remote_win.sh imagecas_extract_first_split
+#   ./scripts/remote_win.sh install_7zip
 #   ./scripts/remote_win.sh commit_case 5
 #
 # Env overrides:
@@ -26,7 +27,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|commit_case> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case> [args...]" >&2
   exit 2
 fi
 
@@ -78,6 +79,13 @@ case "$SUB" in
       exit 2
     fi
     BODY='{"command":"imagecas_extract_first_split","args":[]}'
+    ;;
+  install_7zip)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 install_7zip" >&2
+      exit 2
+    fi
+    BODY='{"command":"install_7zip","args":[]}'
     ;;
   commit_case)
     if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+$ ]]; then
