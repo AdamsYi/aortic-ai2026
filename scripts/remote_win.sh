@@ -5,6 +5,7 @@
 # Usage:
 #   ./scripts/remote_win.sh status
 #   ./scripts/remote_win.sh git_pull
+#   ./scripts/remote_win.sh pip_sync
 #   ./scripts/remote_win.sh ingest --dry-run --case-ids 1,2,3
 #   ./scripts/remote_win.sh ingest --case-ids 5
 #   ./scripts/remote_win.sh commit_case 5
@@ -19,7 +20,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|ingest|commit_case> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|pip_sync|ingest|commit_case> [args...]" >&2
   exit 2
 fi
 
@@ -30,6 +31,13 @@ case "$SUB" in
   status|git_pull)
     COMMAND="$SUB"
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1], "args": []}))' "$COMMAND")
+    ;;
+  pip_sync)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 pip_sync" >&2
+      exit 2
+    fi
+    BODY='{"command":"pip_sync","args":[]}'
     ;;
   ingest)
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "ingest_imagecas", "args": sys.argv[1:]}))' "$@")
