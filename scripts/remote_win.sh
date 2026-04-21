@@ -10,6 +10,7 @@
 #   ./scripts/remote_win.sh ingest --case-ids 5
 #   ./scripts/remote_win.sh ingest_zenodo --dry-run --max-cases 5
 #   ./scripts/remote_win.sh ingest_zenodo --case-index 3
+#   ./scripts/remote_win.sh zenodo_inspect
 #   ./scripts/remote_win.sh commit_case 5
 #
 # Env overrides:
@@ -22,7 +23,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|commit_case> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|zenodo_inspect|commit_case> [args...]" >&2
   exit 2
 fi
 
@@ -46,6 +47,13 @@ case "$SUB" in
     ;;
   ingest_zenodo)
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "ingest_zenodo", "args": sys.argv[1:]}))' "$@")
+    ;;
+  zenodo_inspect)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 zenodo_inspect" >&2
+      exit 2
+    fi
+    BODY='{"command":"zenodo_inspect","args":[]}'
     ;;
   commit_case)
     if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+$ ]]; then

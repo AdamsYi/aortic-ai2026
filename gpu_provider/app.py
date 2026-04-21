@@ -711,6 +711,32 @@ def _cmd_ingest_zenodo(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return argv, _GPU_DIR
 
 
+def _cmd_zenodo_inspect(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="zenodo_inspect_takes_no_args")
+    snippet = (
+        "import hashlib, zipfile\n"
+        "from pathlib import Path\n"
+        "zip_path = Path(r'C:\\AorticAI\\gpu_provider\\demo_data\\tavi_data.zip')\n"
+        "if not zip_path.exists():\n"
+        "    raise SystemExit(f'zip_missing {zip_path}')\n"
+        "size = zip_path.stat().st_size\n"
+        "sha = hashlib.sha256()\n"
+        "with zip_path.open('rb') as fh:\n"
+        "    for chunk in iter(lambda: fh.read(1024 * 1024), b''):\n"
+        "        sha.update(chunk)\n"
+        "print(f'zip_path {zip_path.resolve()}')\n"
+        "print(f'zip_size_bytes {size}')\n"
+        "print(f'zip_sha256_prefix16 {sha.hexdigest()[:16]}')\n"
+        "with zipfile.ZipFile(zip_path, 'r') as zf:\n"
+        "    names = zf.namelist()\n"
+        "    print(f'zip_entry_count {len(names)}')\n"
+        "    for idx, name in enumerate(names[:80], start=1):\n"
+        "        print(f'entry_{idx:02d} {name}')\n"
+    )
+    return [sys.executable, "-u", "-c", snippet], _GPU_DIR
+
+
 def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
     if args:
         raise HTTPException(status_code=400, detail="pip_sync_takes_no_args")
@@ -804,6 +830,7 @@ _ADMIN_WHITELIST = {
     "pip_sync": _cmd_pip_sync,
     "ingest_imagecas": _cmd_ingest,
     "ingest_zenodo": _cmd_ingest_zenodo,
+    "zenodo_inspect": _cmd_zenodo_inspect,
     "commit_case": _cmd_commit_case,
 }
 
