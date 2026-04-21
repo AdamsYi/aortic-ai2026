@@ -13,6 +13,9 @@ from pathlib import Path
 import re
 from typing import Any, Optional, Sequence
 
+import nibabel as nib
+import numpy as np
+
 
 WIN_BASE = Path(r"C:\AorticAI\gpu_provider")
 SOURCE_DATASET = {
@@ -217,6 +220,18 @@ def summarize_case(case_id: int, meta: Any, gate: Any) -> None:
     log(f"[study_meta] case_id={case_id} payload={meta.to_manifest_dict()}")
 
 
+def infer_blood_pool_source(img_path: Path, label_path: Path) -> str:
+    ct_data = np.asarray(nib.load(str(img_path)).get_fdata())
+    mask_data = np.asarray(nib.load(str(label_path)).get_fdata()) > 0
+    if float(np.mean(mask_data)) < 0.005:
+        return "central-fallback"
+    hu = ct_data[mask_data]
+    hu = hu[(hu >= 0) & (hu <= 600)]
+    if hu.size < 1000:
+        return "central-fallback"
+    return "mask"
+
+
 def build_minimal_manifest(
     case_slug: str,
     case_id: int,
@@ -417,9 +432,11 @@ def process_selected_case(
     label_path: Path,
     dry_run: bool,
 ) -> tuple[dict[str, Any], dict[str, Any], Optional[dict[str, Any]]]:
+    blood_pool_source = infer_blood_pool_source(img_path, label_path)
     meta = extract_study_meta(img_path, mask_path=label_path)
     gate = evaluate_gate(meta)
     summarize_case(case_id, meta, gate)
+    log(f"[blood_pool_source] case_id={case_id} source={blood_pool_source}")
     meta_dict = meta.to_manifest_dict()
     gate_dict = gate.to_manifest_dict()
     if dry_run:
