@@ -156,3 +156,90 @@
 3. PR #6 — DICOM series 导入（`@cornerstonejs/dicom-image-loader`）
 4. PR #7 — study list + 多病例路由（`/workstation?case=<id>`）
 5. PR #8 — vendor-specific TAVI sizing（Edwards / Medtronic / Abbott IFU 规则引擎）
+
+---
+
+## 6. Phase B2b 进度快照（2026-04-21，准备换对话时落盘）
+
+> 目标：让首例 ImageCAS 真实 CTA 端到端通过 SCCT 2021 TAVI sizing gate，推 `ingest/imagecas_1` PR。
+
+### 6.1 已完成（按提交）
+
+| Commit | 内容 |
+|--------|------|
+| `ed58810` | Phase B1c — 质量门改为按术式分层：TAVI 80 / VSRR 150 / PEARS 200 / 髂股 280 mm；`DataQualityGate` 新增 `allowed_procedures` 字段（Py/TS/schema 三方 lockstep） |
+| `afe51ba` | `fetch_imagecas.py` 接入真实 Win 解压目录 `C:\AorticAI\gpu_provider\demo_data\imagecas_1-200_extracted\`，扫描 `<N>.img.nii.gz + <N>.label.nii.gz` |
+| `ab39e35` | `fetch_imagecas.py` 递归 extracted split 子目录 |
+| `8a7279c` | `data_quality.py` 当冠脉标签过于稀疏（voxel ratio < 0.005 或 HU∈[0,600] 体素 < 1000）时 fallback 到中心采样血池 |
+| `16afa39` | (具体含义已在上下文中被折叠，与 ingest 流程相关补丁) |
+| `5ef7854` | `fetch_imagecas.py` Win stdout 统一 UTF-8 解码 |
+| `a88c423` | `scripts/remote_win.sh` 强制 HTTP/1.1 避免 cloudflared HTTP/2 INTERNAL_ERROR |
+| `8651701` | `app.py` 新增只读命令 `inspect_case <id>`（读 manifest + mesh_qa + pipeline.log 尾 200）；`status` 不再被提交标题特殊字符卡住；`commit_case` 遇 git 交互时 fail-fast 不挂锁 |
+| `f44c706` | `gpu_provider/requirements.txt` 加 `trimesh>=4.0.0`（mesh_qa 必需） |
+| `60bc147` | mesh_qa 契约加固：trimesh 缺失时抛 `RuntimeError("mesh_qa_requires_trimesh")`；`fetch_imagecas.py` 捕获为 `pipeline_error="mesh_qa_runtime_missing"`，不再伪装成"tri_count=0 的 mesh 质量失败" |
+
+### 6.2 数据集决策轨迹
+
+- ❌ Zenodo 15094600：2D PNG 分割图（非 3D NIfTI），弃用
+- ❌ TCIA "Coronary-CT-Angiography"：不存在，Claude 幻觉，弃用
+- ❌ AVT：临床价值太低（用户拒）
+- ✅ **ImageCAS**（Kaggle `xiaoweixumedicalai/imagecas`，800 CCTA，img+label NIfTI，apache-2.0）— 第 1 个 split 1–200 已在 Win 解压完毕（17.7GB ZIP + 16GB 解压）
+
+### 6.3 Case 1 当前状态（ImageCAS id=1）
+
+```
+slice_thickness_mm = 0.5           ✅ < 1.0 SCCT
+voxel_spacing_mm   = [0.377, 0.377, 0.5]
+fov_mm             = [193.0, 193.0, 137.5]
+blood_pool_hu_mean = 315.74         ✅ ≥ 300
+blood_pool_hu_source = central-by-design  (ImageCAS 标签是冠脉树，非血池；中心采样是设计选择，不是 fallback)
+contrast_phase     = arterial      ✅
+
+passes_sizing_gate = true
+allowed_procedures = ["TAVI"]
+failure_reasons    = ["vsrr_root_coverage_below_150mm", "pears_coverage_below_200mm"]
+advisories         = ["iliofemoral_access_not_assessable_plan_separately"]
+```
+
+Pipeline 已在 Win 跑完，bundle 位于 `C:\AorticAI\cases\imagecas_0001\`。**数据门通过，但 bundle 尚未变绿**，原因：`60bc147` 之前 mesh_qa 伪装成 `tri_count=0 + trimesh_unavailable_in_runtime`，现已修正为明确的 `pipeline_error="mesh_qa_runtime_missing"`。
+
+### 6.4 ❗ 下一步（开新对话后立即做）
+
+1. 让用户重启 Win bat（`Stop_AorticAI.bat` → `Start_AorticAI.bat`），bat 会 `git pull` 自动拿到 `60bc147`
+2. 转执行端（Codex 或 secondary Claude Code）：
+
+```bash
+./scripts/remote_win.sh status                  # 确认 HEAD = 60bc147
+./scripts/remote_win.sh pip_sync                # 安装 trimesh
+./scripts/remote_win.sh ingest --case-ids 1     # 重跑
+./scripts/remote_win.sh inspect_case 1          # 贴真实 mesh_qa.json
+```
+
+3. 根据真实 mesh_qa 数字分类判断：
+   - **三个 mesh 都 `passes_gate=true`** → bundle 变绿（`data_source="real_ct_pipeline_output"`）→ `commit_case 1` 更新 `ingest/imagecas_1` 分支 → `gh pr create` 开 PR
+   - **任一 mesh 真实不达标**（tri_count / non_manifold_edges / aspect_p95）→ 不推 PR，贴数字汇报，红线正确拒绝
+   - **仍报 `mesh_qa_runtime_missing`** → pip_sync 没装上，查 `requirements.txt` 是否被 pip_sync 正确消费
+
+### 6.5 已知技术债（不要在 case 1 绿之前顺手改）
+
+1. **`cases/imagecas_0001/imaging_hidden/imagecas_0001_ct.nii.gz` 91MB 被提交进 `ingest/imagecas_1` 分支**（GitHub 警告但未拒）。扩展到 N 例会撑爆 repo。待 case 1 绿后处理：
+   - 加 `.gitignore` 排 `cases/*/imaging_hidden/`
+   - manifest 改存绝对路径或 R2 key（保持 `case_manifest.json` 是"唯一真相"但不嵌二进制）
+   - `ingest/imagecas_1` 分支 rewrite-and-force-push 去大文件（需用户授权）
+
+2. **`status` 命令仍可能被某些 commit 标题字符卡住**（`8651701` 修了主流，但未穷尽）。非阻塞。
+
+3. **`inspect_case` 仍走 `_ADMIN_LOCK`**，未实现独立读锁。当长写命令在跑时读会阻塞。非阻塞但影响诊断速度。
+
+4. **`pre-existing test #16 failure**`（`tests/failure_modes.test.ts:38` TAVI nominal size 期望 23 实际 20）— AGENTS.md "不顺手修"。不动。
+
+### 6.6 红线速查（AGENTS.md 镜像）
+
+- 不改 `data_quality.py` / `contracts.ts` 的阈值（80/150/200/280 mm、300/600 HU、1.0 mm）
+- 不改 mesh_qa 阈值
+- 不手编 manifest 的 `passes_sizing_gate`
+- 不 `git commit --no-verify`
+- 不动 `archive/`
+- 不写 emoji、不写坟墓注释、不创建 .md 文档（REFACTOR_LOG / AGENTS / CLAUDE 索引内文件除外）
+- Python ↔ TypeScript 阈值必须 lockstep，改一边忘改另一边 = bug
+
