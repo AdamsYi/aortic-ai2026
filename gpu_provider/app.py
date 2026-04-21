@@ -737,6 +737,36 @@ def _cmd_zenodo_inspect(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return [sys.executable, "-u", "-c", snippet], _GPU_DIR
 
 
+def _cmd_tcia_probe(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="tcia_probe_takes_no_args")
+    snippet = (
+        "import json\n"
+        "import urllib.request\n"
+        "URL = 'https://services.cancerimagingarchive.net/services/v3/TCIA/query/getSeries?Collection=Coronary-CT-Angiography&format=json'\n"
+        "def val(row, key):\n"
+        "    value = row.get(key)\n"
+        "    return '-' if value in (None, '') else str(value)\n"
+        "try:\n"
+        "    with urllib.request.urlopen(URL, timeout=60) as resp:\n"
+        "        payload = json.load(resp)\n"
+        "except Exception as exc:\n"
+        "    print(str(exc))\n"
+        "    raise\n"
+        "print(f'series_count | {len(payload)}')\n"
+        "for row in payload[:30]:\n"
+        "    print(' | '.join([\n"
+        "        val(row, 'SeriesInstanceUID'),\n"
+        "        val(row, 'Modality'),\n"
+        "        val(row, 'BodyPartExamined'),\n"
+        "        val(row, 'Manufacturer'),\n"
+        "        val(row, 'ImageCount'),\n"
+        "        val(row, 'SliceThickness'),\n"
+        "    ]))\n"
+    )
+    return [sys.executable, "-u", "-c", snippet], _GPU_DIR
+
+
 def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
     if args:
         raise HTTPException(status_code=400, detail="pip_sync_takes_no_args")
@@ -831,6 +861,7 @@ _ADMIN_WHITELIST = {
     "ingest_imagecas": _cmd_ingest,
     "ingest_zenodo": _cmd_ingest_zenodo,
     "zenodo_inspect": _cmd_zenodo_inspect,
+    "tcia_probe": _cmd_tcia_probe,
     "commit_case": _cmd_commit_case,
 }
 
