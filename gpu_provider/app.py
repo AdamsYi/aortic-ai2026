@@ -676,6 +676,41 @@ def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return argv, _GPU_DIR
 
 
+def _validate_ingest_zenodo_args(args: List[str]) -> List[str]:
+    allowed: List[str] = []
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--dry-run":
+            allowed.append(tok)
+            i += 1
+            continue
+        if tok in {"--max-cases", "--case-index"}:
+            if i + 1 >= len(args):
+                raise HTTPException(status_code=400, detail=f"{tok[2:]}_missing_value")
+            val = args[i + 1]
+            if not _CASE_ID_RE.match(val):
+                raise HTTPException(status_code=400, detail=f"{tok[2:]}_invalid_format")
+            allowed.extend([tok, val])
+            i += 2
+            continue
+        if tok.startswith("--max-cases=") or tok.startswith("--case-index="):
+            val = tok.split("=", 1)[1]
+            if not _CASE_ID_RE.match(val):
+                raise HTTPException(status_code=400, detail=f"{tok.split('=', 1)[0][2:]}_invalid_format")
+            allowed.append(tok)
+            i += 1
+            continue
+        raise HTTPException(status_code=400, detail=f"arg_not_whitelisted:{tok}")
+    return allowed
+
+
+def _cmd_ingest_zenodo(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    clean = _validate_ingest_zenodo_args(args)
+    argv = [sys.executable, "-u", str(_GPU_DIR / "download_and_process_tavi.py"), *clean]
+    return argv, _GPU_DIR
+
+
 def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
     if args:
         raise HTTPException(status_code=400, detail="pip_sync_takes_no_args")
@@ -688,26 +723,49 @@ def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
     ], _GPU_DIR
 
 
-def _validate_commit_case_args(args: List[str]) -> str:
+def _resolve_commit_case_target(case_id: str) -> tuple[str, str, str]:
+    numeric_id = str(int(case_id))
+    candidates = []
+
+    zenodo_slug = f"zenodo_tavi_{numeric_id}"
+    if (_REPO_ROOT / "cases" / zenodo_slug).exists():
+        candidates.append(
+            (
+                zenodo_slug,
+                f"ingest/{zenodo_slug}",
+                f"feat(cases): Zenodo TAVI case {numeric_id} passing SCCT 2021 data-quality gate",
+            )
+        )
+
+    imagecas_slug = f"imagecas_{int(case_id):04d}"
+    if (_REPO_ROOT / "cases" / imagecas_slug).exists():
+        candidates.append(
+            (
+                imagecas_slug,
+                f"ingest/imagecas-{numeric_id}",
+                f"feat(cases): ImageCAS case {numeric_id} passing SCCT 2021 data-quality gate",
+            )
+        )
+
+    if not candidates:
+        raise HTTPException(status_code=400, detail="case_bundle_missing")
+    if len(candidates) > 1:
+        raise HTTPException(status_code=400, detail="case_bundle_ambiguous")
+    return candidates[0]
+
+
+def _validate_commit_case_args(args: List[str]) -> tuple[str, str, str]:
     if len(args) != 2 or args[0] != "--case-id":
         raise HTTPException(status_code=400, detail="commit_case_requires_case-id")
     case_id = args[1]
     if not _CASE_ID_RE.match(case_id):
         raise HTTPException(status_code=400, detail="case-id_invalid_format")
-    case_dir = _REPO_ROOT / "cases" / f"imagecas_{int(case_id):04d}"
-    if not case_dir.exists():
-        raise HTTPException(status_code=400, detail="case_bundle_missing")
-    return case_id
+    return _resolve_commit_case_target(case_id)
 
 
 def _cmd_commit_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
-    case_id = _validate_commit_case_args(args)
-    branch = f"ingest/imagecas-{case_id}"
-    case_dir = f"cases/imagecas_{int(case_id):04d}"
-    message = (
-        f"feat(cases): ImageCAS case {case_id} "
-        "passing SCCT 2021 data-quality gate"
-    )
+    case_slug, branch, message = _validate_commit_case_args(args)
+    case_dir = f"cases/{case_slug}"
     snippet = (
         "import subprocess, sys\n"
         "case_dir = sys.argv[1]\n"
@@ -745,6 +803,7 @@ _ADMIN_WHITELIST = {
     "git_pull": _cmd_git_pull,
     "pip_sync": _cmd_pip_sync,
     "ingest_imagecas": _cmd_ingest,
+    "ingest_zenodo": _cmd_ingest_zenodo,
     "commit_case": _cmd_commit_case,
 }
 
