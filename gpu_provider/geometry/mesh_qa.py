@@ -105,7 +105,16 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
     mesh = trimesh.load(stl_path, force="mesh")
     tri_count = int(len(mesh.faces))
     try:
-        non_manifold_edges = int(len(mesh.edges_unique) - len(mesh.edges))
+        # non_manifold_edges = edges shared by > 2 faces
+        # mesh.face_adjacency is an (N, 2) array of face indices that share an edge
+        # Each row represents one edge shared by exactly 2 faces.
+        # If an edge is shared by > 2 faces, it appears multiple times in face_adjacency.
+        # We need to count edges that have more than 2 adjacent faces.
+        # face_adjacency_edges gives the index into mesh.edges_unique for each adjacency pair
+        edge_adjacency_count = np.bincount(mesh.face_adjacency_edges, minlength=len(mesh.edges_unique))
+        # An edge with 2 adjacent faces appears once in face_adjacency_edges
+        # An edge with 3+ adjacent faces (non-manifold) appears 2+ times
+        non_manifold_edges = int(np.sum(edge_adjacency_count >= 2))
     except Exception:
         non_manifold_edges = None
     try:
