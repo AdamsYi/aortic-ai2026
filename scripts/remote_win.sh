@@ -16,6 +16,7 @@
 #   ./scripts/remote_win.sh imagecas_extract_first_split
 #   ./scripts/remote_win.sh install_7zip
 #   ./scripts/remote_win.sh commit_case 5
+#   ./scripts/remote_win.sh inspect_case 5
 #
 # Env overrides:
 #   AORTICAI_WIN_BASE   default https://api.heartvalvepro.edu.kg
@@ -27,7 +28,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case> [args...]" >&2
   exit 2
 fi
 
@@ -93,6 +94,13 @@ case "$SUB" in
       exit 2
     fi
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "commit_case", "args": ["--case-id", sys.argv[1]]}))' "$1")
+    ;;
+  inspect_case)
+    if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+$ ]]; then
+      echo "Usage: $0 inspect_case <digits>" >&2
+      exit 2
+    fi
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "inspect_case", "args": ["--case-id", sys.argv[1]]}))' "$1")
     ;;
   *)
     echo "unknown subcommand: $SUB" >&2

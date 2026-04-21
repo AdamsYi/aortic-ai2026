@@ -617,6 +617,7 @@ async def infer(request: Request, x_provider_secret: Optional[str] = Header(defa
 # through strict validators so nothing flows unsanitised into the shell.
 
 _ADMIN_LOCK = threading.Lock()
+_ADMIN_READ_LOCK = threading.Lock()
 _GPU_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _GPU_DIR.parent
 
@@ -676,8 +677,10 @@ def _cmd_status(_args: List[str]) -> tuple[List[str], Optional[Path]]:
         "print('platform=',platform.platform());"
         "print('gpu=',bool(shutil.which('nvidia-smi')));"
         "print('dcm2niix=',bool(shutil.which('dcm2niix')));"
-        "r=subprocess.run(['git','log','-1','--oneline'],capture_output=True,text=True);"
-        "print('git=',r.stdout.strip())"
+        "r1=subprocess.run(['git','rev-parse','--short','HEAD'],capture_output=True,text=True,encoding='utf-8',errors='replace');"
+        "r2=subprocess.run(['git','log','-1','--pretty=%s'],capture_output=True,text=True,encoding='utf-8',errors='replace');"
+        "print('git_head=',(r1.stdout or '').strip());"
+        "print('git_subject=',(r2.stdout or '').strip())"
     )
     return [sys.executable, "-c", snippet], _REPO_ROOT
 
@@ -1086,10 +1089,14 @@ def _cmd_commit_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
     case_slug, branch, message = _validate_commit_case_args(args)
     case_dir = f"cases/{case_slug}"
     snippet = (
-        "import subprocess, sys\n"
+        "import os, subprocess, sys\n"
         "case_dir = sys.argv[1]\n"
         "branch = sys.argv[2]\n"
         "message = sys.argv[3]\n"
+        "git_env = dict(os.environ)\n"
+        "git_env['GIT_TERMINAL_PROMPT'] = '0'\n"
+        "git_env['GIT_PAGER'] = 'cat'\n"
+        "git_env['PAGER'] = 'cat'\n"
         "commands = [\n"
         "    ['git', 'add', case_dir],\n"
         "    ['git', 'checkout', '-B', branch],\n"
@@ -1105,6 +1112,7 @@ def _cmd_commit_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
         "        text=True,\n"
         "        encoding='utf-8',\n"
         "        errors='replace',\n"
+        "        env=git_env,\n"
         "        bufsize=1,\n"
         "    )\n"
         "    assert proc.stdout is not None\n"
@@ -1115,6 +1123,36 @@ def _cmd_commit_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
         "        raise SystemExit(code)\n"
     )
     return [sys.executable, "-u", "-c", snippet, case_dir, branch, message], _REPO_ROOT
+
+
+def _cmd_inspect_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    case_slug, _branch, _message = _validate_commit_case_args(args)
+    snippet = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "case_slug = sys.argv[1]\n"
+        "repo_root = Path(sys.argv[2])\n"
+        "case_dir = repo_root / 'cases' / case_slug\n"
+        "manifest = case_dir / 'artifacts' / 'case_manifest.json'\n"
+        "mesh_qa = case_dir / 'qa' / 'mesh_qa.json'\n"
+        "pipeline_log = case_dir / 'pipeline.log'\n"
+        "print(f'case_dir | {case_dir}')\n"
+        "for label, path in [('case_manifest', manifest), ('mesh_qa', mesh_qa), ('pipeline_log', pipeline_log)]:\n"
+        "    print(f'file | {label} | exists={path.exists()} | path={path}')\n"
+        "if not manifest.exists():\n"
+        "    raise SystemExit(2)\n"
+        "print('--- case_manifest.json ---')\n"
+        "print(manifest.read_text(encoding='utf-8', errors='replace'))\n"
+        "if mesh_qa.exists():\n"
+        "    print('--- mesh_qa.json ---')\n"
+        "    print(mesh_qa.read_text(encoding='utf-8', errors='replace'))\n"
+        "if pipeline_log.exists():\n"
+        "    print('--- pipeline.log tail(200) ---')\n"
+        "    lines = pipeline_log.read_text(encoding='utf-8', errors='replace').splitlines()\n"
+        "    for line in lines[-200:]:\n"
+        "        print(line)\n"
+    )
+    return [sys.executable, "-u", "-c", snippet, case_slug, str(_REPO_ROOT)], _REPO_ROOT
 
 
 _ADMIN_WHITELIST = {
@@ -1131,13 +1169,17 @@ _ADMIN_WHITELIST = {
     "commit_case": _cmd_commit_case,
 }
 
+_ADMIN_READONLY_WHITELIST = {
+    "inspect_case": _cmd_inspect_case,
+}
+
 
 class AdminRunRequest(BaseModel):
     command: str
     args: List[str] = Field(default_factory=list)
 
 
-def _stream_process(argv: List[str], cwd: Optional[Path]):
+def _stream_process(argv: List[str], cwd: Optional[Path], lock: threading.Lock):
     yield f"[admin] $ {' '.join(argv)}\n"
     env_over = dict(os.environ)
     env_over["PYTHONUNBUFFERED"] = "1"
@@ -1164,7 +1206,7 @@ def _stream_process(argv: List[str], cwd: Optional[Path]):
         code = proc.wait()
         yield f"[admin] exit_code={code}\n"
     finally:
-        _ADMIN_LOCK.release()
+        lock.release()
 
 
 @app.post("/admin/run")
@@ -1178,17 +1220,29 @@ async def admin_run(
         raise HTTPException(status_code=401, detail="provider_secret_mismatch")
 
     resolver = _ADMIN_WHITELIST.get(payload.command)
+    read_only = False
     if resolver is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"command_not_whitelisted:{payload.command}",
-        )
+        resolver = _ADMIN_READONLY_WHITELIST.get(payload.command)
+        if resolver is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"command_not_whitelisted:{payload.command}",
+            )
+        read_only = True
     argv, cwd = resolver(payload.args)
+
+    if read_only:
+        if not _ADMIN_READ_LOCK.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="another_readonly_admin_command_in_progress")
+        return StreamingResponse(
+            _stream_process(argv, cwd, _ADMIN_READ_LOCK),
+            media_type="text/plain; charset=utf-8",
+        )
 
     if not _ADMIN_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="another_admin_command_in_progress")
 
     return StreamingResponse(
-        _stream_process(argv, cwd),
+        _stream_process(argv, cwd, _ADMIN_LOCK),
         media_type="text/plain; charset=utf-8",
     )
