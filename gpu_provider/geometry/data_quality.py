@@ -54,6 +54,7 @@ class StudyMeta:
     contrast_phase: Optional[str]
     fov_mm: Optional[Tuple[float, float, float]]
     blood_pool_hu_mean: Optional[float]
+    blood_pool_hu_source: Optional[str]
 
     def to_manifest_dict(self) -> dict:
         return {
@@ -68,6 +69,7 @@ class StudyMeta:
             "contrast_phase": self.contrast_phase,
             "fov_mm": list(self.fov_mm) if self.fov_mm else None,
             "blood_pool_hu_mean": self.blood_pool_hu_mean,
+            "blood_pool_hu_source": self.blood_pool_hu_source,
         }
 
 
@@ -87,7 +89,11 @@ class DataQualityGate:
         }
 
 
-def estimate_blood_pool_hu(ct_data, mask_data=None) -> Optional[float]:
+def estimate_blood_pool_hu(
+    ct_data,
+    mask_data=None,
+    label_semantics: Optional[str] = None,
+) -> Tuple[Optional[float], str]:
     """Estimate mean HU of the blood pool.
 
     If a label mask is provided, use voxels where label > 0 AND HU in [0, 600]
@@ -109,22 +115,26 @@ def estimate_blood_pool_hu(ct_data, mask_data=None) -> Optional[float]:
             return None
         return float(np.mean(sample))
 
+    if label_semantics in {"coronary_tree", "none"}:
+        return central_sample_hu(), "central-by-design"
+
     if mask_data is not None:
         m = np.asarray(mask_data) > 0
         if float(np.mean(m)) < 0.005:
-            return central_sample_hu()
+            return central_sample_hu(), "central-fallback"
         hu = arr[m]
         hu = hu[(hu >= 0) & (hu <= 600)]
         if hu.size < 1000:
-            return central_sample_hu()
-        return float(np.mean(hu))
-    return central_sample_hu()
+            return central_sample_hu(), "central-fallback"
+        return float(np.mean(hu)), "mask"
+    return central_sample_hu(), "central-by-design"
 
 
 def extract_study_meta(
     ct_path: Path,
     mask_path: Optional[Path] = None,
     contrast_phase_hint: Optional[str] = None,
+    label_semantics: Optional[str] = None,
 ) -> StudyMeta:
     """Read a NIfTI CT and derive study_meta fields."""
     if nib is None:
@@ -142,7 +152,11 @@ def extract_study_meta(
     mask_data = None
     if mask_path is not None and mask_path.exists():
         mask_data = nib.load(str(mask_path)).get_fdata()
-    blood_hu = estimate_blood_pool_hu(ct_data, mask_data)
+    blood_hu, blood_hu_source = estimate_blood_pool_hu(
+        ct_data,
+        mask_data,
+        label_semantics=label_semantics,
+    )
 
     # Heuristic contrast phase classification
     phase: Optional[str] = contrast_phase_hint
@@ -172,6 +186,7 @@ def extract_study_meta(
         contrast_phase=phase,
         fov_mm=fov,
         blood_pool_hu_mean=blood_hu,
+        blood_pool_hu_source=blood_hu_source,
     )
 
 

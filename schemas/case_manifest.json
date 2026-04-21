@@ -79,7 +79,11 @@
           "minItems": 3,
           "maxItems": 3
         },
-        "blood_pool_hu_mean": { "type": ["number", "null"] }
+        "blood_pool_hu_mean": { "type": ["number", "null"] },
+        "blood_pool_hu_source": {
+          "type": ["string", "null"],
+          "enum": ["mask", "central-fallback", "central-by-design", null]
+        }
       },
       "additionalProperties": true
     },

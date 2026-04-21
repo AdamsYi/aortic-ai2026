@@ -131,6 +131,7 @@ export interface StudyMeta {
   contrast_phase: ContrastPhase | null;
   fov_mm: [number, number, number] | null;
   blood_pool_hu_mean: number | null;
+  blood_pool_hu_source?: "mask" | "central-fallback" | "central-by-design" | null;
 }
 
 export interface DataQualityGate {
