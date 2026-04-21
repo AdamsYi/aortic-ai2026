@@ -98,22 +98,27 @@ def estimate_blood_pool_hu(ct_data, mask_data=None) -> Optional[float]:
     if np is None:
         return None
     arr = np.asarray(ct_data)
+
+    def central_sample_hu() -> Optional[float]:
+        shape = arr.shape
+        cz, cy, cx = [s // 2 for s in shape]
+        rz, ry, rx = [max(4, s // 6) for s in shape]
+        sample = arr[cz - rz : cz + rz, cy - ry : cy + ry, cx - rx : cx + rx]
+        sample = sample[(sample > 50) & (sample < 500)]
+        if sample.size < 1000:
+            return None
+        return float(np.mean(sample))
+
     if mask_data is not None:
         m = np.asarray(mask_data) > 0
+        if float(np.mean(m)) < 0.005:
+            return central_sample_hu()
         hu = arr[m]
         hu = hu[(hu >= 0) & (hu <= 600)]
         if hu.size < 1000:
-            return None
+            return central_sample_hu()
         return float(np.mean(hu))
-    # Fallback: central cube
-    shape = arr.shape
-    cz, cy, cx = [s // 2 for s in shape]
-    rz, ry, rx = [max(4, s // 6) for s in shape]
-    sample = arr[cz - rz : cz + rz, cy - ry : cy + ry, cx - rx : cx + rx]
-    sample = sample[(sample > 50) & (sample < 500)]
-    if sample.size < 1000:
-        return None
-    return float(np.mean(sample))
+    return central_sample_hu()
 
 
 def extract_study_meta(
