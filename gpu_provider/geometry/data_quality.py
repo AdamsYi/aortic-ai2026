@@ -1,8 +1,17 @@
 """Clinical data-quality gate for source CTAs (Python mirror).
 
 Must stay in lockstep with:
-  services/api/contracts.ts   → DATA_QUALITY_THRESHOLDS
+  services/api/contracts.ts   → shared gate thresholds
   schemas/case_manifest.json  → study_meta + data_quality
+
+Dual-sided gate constants mirrored in TypeScript:
+  MAX_SLICE_THICKNESS_MM
+  MIN_CONTRAST_BLOOD_POOL_HU
+  MAX_CONTRAST_BLOOD_POOL_HU
+  ACCEPTED_CONTRAST_PHASES
+  FULL_FOV_MIN_Z_MM is used on the Python side to derive study_meta.is_cropped
+  and is still registered in DATA_QUALITY_THRESHOLDS to keep the lockstep
+  declaration honest.
 
 Source of thresholds: SCCT 2021 Expert Consensus on CT for TAVR
 (Blanke et al., J Cardiovasc Comput Tomogr 2019;13:1-20).
@@ -21,7 +30,7 @@ except ImportError:  # pragma: no cover
     np = None  # type: ignore
 
 
-# ── Thresholds (lockstep with contracts.ts DATA_QUALITY_THRESHOLDS) ────────
+# ── Thresholds (shared gate constants + Python-side crop derivation) ───────
 MAX_SLICE_THICKNESS_MM = 1.0
 MIN_CONTRAST_BLOOD_POOL_HU = 300.0
 MAX_CONTRAST_BLOOD_POOL_HU = 600.0
