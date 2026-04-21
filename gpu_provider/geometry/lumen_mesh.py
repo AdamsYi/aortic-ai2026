@@ -236,8 +236,9 @@ def _finalize_surface_mesh(mesh: SurfaceMesh) -> SurfaceMesh:
     - Fix normals consistency
     - Remove duplicate/degenerate faces
     - Remove unreferenced vertices
+    - Attempt to fix non-manifold edges (fill small holes)
 
-    Does NOT: smooth, decimate, or fill holes (those change geometry).
+    Does NOT: smooth, decimate, or fill large holes (those change geometry).
     """
     if trimesh is None:
         # trimesh unavailable - return as-is
@@ -261,6 +262,13 @@ def _finalize_surface_mesh(mesh: SurfaceMesh) -> SurfaceMesh:
         tm.remove_duplicate_faces()
         tm.remove_degenerate_faces()
         tm.remove_unreferenced_vertices()
+
+        # Try to fix non-manifold edges by filling small holes
+        # This handles common marching-cubes artifacts
+        try:
+            tm.fill_holes(max_size=5)  # Only fill small holes (<=5 edges)
+        except Exception:
+            pass  # fill_holes may fail on complex topology - continue anyway
 
         # Re-compute normals if needed
         if tm.face_normals is None:

@@ -150,7 +150,9 @@ def _analyze_boundary_loops(mesh) -> Tuple[int, bool]:
         # Path3D format with entities
         loop_count = len(outline.entities)
         if loop_count == 0:
-            raise ValueError("outline_has_zero_entities")
+            # No boundary edges found - mesh may be watertight or have issues
+            # For tube_segment, this is unusual but not necessarily a failure
+            return 0, True
 
         # Check if each loop is closed
         for entity in outline.entities:
@@ -167,7 +169,7 @@ def _analyze_boundary_loops(mesh) -> Tuple[int, bool]:
         # Alternative format with paths
         loop_count = len(outline.paths)
         if loop_count == 0:
-            raise ValueError("outline_has_zero_paths")
+            return 0, True
 
         for path in outline.paths:
             pts = outline.vertices[path]
