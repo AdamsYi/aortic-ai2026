@@ -12,4 +12,5 @@ pydicom==3.0.1
 TotalSegmentator==2.11.0
 scikit-image==0.24.0
 reportlab==4.2.2
+kaggle==1.6.17
 # vmtk is intentionally not pinned here: Windows install is fragile and pipeline has topology fallback.
