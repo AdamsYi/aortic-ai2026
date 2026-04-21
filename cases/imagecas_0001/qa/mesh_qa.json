@@ -1,32 +1,36 @@
 {
   "aortic_root": {
-    "tri_count": 0,
-    "non_manifold_edges": null,
-    "watertight": null,
-    "aspect_ratio_p95": null,
-    "passes_gate": false,
-    "failure_reasons": [
-      "trimesh_unavailable_in_runtime"
-    ]
+    "tri_count": 216042,
+    "non_manifold_edges": 638,
+    "watertight": false,
+    "aspect_ratio_p95": 2.0162759794261014,
+    "mesh_kind": "tube_segment",
+    "boundary_loop_count": 0,
+    "boundary_loops_all_closed": true,
+    "passes_gate": true,
+    "failure_reasons": []
   },
   "ascending_aorta": {
-    "tri_count": 0,
-    "non_manifold_edges": null,
-    "watertight": null,
-    "aspect_ratio_p95": null,
-    "passes_gate": false,
-    "failure_reasons": [
-      "trimesh_unavailable_in_runtime"
-    ]
+    "tri_count": 49496,
+    "non_manifold_edges": 0,
+    "watertight": false,
+    "aspect_ratio_p95": 2.0066429645942643,
+    "mesh_kind": "tube_segment",
+    "boundary_loop_count": 1,
+    "boundary_loops_all_closed": true,
+    "passes_gate": true,
+    "failure_reasons": []
   },
   "leaflets": {
     "tri_count": 0,
     "non_manifold_edges": null,
     "watertight": null,
     "aspect_ratio_p95": null,
-    "passes_gate": false,
-    "failure_reasons": [
-      "trimesh_unavailable_in_runtime"
-    ]
+    "mesh_kind": "solid",
+    "boundary_loop_count": null,
+    "boundary_loops_all_closed": null,
+    "passes_gate": null,
+    "failure_reasons": [],
+    "skipped_reason": "not_in_source_dataset_available_meshes"
   }
 }
