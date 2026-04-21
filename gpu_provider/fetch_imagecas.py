@@ -85,6 +85,19 @@ def resolve_repo_root(base_dir: Path) -> Path:
     return base_dir.parent
 
 
+def resolve_kaggle_cli() -> str:
+    """Return the Kaggle CLI entrypoint from the active venv when possible."""
+    scripts_dir = Path(sys.executable).resolve().parent
+    for candidate in ("kaggle.exe", "kaggle"):
+        cli = scripts_dir / candidate
+        if cli.exists():
+            return str(cli)
+    found = shutil.which("kaggle")
+    if found:
+        return found
+    raise RuntimeError("kaggle CLI not found in venv Scripts/ or PATH")
+
+
 def run_cmd(cmd: List[str], cwd: Optional[Path] = None, check: bool = True) -> int:
     log(f"$ {' '.join(str(c) for c in cmd)}")
     proc = subprocess.Popen(
@@ -107,9 +120,10 @@ def run_cmd(cmd: List[str], cwd: Optional[Path] = None, check: bool = True) -> i
 def kaggle_download_file(dataset: str, filename: str, out_dir: Path) -> Path:
     """Pull a single file from a Kaggle dataset; unzip in place."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    kaggle_cli = resolve_kaggle_cli()
     run_cmd(
         [
-            sys.executable, "-m", "kaggle", "datasets", "download",
+            kaggle_cli, "datasets", "download",
             "-d", dataset, "-f", filename, "-p", str(out_dir), "--force",
         ]
     )
