@@ -10,8 +10,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import re
 import requests
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 
@@ -607,3 +609,136 @@ async def infer(request: Request, x_provider_secret: Optional[str] = Header(defa
     post_stage_status(req, stage="completed", progress=100, status="completed")
     post_simple_completion_callback(req, status="completed", result_case_id=req.job_id)
     return result.model_dump(exclude_none=True)
+
+
+# ─── /admin/run ────────────────────────────────────────────────────────────
+# Mac-side remote control channel. Reuses PROVIDER_SECRET (see AGENTS §A
+# decision record). Only whitelisted subcommands are executable; argv goes
+# through strict validators so nothing flows unsanitised into the shell.
+
+_ADMIN_LOCK = threading.Lock()
+_GPU_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _GPU_DIR.parent
+
+_CASE_IDS_RE = re.compile(r"^[0-9]+(,[0-9]+)*$")
+
+
+def _validate_ingest_args(args: List[str]) -> List[str]:
+    allowed: List[str] = []
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--dry-run":
+            allowed.append(tok)
+            i += 1
+            continue
+        if tok == "--case-ids":
+            if i + 1 >= len(args):
+                raise HTTPException(status_code=400, detail="case-ids_missing_value")
+            val = args[i + 1]
+            if not _CASE_IDS_RE.match(val):
+                raise HTTPException(status_code=400, detail="case-ids_invalid_format")
+            allowed.extend([tok, val])
+            i += 2
+            continue
+        if tok.startswith("--case-ids="):
+            val = tok.split("=", 1)[1]
+            if not _CASE_IDS_RE.match(val):
+                raise HTTPException(status_code=400, detail="case-ids_invalid_format")
+            allowed.append(tok)
+            i += 1
+            continue
+        raise HTTPException(status_code=400, detail=f"arg_not_whitelisted:{tok}")
+    return allowed
+
+
+def _cmd_status(_args: List[str]) -> tuple[List[str], Optional[Path]]:
+    snippet = (
+        "import platform,sys,subprocess,shutil;"
+        "print('python=',sys.version.split()[0]);"
+        "print('platform=',platform.platform());"
+        "print('gpu=',bool(shutil.which('nvidia-smi')));"
+        "print('dcm2niix=',bool(shutil.which('dcm2niix')));"
+        "r=subprocess.run(['git','log','-1','--oneline'],capture_output=True,text=True);"
+        "print('git=',r.stdout.strip())"
+    )
+    return [sys.executable, "-c", snippet], _REPO_ROOT
+
+
+def _cmd_git_pull(_args: List[str]) -> tuple[List[str], Optional[Path]]:
+    return ["git", "pull", "--ff-only"], _REPO_ROOT
+
+
+def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    clean = _validate_ingest_args(args)
+    argv = [sys.executable, "-u", str(_GPU_DIR / "fetch_imagecas.py"), *clean]
+    return argv, _GPU_DIR
+
+
+_ADMIN_WHITELIST = {
+    "status": _cmd_status,
+    "git_pull": _cmd_git_pull,
+    "ingest_imagecas": _cmd_ingest,
+}
+
+
+class AdminRunRequest(BaseModel):
+    command: str
+    args: List[str] = Field(default_factory=list)
+
+
+def _stream_process(argv: List[str], cwd: Optional[Path]):
+    yield f"[admin] $ {' '.join(argv)}\n"
+    env_over = dict(os.environ)
+    env_over["PYTHONUNBUFFERED"] = "1"
+    env_over["PYTHONIOENCODING"] = "utf-8"
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(cwd) if cwd else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env_over,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+    except Exception as exc:
+        yield f"[admin] spawn_failed: {exc}\n"
+        return
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            yield line
+        code = proc.wait()
+        yield f"[admin] exit_code={code}\n"
+    finally:
+        _ADMIN_LOCK.release()
+
+
+@app.post("/admin/run")
+async def admin_run(
+    payload: AdminRunRequest,
+    x_provider_secret: Optional[str] = Header(default=None),
+) -> StreamingResponse:
+    expected_secret = env("PROVIDER_SECRET", "aorticai-internal-2026").strip()
+    provided_secret = (x_provider_secret or "").strip()
+    if expected_secret and provided_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="provider_secret_mismatch")
+
+    resolver = _ADMIN_WHITELIST.get(payload.command)
+    if resolver is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"command_not_whitelisted:{payload.command}",
+        )
+    argv, cwd = resolver(payload.args)
+
+    if not _ADMIN_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="another_admin_command_in_progress")
+
+    return StreamingResponse(
+        _stream_process(argv, cwd),
+        media_type="text/plain; charset=utf-8",
+    )
