@@ -7,6 +7,7 @@
 #   ./scripts/remote_win.sh git_pull
 #   ./scripts/remote_win.sh ingest --dry-run --case-ids 1,2,3
 #   ./scripts/remote_win.sh ingest --case-ids 5
+#   ./scripts/remote_win.sh commit_case 5
 #
 # Env overrides:
 #   AORTICAI_WIN_BASE   default https://api.heartvalvepro.edu.kg
@@ -18,7 +19,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|ingest> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|ingest|commit_case> [args...]" >&2
   exit 2
 fi
 
@@ -32,6 +33,13 @@ case "$SUB" in
     ;;
   ingest)
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "ingest_imagecas", "args": sys.argv[1:]}))' "$@")
+    ;;
+  commit_case)
+    if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+$ ]]; then
+      echo "Usage: $0 commit_case <digits>" >&2
+      exit 2
+    fi
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "commit_case", "args": ["--case-id", sys.argv[1]]}))' "$1")
     ;;
   *)
     echo "unknown subcommand: $SUB" >&2
