@@ -122,7 +122,9 @@ export type ContrastPhase = "non_contrast" | "arterial" | "venous" | "unknown";
 export interface StudyMeta {
   slice_thickness_mm: number | null;
   voxel_spacing_mm: [number, number, number] | null;
-  is_cropped: boolean | null;
+  is_root_covered: boolean | null;
+  is_iliofemoral_covered: boolean | null;
+  is_cropped?: boolean | null;
   contrast_phase: ContrastPhase | null;
   fov_mm: [number, number, number] | null;
   blood_pool_hu_mean: number | null;
@@ -158,10 +160,6 @@ export type MeshQaReport = Record<string, MeshQaEntry>;
  * research datasets (Zenodo, MM-WHS, ASOCA). Values tighter than this
  * (e.g. 0.625 mm) describe reconstruction hardware, not acquisition
  * quality, and would reject most legitimate research CTAs.
- * fovMinZMm is registered here so Python's cropped-ROI derivation stays
- * lockstep with the shared threshold table, even though the TS side only
- * consumes the derived boolean study_meta.is_cropped today.
- *
  * Keep in lockstep with gpu_provider/geometry/mesh_qa.py and
  * schemas/case_manifest.json.
  */
@@ -170,7 +168,8 @@ export const DATA_QUALITY_THRESHOLDS = {
   minContrastBloodPoolHu: 300,
   maxContrastBloodPoolHu: 600,
   acceptedContrastPhases: ["arterial", "cardiac"] as const,
-  fovMinZMm: 280,
+  rootCoverageMinZMm: 150,
+  iliofemoralCoverageMinZMm: 280,
 } as const;
 
 export const MESH_QA_THRESHOLDS: Record<string, { minTris: number }> = {

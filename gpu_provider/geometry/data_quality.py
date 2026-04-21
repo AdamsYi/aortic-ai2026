@@ -9,9 +9,8 @@ Dual-sided gate constants mirrored in TypeScript:
   MIN_CONTRAST_BLOOD_POOL_HU
   MAX_CONTRAST_BLOOD_POOL_HU
   ACCEPTED_CONTRAST_PHASES
-  FULL_FOV_MIN_Z_MM is used on the Python side to derive study_meta.is_cropped
-  and is still registered in DATA_QUALITY_THRESHOLDS to keep the lockstep
-  declaration honest.
+  ROOT_COVERAGE_MIN_Z_MM
+  ILIOFEMORAL_COVERAGE_MIN_Z_MM
 
 Source of thresholds: SCCT 2021 Expert Consensus on CT for TAVR
 (Blanke et al., J Cardiovasc Comput Tomogr 2019;13:1-20).
@@ -30,21 +29,21 @@ except ImportError:  # pragma: no cover
     np = None  # type: ignore
 
 
-# ── Thresholds (shared gate constants + Python-side crop derivation) ───────
+# ── Thresholds (shared gate constants + coverage derivation) ────────────────
 MAX_SLICE_THICKNESS_MM = 1.0
 MIN_CONTRAST_BLOOD_POOL_HU = 300.0
 MAX_CONTRAST_BLOOD_POOL_HU = 600.0
 ACCEPTED_CONTRAST_PHASES = ("arterial", "cardiac")
-
-# A "full" cardiac CTA FOV in z should comfortably cover annulus to iliac
-# bifurcation (≥ 280 mm). Shorter z-extent is treated as cropped ROI.
-FULL_FOV_MIN_Z_MM = 280.0
+ROOT_COVERAGE_MIN_Z_MM = 150.0
+ILIOFEMORAL_COVERAGE_MIN_Z_MM = 280.0
 
 
 @dataclass
 class StudyMeta:
     slice_thickness_mm: Optional[float]
     voxel_spacing_mm: Optional[Tuple[float, float, float]]
+    is_root_covered: Optional[bool]
+    is_iliofemoral_covered: Optional[bool]
     is_cropped: Optional[bool]
     contrast_phase: Optional[str]
     fov_mm: Optional[Tuple[float, float, float]]
@@ -54,6 +53,8 @@ class StudyMeta:
         return {
             "slice_thickness_mm": self.slice_thickness_mm,
             "voxel_spacing_mm": list(self.voxel_spacing_mm) if self.voxel_spacing_mm else None,
+            "is_root_covered": self.is_root_covered,
+            "is_iliofemoral_covered": self.is_iliofemoral_covered,
             "is_cropped": self.is_cropped,
             "contrast_phase": self.contrast_phase,
             "fov_mm": list(self.fov_mm) if self.fov_mm else None,
@@ -139,12 +140,15 @@ def extract_study_meta(
         else:
             phase = "non_contrast"
 
-    is_cropped = bool(fov[2] < FULL_FOV_MIN_Z_MM)
+    is_root_covered = bool(fov[2] >= ROOT_COVERAGE_MIN_Z_MM)
+    is_iliofemoral_covered = bool(fov[2] >= ILIOFEMORAL_COVERAGE_MIN_Z_MM)
 
     return StudyMeta(
         slice_thickness_mm=slice_thickness,
         voxel_spacing_mm=spacing,
-        is_cropped=is_cropped,
+        is_root_covered=is_root_covered,
+        is_iliofemoral_covered=is_iliofemoral_covered,
+        is_cropped=(not is_iliofemoral_covered),
         contrast_phase=phase,
         fov_mm=fov,
         blood_pool_hu_mean=blood_hu,
@@ -179,8 +183,11 @@ def evaluate_gate(meta: StudyMeta) -> DataQualityGate:
             f"blood_pool_hu_above_{MAX_CONTRAST_BLOOD_POOL_HU:.0f}_possible_hyperenhancement"
         )
 
-    if meta.is_cropped is True:
-        reasons.append("cropped_roi_excludes_coronary_ostia_and_iliofemoral")
+    if meta.is_root_covered is False:
+        reasons.append("root_coverage_below_150mm_scct2021")
+
+    if meta.is_iliofemoral_covered is False:
+        advisories.append("iliofemoral_access_not_assessable_plan_separately")
 
     return DataQualityGate(
         passes_sizing_gate=len(reasons) == 0,
@@ -194,7 +201,8 @@ __all__ = [
     "MIN_CONTRAST_BLOOD_POOL_HU",
     "MAX_CONTRAST_BLOOD_POOL_HU",
     "ACCEPTED_CONTRAST_PHASES",
-    "FULL_FOV_MIN_Z_MM",
+    "ROOT_COVERAGE_MIN_Z_MM",
+    "ILIOFEMORAL_COVERAGE_MIN_Z_MM",
     "StudyMeta",
     "DataQualityGate",
     "estimate_blood_pool_hu",
