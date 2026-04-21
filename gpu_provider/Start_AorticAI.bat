@@ -8,7 +8,9 @@ echo   AorticAI 主动脉规划系统
 echo ==========================================
 echo.
 echo [1/4] 正在更新代码...
-git -C C:\AorticAI pull
+cd /d C:\AorticAI
+git config advice.diverging false
+git pull --no-rebase
 
 echo [1/4] 已完成：代码已更新
 echo [2/4] 正在关闭旧进程...
