@@ -3,6 +3,13 @@
 Clinical contract (keep in lockstep with services/api/contracts.ts
 MESH_QA_THRESHOLDS and schemas/case_manifest.json):
 
+Mesh classification:
+  - tube_segment: aortic_root, ascending_aorta, lumen
+    → open ends allowed; requires clean boundary loops
+  - solid: leaflets, calcium, annulus_ring
+    → must be watertight closed surfaces
+
+Thresholds:
   - aortic_root         ≥ 80 000 tris
   - ascending_aorta     ≥ 40 000 tris
   - annulus_ring        ≥  2 000 tris
@@ -10,7 +17,8 @@ MESH_QA_THRESHOLDS and schemas/case_manifest.json):
   - leaflets (combined) ≥ 60 000 tris
   - non_manifold_edges  == 0
   - aspect_ratio_p95    <  8
-  - watertight          == True
+  - watertight          == True (solid only)
+  - boundary_loops      clean closed loops (tube_segment only)
 
 Report is written to ``cases/<case_id>/qa/mesh_qa.json`` and also merged into
 the case_manifest under ``mesh_qa``.  If any mesh fails the gate, the manifest
@@ -22,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 try:  # trimesh is already a runtime dep of the provider
     import trimesh  # type: ignore
@@ -30,6 +38,20 @@ try:  # trimesh is already a runtime dep of the provider
 except ImportError:  # pragma: no cover - provider environment always has these
     trimesh = None  # type: ignore
     np = None  # type: ignore
+
+
+# Mesh classification: tube_segment (open ends allowed) vs solid (must be closed)
+MESH_KIND_MAP: Dict[str, str] = {
+    "aortic_root": "tube_segment",
+    "ascending_aorta": "tube_segment",
+    "lumen": "tube_segment",
+    "leaflets": "solid",
+    "leaflet_L": "solid",
+    "leaflet_N": "solid",
+    "leaflet_R": "solid",
+    "annulus_ring": "solid",
+    "calcium": "solid",
+}
 
 
 MESH_QA_THRESHOLDS: Dict[str, Dict[str, float]] = {
@@ -50,6 +72,9 @@ class MeshQaEntry:
     non_manifold_edges: Optional[int] = None
     watertight: Optional[bool] = None
     aspect_ratio_p95: Optional[float] = None
+    mesh_kind: Optional[str] = None
+    boundary_loop_count: Optional[int] = None
+    boundary_loops_all_closed: Optional[bool] = None
     passes_gate: bool = False
     failure_reasons: List[str] = field(default_factory=list)
 
@@ -59,6 +84,9 @@ class MeshQaEntry:
             "non_manifold_edges": self.non_manifold_edges,
             "watertight": self.watertight,
             "aspect_ratio_p95": self.aspect_ratio_p95,
+            "mesh_kind": self.mesh_kind,
+            "boundary_loop_count": self.boundary_loop_count,
+            "boundary_loops_all_closed": self.boundary_loops_all_closed,
             "passes_gate": self.passes_gate,
             "failure_reasons": list(self.failure_reasons),
         }
@@ -84,10 +112,66 @@ def _aspect_ratio_p95(mesh) -> Optional[float]:
         return None
 
 
+def _analyze_boundary_loops(mesh) -> Tuple[Optional[int], Optional[bool]]:
+    """Analyze boundary loops for tube_segment meshes.
+
+    Returns:
+        (boundary_loop_count, boundary_loops_all_closed)
+        - boundary_loop_count: number of distinct boundary loops (0 if watertight)
+        - boundary_loops_all_closed: True if each loop forms a closed path
+
+    For tube_segment meshes (aortic_root, ascending_aorta), we expect 1-2
+    boundary loops (open ends). Each loop must be a closed path.
+    """
+    if trimesh is None:
+        return None, None
+    try:
+        # is_watertight means no boundary edges
+        if mesh.is_watertight:
+            return 0, True
+
+        # Get boundary edges - these are edges belonging to only 1 face
+        boundary = mesh.boundary_edges
+        if boundary is None or len(boundary) == 0:
+            return 0, True
+
+        # Count distinct boundary loops by following connected boundary edges
+        # trimesh.outline() returns the boundary as a collection of line strings
+        outline = mesh.outline()
+        if outline is None or len(outline.entities) == 0:
+            # Fallback: count boundary edge chains
+            return None, None
+
+        # Count the number of separate curves in the outline
+        loop_count = len(outline.entities) if hasattr(outline, 'entities') else 0
+
+        # Check if each loop is closed (first vertex == last vertex)
+        all_closed = True
+        if hasattr(outline, 'vertices') and hasattr(outline, 'entities'):
+            for entity in outline.entities:
+                if hasattr(entity, 'points'):
+                    pts = entity.points
+                    if len(pts) < 2:
+                        all_closed = False
+                        break
+                    # Check if first and last points are the same
+                    if not np.allclose(pts[0], pts[-1]):
+                        all_closed = False
+                        break
+
+        return loop_count, all_closed
+    except Exception:
+        return None, None
+
+
 def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
     """Audit a single STL file against MESH_QA_THRESHOLDS[logical_name].
 
     logical_name determines which threshold row applies (e.g. "aortic_root").
+    mesh_kind is determined by MESH_KIND_MAP:
+      - tube_segment (aortic_root, ascending_aorta): open ends allowed,
+        requires clean boundary loops (1-2 loops, all closed)
+      - solid (leaflets, annulus_ring): must be watertight
     """
     reasons: List[str] = []
 
@@ -104,6 +188,10 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
 
     mesh = trimesh.load(stl_path, force="mesh")
     tri_count = int(len(mesh.faces))
+
+    # Determine mesh kind
+    mesh_kind = MESH_KIND_MAP.get(logical_name, "solid")
+
     try:
         # non_manifold_edges: edges shared by > 2 faces
         # mesh.face_adjacency_edges[i] gives the edge index for the i-th face adjacency pair
@@ -120,12 +208,20 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
             non_manifold_edges = 0 if euler > 0 else int(abs(euler) // 2)
         except Exception:
             non_manifold_edges = 0
+
     try:
         watertight = bool(mesh.is_watertight)
     except Exception:
         watertight = None
+
+    # Analyze boundary loops for tube_segment meshes
+    boundary_loop_count, boundary_loops_all_closed = None, None
+    if mesh_kind == "tube_segment":
+        boundary_loop_count, boundary_loops_all_closed = _analyze_boundary_loops(mesh)
+
     aspect_p95 = _aspect_ratio_p95(mesh)
 
+    # Apply thresholds based on logical_name
     threshold = MESH_QA_THRESHOLDS.get(logical_name)
     if threshold is None:
         reasons.append(f"no_threshold_for_logical_name:{logical_name}")
@@ -134,18 +230,41 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
         if tri_count < min_tris:
             reasons.append(f"tri_count_below_{min_tris}")
 
+    # Non-manifold edges always fail
     if non_manifold_edges is not None and non_manifold_edges > 0:
         reasons.append("non_manifold_edges_detected")
-    if watertight is False:
-        reasons.append("mesh_not_watertight")
+
+    # Aspect ratio always fails if exceeded
     if aspect_p95 is not None and aspect_p95 > MAX_ASPECT_P95:
         reasons.append(f"aspect_ratio_p95_exceeds_{MAX_ASPECT_P95}")
+
+    # Watertight / boundary loop rules depend on mesh kind
+    if mesh_kind == "solid":
+        # Solid meshes must be watertight
+        if watertight is False:
+            reasons.append("mesh_not_watertight")
+    else:
+        # tube_segment: allow open ends but require clean boundary loops
+        # Expected: 1-2 boundary loops (open ends), all must be closed paths
+        if boundary_loop_count is not None:
+            if boundary_loop_count == 0:
+                # Watertight tube - acceptable
+                pass
+            elif boundary_loop_count > 2:
+                # Too many open ends - topology error
+                reasons.append(f"tube_segment_boundary_loops_excess_{boundary_loop_count}")
+            elif boundary_loops_all_closed is False:
+                # Boundary loops exist but are not closed paths
+                reasons.append("tube_segment_boundary_loops_not_closed")
 
     return MeshQaEntry(
         tri_count=tri_count,
         non_manifold_edges=non_manifold_edges,
         watertight=watertight,
         aspect_ratio_p95=aspect_p95,
+        mesh_kind=mesh_kind,
+        boundary_loop_count=boundary_loop_count,
+        boundary_loops_all_closed=boundary_loops_all_closed,
         passes_gate=len(reasons) == 0,
         failure_reasons=reasons,
     )

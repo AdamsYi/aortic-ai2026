@@ -141,13 +141,27 @@ export interface DataQualityGate {
   advisories?: string[];
 }
 
+export interface SourceDataset {
+  name: string;
+  host?: string;
+  kaggle_id?: string;
+  license?: string;
+  citation?: string;
+  label_semantics?: string;
+  available_meshes?: string[];
+}
+
 export interface MeshQaEntry {
   tri_count: number;
   non_manifold_edges?: number | null;
   watertight?: boolean | null;
   aspect_ratio_p95?: number | null;
+  mesh_kind?: "solid" | "tube_segment" | null;
+  boundary_loop_count?: number | null;
+  boundary_loops_all_closed?: boolean | null;
   passes_gate?: boolean | null;
   failure_reasons?: string[];
+  skipped_reason?: string | null;
 }
 
 export type MeshQaReport = Record<string, MeshQaEntry>;

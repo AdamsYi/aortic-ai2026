@@ -122,10 +122,16 @@
           "non_manifold_edges": { "type": ["integer", "null"] },
           "watertight": { "type": ["boolean", "null"] },
           "aspect_ratio_p95": { "type": ["number", "null"] },
+          "mesh_kind": { "type": ["string", "null"], "enum": ["solid", "tube_segment", null] },
+          "boundary_loop_count": { "type": ["integer", "null"] },
+          "boundary_loops_all_closed": { "type": ["boolean", "null"] },
           "passes_gate": { "type": ["boolean", "null"] },
           "failure_reasons": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "skipped_reason": {
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": true

@@ -22,6 +22,7 @@ SOURCE_DATASET = {
     "license": "apache-2.0",
     "citation": "Zeng et al., ImageCAS: a large-scale dataset and benchmark for coronary artery segmentation based on CT, 2023.",
     "label_semantics": "coronary_tree",
+    "available_meshes": ["aortic_root", "ascending_aorta"],  # ImageCAS has no leaflet labels
 }
 CASE_ID_RE = re.compile(r"^(\d+)\.img\.nii\.gz$")
 
@@ -43,6 +44,7 @@ extract_study_meta = _DATA_QUALITY.extract_study_meta
 evaluate_gate = _DATA_QUALITY.evaluate_gate
 audit_case_meshes = _MESH_QA.audit_case_meshes
 report_to_manifest = _MESH_QA.report_to_manifest
+MESH_KIND_MAP = _MESH_QA.MESH_KIND_MAP
 
 
 def log(msg: str) -> None:
@@ -341,19 +343,58 @@ def emit_case_bundle(
 
         # Run mesh QA gate; if trimesh is missing at runtime, catch the specific
         # RuntimeError and record it as a pipeline error rather than a gate failure.
+        # Only audit meshes listed in source_dataset.available_meshes; skip others
+        # and mark them with skipped_reason.
         mesh_qa_error: Optional[str] = None
+        mesh_report: Dict[str, Any] = {}
+        mesh_gate_all_pass = False
+
+        available_meshes = SOURCE_DATASET.get("available_meshes", [])
+        meshes_to_audit = {
+            name: path
+            for name, path in [
+                ("aortic_root", meshes / "aortic_root.stl"),
+                ("ascending_aorta", meshes / "ascending_aorta.stl"),
+                ("leaflets", meshes / "leaflets.stl"),
+            ]
+            if name in available_meshes
+        }
+        meshes_to_skip = {
+            name: path
+            for name, path in [
+                ("aortic_root", meshes / "aortic_root.stl"),
+                ("ascending_aorta", meshes / "ascending_aorta.stl"),
+                ("leaflets", meshes / "leaflets.stl"),
+            ]
+            if name not in available_meshes and path.exists()
+        }
+
         try:
-            mesh_report = report_to_manifest(
-                audit_case_meshes(
-                    {
-                        "aortic_root": meshes / "aortic_root.stl",
-                        "ascending_aorta": meshes / "ascending_aorta.stl",
-                        "leaflets": meshes / "leaflets.stl",
-                    }
+            if meshes_to_audit:
+                mesh_report = report_to_manifest(audit_case_meshes(meshes_to_audit))
+            # Add skipped meshes with skipped_reason
+            for name in meshes_to_skip:
+                mesh_report[name] = {
+                    "tri_count": 0,
+                    "non_manifold_edges": None,
+                    "watertight": None,
+                    "aspect_ratio_p95": None,
+                    "mesh_kind": MESH_KIND_MAP.get(name, "solid"),
+                    "boundary_loop_count": None,
+                    "boundary_loops_all_closed": None,
+                    "passes_gate": None,
+                    "failure_reasons": [],
+                    "skipped_reason": "not_in_source_dataset_available_meshes",
+                }
+            # mesh_gate_all_pass: only require available_meshes to pass
+            mesh_gate_all_pass = (
+                bool(mesh_report)
+                and len(meshes_to_audit) > 0
+                and all(
+                    bool(entry.get("passes_gate"))
+                    for name, entry in mesh_report.items()
+                    if name in available_meshes
                 )
-            )
-            mesh_gate_all_pass = bool(mesh_report) and all(
-                bool(entry.get("passes_gate")) for entry in mesh_report.values()
             )
         except RuntimeError as exc:
             if "mesh_qa_requires_trimesh" in str(exc):
@@ -393,6 +434,12 @@ def emit_case_bundle(
             "pipeline_risk_flags": len(failure_flags),
             "mesh_gate_all_pass": mesh_gate_all_pass,
         }
+        # Add advisory for skipped leaflet mesh
+        if "leaflets" not in available_meshes:
+            advisories = manifest.get("data_quality", {}).get("advisories", [])
+            if "leaflet_mesh_skipped_no_labels_in_source_dataset" not in advisories:
+                advisories.append("leaflet_mesh_skipped_no_labels_in_source_dataset")
+                manifest["data_quality"]["advisories"] = advisories
 
     quality_gates_payload = {
         "study_meta": meta_dict,
