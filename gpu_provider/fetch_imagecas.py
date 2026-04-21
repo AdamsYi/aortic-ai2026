@@ -73,12 +73,12 @@ def parse_args() -> argparse.Namespace:
 
 def enumerate_cases(extracted_dir: Path) -> list[tuple[int, Path, Path]]:
     pairs: list[tuple[int, Path, Path]] = []
-    for img_path in sorted(extracted_dir.glob("*.img.nii.gz"), key=lambda p: p.name):
+    for img_path in sorted(extracted_dir.rglob("*.img.nii.gz"), key=lambda p: (p.parent.as_posix(), p.name)):
         match = CASE_ID_RE.match(img_path.name)
         if not match:
             continue
         case_id = int(match.group(1))
-        label_path = extracted_dir / f"{case_id}.label.nii.gz"
+        label_path = img_path.with_name(f"{case_id}.label.nii.gz")
         if not label_path.exists():
             continue
         pairs.append((case_id, img_path, label_path))
