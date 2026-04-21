@@ -42,6 +42,7 @@ try:
         mesh_meta,
         save_mask_nifti,
         write_ascii_stl,
+        _finalize_surface_mesh,
     )
     from .geometry.measurements import build_measurements
     from .geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
@@ -58,6 +59,7 @@ except ImportError:
         mesh_meta,
         save_mask_nifti,
         write_ascii_stl,
+        _finalize_surface_mesh,
     )
     from geometry.measurements import build_measurements
     from geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
@@ -421,6 +423,7 @@ def run_geometry_pipeline(
         taubin_lambda=0.18,
         taubin_mu=-0.2,
     )
+    root_mesh = _finalize_surface_mesh(root_mesh)
     root_stl_path = output_dir / "aortic_root.stl"
     write_ascii_stl(root_mesh, root_stl_path, "aortic_root")
     asc_mesh = generate_surface_mesh(
@@ -432,6 +435,7 @@ def run_geometry_pipeline(
         taubin_lambda=0.16,
         taubin_mu=-0.18,
     )
+    asc_mesh = _finalize_surface_mesh(asc_mesh)
     asc_stl_path = output_dir / "ascending_aorta.stl"
     write_ascii_stl(asc_mesh, asc_stl_path, "ascending_aorta")
     timers["surface_export_seconds"] = round(time.time() - t0, 4)
@@ -494,8 +498,9 @@ def run_geometry_pipeline(
     )
     leaflet_model = build_leaflet_model(root_model, leaflet_mask=leaflet_mask, affine=affine, spacing_mm=spacing)
     root_model = attach_leaflet_geometry(root_model, leaflet_model_payload(leaflet_model))
+    leaflet_mesh = _finalize_surface_mesh(leaflet_model.mesh)
     leaflet_stl_path = output_dir / "leaflets.stl"
-    write_ascii_stl(leaflet_model.mesh, leaflet_stl_path, "leaflets")
+    write_ascii_stl(leaflet_mesh, leaflet_stl_path, "leaflets")
     timers["root_model_seconds"] = round(time.time() - t0, 4)
     _record_artifact(artifacts_manifest, "leaflets_stl", leaflet_stl_path.name, "model/stl", leaflet_stl_path)
     leaflet_model_json_path = output_dir / "leaflet_model.json"

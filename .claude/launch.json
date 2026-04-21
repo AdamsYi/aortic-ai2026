@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aortic-dev",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["/Users/adams/Documents/New project/aortic ai2026/node_modules/.bin/wrangler", "dev", "--port", "8787", "--local"],
+      "port": 8787
+    }
+  ]
+}
