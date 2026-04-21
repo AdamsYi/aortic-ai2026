@@ -339,22 +339,34 @@ def emit_case_bundle(
         if _copy_if_exists(output_dir / "report.pdf", reports / "report.pdf"):
             report_index["report_pdf"] = "reports/report.pdf"
 
-        mesh_report = report_to_manifest(
-            audit_case_meshes(
-                {
-                    "aortic_root": meshes / "aortic_root.stl",
-                    "ascending_aorta": meshes / "ascending_aorta.stl",
-                    "leaflets": meshes / "leaflets.stl",
-                }
+        # Run mesh QA gate; if trimesh is missing at runtime, catch the specific
+        # RuntimeError and record it as a pipeline error rather than a gate failure.
+        mesh_qa_error: Optional[str] = None
+        try:
+            mesh_report = report_to_manifest(
+                audit_case_meshes(
+                    {
+                        "aortic_root": meshes / "aortic_root.stl",
+                        "ascending_aorta": meshes / "ascending_aorta.stl",
+                        "leaflets": meshes / "leaflets.stl",
+                    }
+                )
             )
-        )
-        mesh_gate_all_pass = bool(mesh_report) and all(
-            bool(entry.get("passes_gate")) for entry in mesh_report.values()
-        )
-        (qa / "mesh_qa.json").write_text(
-            json.dumps(mesh_report, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+            mesh_gate_all_pass = bool(mesh_report) and all(
+                bool(entry.get("passes_gate")) for entry in mesh_report.values()
+            )
+        except RuntimeError as exc:
+            if "mesh_qa_requires_trimesh" in str(exc):
+                mesh_qa_error = "mesh_qa_runtime_missing"
+                mesh_report = {}
+                mesh_gate_all_pass = False
+            else:
+                raise
+        if mesh_qa_error is None:
+            (qa / "mesh_qa.json").write_text(
+                json.dumps(mesh_report, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
         failure_flags = result.get("risk_flags", []) if isinstance(result.get("risk_flags"), list) else []
         (qa / "failure_flags.json").write_text(
             json.dumps(failure_flags, indent=2, ensure_ascii=False),
@@ -387,6 +399,9 @@ def emit_case_bundle(
         "data_quality": gate_dict,
         "mesh_qa": mesh_report,
     }
+    # Merge mesh_qa_error into pipeline_error if present
+    if mesh_qa_error is not None:
+        pipeline_error = pipeline_error or mesh_qa_error
     if pipeline_error is not None:
         quality_gates_payload["pipeline_error"] = pipeline_error
         (qa / "pipeline_error.json").write_text(

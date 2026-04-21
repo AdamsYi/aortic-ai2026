@@ -93,11 +93,7 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
 
     if trimesh is None:
         # Provider env must have trimesh; if missing, fail loudly.
-        return MeshQaEntry(
-            tri_count=0,
-            passes_gate=False,
-            failure_reasons=["trimesh_unavailable_in_runtime"],
-        )
+        raise RuntimeError("mesh_qa_requires_trimesh")
 
     if not stl_path.exists():
         return MeshQaEntry(
