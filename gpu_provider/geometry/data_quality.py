@@ -9,7 +9,9 @@ Dual-sided gate constants mirrored in TypeScript:
   MIN_CONTRAST_BLOOD_POOL_HU
   MAX_CONTRAST_BLOOD_POOL_HU
   ACCEPTED_CONTRAST_PHASES
-  ROOT_COVERAGE_MIN_Z_MM
+  TAVI_ROOT_COVERAGE_MIN_Z_MM
+  VSRR_ROOT_COVERAGE_MIN_Z_MM
+  PEARS_COVERAGE_MIN_Z_MM
   ILIOFEMORAL_COVERAGE_MIN_Z_MM
 
 Source of thresholds: SCCT 2021 Expert Consensus on CT for TAVR
@@ -34,7 +36,9 @@ MAX_SLICE_THICKNESS_MM = 1.0
 MIN_CONTRAST_BLOOD_POOL_HU = 300.0
 MAX_CONTRAST_BLOOD_POOL_HU = 600.0
 ACCEPTED_CONTRAST_PHASES = ("arterial", "cardiac")
-ROOT_COVERAGE_MIN_Z_MM = 150.0
+TAVI_ROOT_COVERAGE_MIN_Z_MM = 80.0
+VSRR_ROOT_COVERAGE_MIN_Z_MM = 150.0
+PEARS_COVERAGE_MIN_Z_MM = 200.0
 ILIOFEMORAL_COVERAGE_MIN_Z_MM = 280.0
 
 
@@ -42,7 +46,9 @@ ILIOFEMORAL_COVERAGE_MIN_Z_MM = 280.0
 class StudyMeta:
     slice_thickness_mm: Optional[float]
     voxel_spacing_mm: Optional[Tuple[float, float, float]]
-    is_root_covered: Optional[bool]
+    is_tavi_root_covered: Optional[bool]
+    is_vsrr_root_covered: Optional[bool]
+    is_pears_covered: Optional[bool]
     is_iliofemoral_covered: Optional[bool]
     is_cropped: Optional[bool]
     contrast_phase: Optional[str]
@@ -53,7 +59,10 @@ class StudyMeta:
         return {
             "slice_thickness_mm": self.slice_thickness_mm,
             "voxel_spacing_mm": list(self.voxel_spacing_mm) if self.voxel_spacing_mm else None,
-            "is_root_covered": self.is_root_covered,
+            "is_tavi_root_covered": self.is_tavi_root_covered,
+            "is_vsrr_root_covered": self.is_vsrr_root_covered,
+            "is_pears_covered": self.is_pears_covered,
+            "is_root_covered": self.is_vsrr_root_covered,
             "is_iliofemoral_covered": self.is_iliofemoral_covered,
             "is_cropped": self.is_cropped,
             "contrast_phase": self.contrast_phase,
@@ -65,12 +74,14 @@ class StudyMeta:
 @dataclass
 class DataQualityGate:
     passes_sizing_gate: bool
+    allowed_procedures: List[str] = field(default_factory=list)
     failure_reasons: List[str] = field(default_factory=list)
     advisories: List[str] = field(default_factory=list)
 
     def to_manifest_dict(self) -> dict:
         return {
             "passes_sizing_gate": self.passes_sizing_gate,
+            "allowed_procedures": list(self.allowed_procedures),
             "failure_reasons": list(self.failure_reasons),
             "advisories": list(self.advisories),
         }
@@ -140,13 +151,17 @@ def extract_study_meta(
         else:
             phase = "non_contrast"
 
-    is_root_covered = bool(fov[2] >= ROOT_COVERAGE_MIN_Z_MM)
+    is_tavi_root_covered = bool(fov[2] >= TAVI_ROOT_COVERAGE_MIN_Z_MM)
+    is_vsrr_root_covered = bool(fov[2] >= VSRR_ROOT_COVERAGE_MIN_Z_MM)
+    is_pears_covered = bool(fov[2] >= PEARS_COVERAGE_MIN_Z_MM)
     is_iliofemoral_covered = bool(fov[2] >= ILIOFEMORAL_COVERAGE_MIN_Z_MM)
 
     return StudyMeta(
         slice_thickness_mm=slice_thickness,
         voxel_spacing_mm=spacing,
-        is_root_covered=is_root_covered,
+        is_tavi_root_covered=is_tavi_root_covered,
+        is_vsrr_root_covered=is_vsrr_root_covered,
+        is_pears_covered=is_pears_covered,
         is_iliofemoral_covered=is_iliofemoral_covered,
         is_cropped=(not is_iliofemoral_covered),
         contrast_phase=phase,
@@ -159,6 +174,7 @@ def evaluate_gate(meta: StudyMeta) -> DataQualityGate:
     """Run SCCT 2021 data-quality gate on a StudyMeta."""
     reasons: List[str] = []
     advisories: List[str] = []
+    allowed_procedures: List[str] = []
 
     if meta.slice_thickness_mm is None:
         reasons.append("slice_thickness_unknown")
@@ -183,14 +199,26 @@ def evaluate_gate(meta: StudyMeta) -> DataQualityGate:
             f"blood_pool_hu_above_{MAX_CONTRAST_BLOOD_POOL_HU:.0f}_possible_hyperenhancement"
         )
 
-    if meta.is_root_covered is False:
-        reasons.append("root_coverage_below_150mm_scct2021")
+    has_global_hard_failure = len(reasons) > 0
+
+    procedure_coverage = (
+        ("TAVI", meta.is_tavi_root_covered, "tavi_root_coverage_below_80mm"),
+        ("VSRR", meta.is_vsrr_root_covered, "vsrr_root_coverage_below_150mm"),
+        ("PEARS", meta.is_pears_covered, "pears_coverage_below_200mm"),
+    )
+    for procedure, covered, failure_reason in procedure_coverage:
+        if covered is False:
+            reasons.append(failure_reason)
+            continue
+        if covered is True and not has_global_hard_failure:
+            allowed_procedures.append(procedure)
 
     if meta.is_iliofemoral_covered is False:
         advisories.append("iliofemoral_access_not_assessable_plan_separately")
 
     return DataQualityGate(
-        passes_sizing_gate=len(reasons) == 0,
+        passes_sizing_gate=len(allowed_procedures) > 0,
+        allowed_procedures=allowed_procedures,
         failure_reasons=reasons,
         advisories=advisories,
     )
@@ -201,7 +229,9 @@ __all__ = [
     "MIN_CONTRAST_BLOOD_POOL_HU",
     "MAX_CONTRAST_BLOOD_POOL_HU",
     "ACCEPTED_CONTRAST_PHASES",
-    "ROOT_COVERAGE_MIN_Z_MM",
+    "TAVI_ROOT_COVERAGE_MIN_Z_MM",
+    "VSRR_ROOT_COVERAGE_MIN_Z_MM",
+    "PEARS_COVERAGE_MIN_Z_MM",
     "ILIOFEMORAL_COVERAGE_MIN_Z_MM",
     "StudyMeta",
     "DataQualityGate",

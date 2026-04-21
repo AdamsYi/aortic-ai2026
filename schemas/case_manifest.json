@@ -63,6 +63,9 @@
           "minItems": 3,
           "maxItems": 3
         },
+        "is_tavi_root_covered": { "type": ["boolean", "null"] },
+        "is_vsrr_root_covered": { "type": ["boolean", "null"] },
+        "is_pears_covered": { "type": ["boolean", "null"] },
         "is_root_covered": { "type": ["boolean", "null"] },
         "is_iliofemoral_covered": { "type": ["boolean", "null"] },
         "is_cropped": { "type": ["boolean", "null"] },
@@ -86,6 +89,13 @@
       "required": ["passes_sizing_gate", "failure_reasons"],
       "properties": {
         "passes_sizing_gate": { "type": "boolean" },
+        "allowed_procedures": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["TAVI", "VSRR", "PEARS"]
+          }
+        },
         "failure_reasons": {
           "type": "array",
           "items": { "type": "string" }

@@ -122,7 +122,10 @@ export type ContrastPhase = "non_contrast" | "arterial" | "venous" | "unknown";
 export interface StudyMeta {
   slice_thickness_mm: number | null;
   voxel_spacing_mm: [number, number, number] | null;
-  is_root_covered: boolean | null;
+  is_tavi_root_covered?: boolean | null;
+  is_vsrr_root_covered?: boolean | null;
+  is_pears_covered?: boolean | null;
+  is_root_covered?: boolean | null;
   is_iliofemoral_covered: boolean | null;
   is_cropped?: boolean | null;
   contrast_phase: ContrastPhase | null;
@@ -132,6 +135,7 @@ export interface StudyMeta {
 
 export interface DataQualityGate {
   passes_sizing_gate: boolean;
+  allowed_procedures?: Array<"TAVI" | "VSRR" | "PEARS">;
   failure_reasons: string[];
   advisories?: string[];
 }
@@ -168,7 +172,9 @@ export const DATA_QUALITY_THRESHOLDS = {
   minContrastBloodPoolHu: 300,
   maxContrastBloodPoolHu: 600,
   acceptedContrastPhases: ["arterial", "cardiac"] as const,
-  rootCoverageMinZMm: 150,
+  taviRootCoverageMinZMm: 80,
+  vsrrRootCoverageMinZMm: 150,
+  pearsCoverageMinZMm: 200,
   iliofemoralCoverageMinZMm: 280,
 } as const;
 
