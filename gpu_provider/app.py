@@ -767,6 +767,67 @@ def _cmd_tcia_probe(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return [sys.executable, "-u", "-c", snippet], _GPU_DIR
 
 
+def _cmd_imagecas_probe(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="imagecas_probe_takes_no_args")
+    snippet = (
+        "import csv\n"
+        "import io\n"
+        "import shutil\n"
+        "import subprocess\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "dataset = 'xiaoweixumedicalai/imagecas'\n"
+        "scripts_dir = Path(sys.executable).resolve().parent\n"
+        "kaggle_cli = None\n"
+        "for candidate in ('kaggle.exe', 'kaggle'):\n"
+        "    probe = scripts_dir / candidate\n"
+        "    if probe.exists():\n"
+        "        kaggle_cli = str(probe)\n"
+        "        break\n"
+        "if kaggle_cli is None:\n"
+        "    kaggle_cli = shutil.which('kaggle')\n"
+        "if kaggle_cli is None:\n"
+        "    raise SystemExit('kaggle_cli_not_found')\n"
+        "cmd = [kaggle_cli, 'datasets', 'files', '-d', dataset, '--csv']\n"
+        "print(f'dataset | {dataset}')\n"
+        "print(f'kaggle_cli | {kaggle_cli}')\n"
+        "try:\n"
+        "    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)\n"
+        "except Exception as exc:\n"
+        "    if isinstance(exc, subprocess.CalledProcessError):\n"
+        "        if exc.stdout:\n"
+        "            print(exc.stdout.strip())\n"
+        "        if exc.stderr:\n"
+        "            print(exc.stderr.strip())\n"
+        "    print(str(exc))\n"
+        "    raise\n"
+        "reader = csv.DictReader(io.StringIO(proc.stdout))\n"
+        "rows = list(reader)\n"
+        "print(f'archive_entry_count | {len(rows)}')\n"
+        "max_case_end = None\n"
+        "for row in rows:\n"
+        "    name = row.get('name') or row.get('fileName') or row.get('FileName') or ''\n"
+        "    if '-' not in name:\n"
+        "        continue\n"
+        "    head = name.split('.', 1)[0]\n"
+        "    if '-' not in head:\n"
+        "        continue\n"
+        "    start, end = head.split('-', 1)\n"
+        "    if start.isdigit() and end.isdigit():\n"
+        "        end_num = int(end)\n"
+        "        if max_case_end is None or end_num > max_case_end:\n"
+        "            max_case_end = end_num\n"
+        "if max_case_end is not None:\n"
+        "    print(f'inferred_case_count | {max_case_end}')\n"
+        "for idx, row in enumerate(rows, start=1):\n"
+        "    name = row.get('name') or row.get('fileName') or row.get('FileName') or '-'\n"
+        "    size = row.get('totalBytes') or row.get('size') or row.get('Size') or '-'\n"
+        "    print(f'entry_{idx:02d} | {name} | {size}')\n"
+    )
+    return [sys.executable, "-u", "-c", snippet], _GPU_DIR
+
+
 def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
     if args:
         raise HTTPException(status_code=400, detail="pip_sync_takes_no_args")
@@ -862,6 +923,7 @@ _ADMIN_WHITELIST = {
     "ingest_zenodo": _cmd_ingest_zenodo,
     "zenodo_inspect": _cmd_zenodo_inspect,
     "tcia_probe": _cmd_tcia_probe,
+    "imagecas_probe": _cmd_imagecas_probe,
     "commit_case": _cmd_commit_case,
 }
 
