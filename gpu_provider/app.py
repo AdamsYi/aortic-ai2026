@@ -649,6 +649,22 @@ def _validate_ingest_args(args: List[str]) -> List[str]:
             allowed.append(tok)
             i += 1
             continue
+        if tok in {"--max-cases", "--case-index"}:
+            if i + 1 >= len(args):
+                raise HTTPException(status_code=400, detail=f"{tok[2:]}_missing_value")
+            val = args[i + 1]
+            if not _CASE_ID_RE.match(val):
+                raise HTTPException(status_code=400, detail=f"{tok[2:]}_invalid_format")
+            allowed.extend([tok, val])
+            i += 2
+            continue
+        if tok.startswith("--max-cases=") or tok.startswith("--case-index="):
+            val = tok.split("=", 1)[1]
+            if not _CASE_ID_RE.match(val):
+                raise HTTPException(status_code=400, detail=f"{tok.split('=', 1)[0][2:]}_invalid_format")
+            allowed.append(tok)
+            i += 1
+            continue
         raise HTTPException(status_code=400, detail=f"arg_not_whitelisted:{tok}")
     return allowed
 
@@ -672,8 +688,8 @@ def _cmd_git_pull(_args: List[str]) -> tuple[List[str], Optional[Path]]:
 
 def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
     clean = _validate_ingest_args(args)
-    argv = [sys.executable, "-u", str(_GPU_DIR / "fetch_imagecas.py"), *clean]
-    return argv, _GPU_DIR
+    argv = [sys.executable, "-u", "-m", "gpu_provider.fetch_imagecas", *clean]
+    return argv, _REPO_ROOT
 
 
 def _validate_ingest_zenodo_args(args: List[str]) -> List[str]:
@@ -1045,7 +1061,7 @@ def _resolve_commit_case_target(case_id: str) -> tuple[str, str, str]:
         candidates.append(
             (
                 imagecas_slug,
-                f"ingest/imagecas-{numeric_id}",
+                f"ingest/imagecas_{numeric_id}",
                 f"feat(cases): ImageCAS case {numeric_id} passing SCCT 2021 data-quality gate",
             )
         )

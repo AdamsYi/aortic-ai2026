@@ -1,71 +1,47 @@
 #!/usr/bin/env python3
-"""fetch_imagecas.py — selective ingest of ImageCAS (Zeng et al. 2023) CTAs.
-
-Runs on the Windows GPU provider machine. For each candidate case:
-  1. Pull `<i>.img.nii.gz` + `<i>.label.nii.gz` via Kaggle API (per-file)
-  2. Extract study_meta from the NIfTI header + HU stats
-  3. Run the SCCT 2021 data-quality gate (gpu_provider/geometry/data_quality.py)
-  4. On the FIRST passing case: run pipeline_runner.py end-to-end and
-     write a full case bundle into <repo>/cases/imagecas_<id>/ (artifacts,
-     meshes, qa, manifest).
-
-Prereqs (once on Windows):
-  1. pip install kaggle nibabel
-  2. Create Kaggle account → Account → Create New API Token → save
-     kaggle.json to C:\\Users\\<you>\\.kaggle\\kaggle.json (chmod 600 on POSIX).
-  3. Accept dataset rules at https://www.kaggle.com/datasets/xiaoweixumedicalai/imagecas
-
-Usage (on Windows):
-  python fetch_imagecas.py                    # try case_ids 1..20, pick first passing
-  python fetch_imagecas.py --case-ids 1,2,3   # explicit IDs
-  python fetch_imagecas.py --dry-run          # gate-check only, no pipeline
-
-References:
-  Zeng et al., ImageCAS, Comput Med Imaging Graph 2023.
-  Kaggle: xiaoweixumedicalai/imagecas
-  License: CC-BY 4.0 (per Kaggle dataset page).
-"""
+"""ImageCAS ingest using the locally extracted Kaggle split."""
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
-import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
-
-# DNS fallback (borrowed from download_and_process_tavi.py — same rationale
-# on the Windows box: system DNS is flaky, nslookup via 8.8.8.8 works).
-_orig_getaddrinfo = socket.getaddrinfo
-
-
-def _dns_fallback_getaddrinfo(host, port, *args, **kwargs):
-    try:
-        return _orig_getaddrinfo(host, port, *args, **kwargs)
-    except socket.gaierror:
-        try:
-            r = subprocess.run(
-                ["nslookup", host, "8.8.8.8"],
-                capture_output=True, text=True, timeout=10,
-            )
-            for line in r.stdout.splitlines():
-                if "Address:" in line and "8.8.8.8" not in line and "#" not in line:
-                    ip = line.split("Address:")[-1].strip()
-                    if ip:
-                        return _orig_getaddrinfo(ip, port, *args, **kwargs)
-        except Exception:
-            pass
-        raise
-
-
-socket.getaddrinfo = _dns_fallback_getaddrinfo
+import re
+from typing import Any, Optional, Sequence
 
 
 WIN_BASE = Path(r"C:\AorticAI\gpu_provider")
-KAGGLE_DATASET = "xiaoweixumedicalai/imagecas"
+SOURCE_DATASET = {
+    "name": "ImageCAS",
+    "host": "Kaggle",
+    "kaggle_id": "xiaoweixumedicalai/imagecas",
+    "license": "apache-2.0",
+    "citation": "Zeng et al., ImageCAS: a large-scale dataset and benchmark for coronary artery segmentation based on CT, 2023.",
+}
+CASE_ID_RE = re.compile(r"^(\d+)\.img\.nii\.gz$")
+
+
+def _load_local_module(name: str, path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"module_spec_missing | {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_LOCAL_BASE = Path(__file__).resolve().parent
+_DATA_QUALITY = _load_local_module("imagecas_data_quality", _LOCAL_BASE / "geometry" / "data_quality.py")
+_MESH_QA = _load_local_module("imagecas_mesh_qa", _LOCAL_BASE / "geometry" / "mesh_qa.py")
+extract_study_meta = _DATA_QUALITY.extract_study_meta
+evaluate_gate = _DATA_QUALITY.evaluate_gate
+audit_case_meshes = _MESH_QA.audit_case_meshes
+report_to_manifest = _MESH_QA.report_to_manifest
 
 
 def log(msg: str) -> None:
@@ -74,34 +50,72 @@ def log(msg: str) -> None:
 
 
 def resolve_base() -> Path:
-    """Return gpu_provider/ dir — prefers the fixed Windows path when present."""
-    if WIN_BASE.exists():
-        return WIN_BASE
-    return Path(__file__).resolve().parent
+    return WIN_BASE if WIN_BASE.exists() else Path(__file__).resolve().parent
 
 
 def resolve_repo_root(base_dir: Path) -> Path:
-    """Repo root = parent of gpu_provider/."""
     return base_dir.parent
 
 
-def resolve_kaggle_cli() -> str:
-    """Return the Kaggle CLI entrypoint from the active venv when possible."""
-    scripts_dir = Path(sys.executable).resolve().parent
-    for candidate in ("kaggle.exe", "kaggle"):
-        cli = scripts_dir / candidate
-        if cli.exists():
-            return str(cli)
-    found = shutil.which("kaggle")
-    if found:
-        return found
-    raise RuntimeError("kaggle CLI not found in venv Scripts/ or PATH")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-cases", type=int, default=20)
+    parser.add_argument("--case-ids", default="", help="comma-separated ImageCAS ids")
+    parser.add_argument("--case-index", type=int, default=None, help="1-based index in the sorted scan list")
+    parser.add_argument(
+        "--extracted-dir",
+        default="",
+        help="override extracted ImageCAS split root (default: demo_data/imagecas_1-200_extracted)",
+    )
+    return parser.parse_args()
 
 
-def run_cmd(cmd: List[str], cwd: Optional[Path] = None, check: bool = True) -> int:
-    log(f"$ {' '.join(str(c) for c in cmd)}")
+def enumerate_cases(extracted_dir: Path) -> list[tuple[int, Path, Path]]:
+    pairs: list[tuple[int, Path, Path]] = []
+    for img_path in sorted(extracted_dir.glob("*.img.nii.gz"), key=lambda p: p.name):
+        match = CASE_ID_RE.match(img_path.name)
+        if not match:
+            continue
+        case_id = int(match.group(1))
+        label_path = extracted_dir / f"{case_id}.label.nii.gz"
+        if not label_path.exists():
+            continue
+        pairs.append((case_id, img_path, label_path))
+    return sorted(pairs, key=lambda item: item[0])
+
+
+def parse_case_ids(raw: str) -> list[int]:
+    if not raw.strip():
+        return []
+    return [int(part.strip()) for part in raw.split(",") if part.strip()]
+
+
+def select_cases(
+    cases: Sequence[tuple[int, Path, Path]],
+    case_ids: Sequence[int],
+    case_index: Optional[int],
+    max_cases: int,
+) -> list[tuple[int, Path, Path]]:
+    if case_ids:
+        indexed = {case_id: (case_id, img_path, label_path) for case_id, img_path, label_path in cases}
+        missing = [case_id for case_id in case_ids if case_id not in indexed]
+        if missing:
+            raise RuntimeError(f"case_ids_not_found | {missing}")
+        return [indexed[case_id] for case_id in case_ids]
+    if case_index is not None:
+        if case_index < 1 or case_index > len(cases):
+            raise RuntimeError(f"case_index_out_of_range | {case_index} | total={len(cases)}")
+        return [cases[case_index - 1]]
+    if max_cases < 1:
+        raise RuntimeError(f"max_cases_invalid | {max_cases}")
+    return list(cases[:max_cases])
+
+
+def run_cmd(cmd: Sequence[str], cwd: Optional[Path] = None) -> None:
+    log(f"$ {' '.join(str(part) for part in cmd)}")
     proc = subprocess.Popen(
-        cmd,
+        list(cmd),
         cwd=str(cwd) if cwd else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -112,177 +126,110 @@ def run_cmd(cmd: List[str], cwd: Optional[Path] = None, check: bool = True) -> i
     for line in proc.stdout:
         print(line.rstrip(), flush=True)
     code = proc.wait()
-    if check and code != 0:
-        raise RuntimeError(f"command failed ({code}): {' '.join(cmd)}")
-    return code
+    if code != 0:
+        raise RuntimeError(f"command_failed | code={code} | cmd={' '.join(str(part) for part in cmd)}")
 
 
-def kaggle_download_file(dataset: str, filename: str, out_dir: Path) -> Path:
-    """Pull a single file from a Kaggle dataset; unzip in place."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    kaggle_cli = resolve_kaggle_cli()
-    run_cmd(
-        [
-            kaggle_cli, "datasets", "download",
-            "-d", dataset, "-f", filename, "-p", str(out_dir), "--force",
-        ]
-    )
-    # Kaggle CLI saves the file either as <filename> or <filename>.zip
-    direct = out_dir / filename
-    wrapped = out_dir / (filename + ".zip")
-    if direct.exists():
-        return direct
-    if wrapped.exists():
-        import zipfile
-
-        with zipfile.ZipFile(wrapped) as zf:
-            zf.extractall(out_dir)
-        wrapped.unlink()
-        if direct.exists():
-            return direct
-    # Some CLI versions drop numeric-only files as "imagecas-<N>.zip"
-    candidates = list(out_dir.glob(Path(filename).stem + "*"))
-    for c in candidates:
-        if c.suffix in (".nii", ".gz") and c.name.startswith(Path(filename).stem):
-            return c
-    raise FileNotFoundError(f"kaggle fetch did not produce {filename} in {out_dir}")
-
-
-def fetch_case(dataset: str, case_id: int, out_dir: Path) -> tuple[Path, Path]:
-    """Pull <case_id>.img.nii.gz and <case_id>.label.nii.gz."""
-    img_name = f"{case_id}.img.nii.gz"
-    lbl_name = f"{case_id}.label.nii.gz"
-    img_path = kaggle_download_file(dataset, img_name, out_dir)
-    lbl_path = kaggle_download_file(dataset, lbl_name, out_dir)
-    return img_path, lbl_path
-
-
-def write_preview_manifest(
-    case_stage_dir: Path,
-    case_id: int,
-    meta_dict: dict,
-    gate_dict: dict,
-) -> None:
-    preview = {
-        "case_id": f"imagecas_{case_id:04d}",
-        "source_dataset": "ImageCAS (Zeng et al. 2023, CC-BY-4.0)",
-        "scan_date_unknown": True,
-        "study_meta": meta_dict,
-        "data_quality": gate_dict,
-        "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-    out = case_stage_dir / "preview_manifest.json"
-    out.write_text(json.dumps(preview, indent=2, ensure_ascii=False), encoding="utf-8")
-    log(f"wrote preview manifest: {out}")
-
-
-def stage_first_passing_case(
-    candidates: List[int],
-    dataset: str,
-    stage_root: Path,
-) -> Optional[tuple[int, Path, Path, dict, dict]]:
-    """Try candidates in order; return (case_id, ct, mask, meta, gate) for first pass."""
-    from geometry.data_quality import extract_study_meta, evaluate_gate
-
-    for cid in candidates:
-        case_stage = stage_root / f"imagecas_{cid:04d}"
-        try:
-            log(f"── trying case {cid} → {case_stage} ──")
-            ct_path, mask_path = fetch_case(dataset, cid, case_stage)
-            meta = extract_study_meta(ct_path, mask_path)
-            gate = evaluate_gate(meta)
-            log(f"study_meta: {meta.to_manifest_dict()}")
-            log(f"gate: passes={gate.passes_sizing_gate} reasons={gate.failure_reasons}")
-            write_preview_manifest(
-                case_stage, cid, meta.to_manifest_dict(), gate.to_manifest_dict()
-            )
-            if gate.passes_sizing_gate:
-                return cid, ct_path, mask_path, meta.to_manifest_dict(), gate.to_manifest_dict()
-            log(f"case {cid} did NOT pass gate → trying next")
-        except Exception as exc:
-            log(f"case {cid} fetch/inspect failed: {exc}")
-            continue
-    return None
-
-
-def run_pipeline_on_case(
-    base_dir: Path,
-    ct_path: Path,
-    mask_path: Path,
-    case_id: int,
-    output_dir: Path,
-) -> Path:
-    """Invoke pipeline_runner.py --skip-segmentation on fetched (ct, mask)."""
+def run_pipeline_on_case(base_dir: Path, ct_path: Path, case_id: int, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     result_json = output_dir / "result.json"
     run_cmd(
         [
-            sys.executable, "pipeline_runner.py",
-            "--input", str(ct_path),
-            "--input-mask", str(mask_path),
-            "--skip-segmentation",
-            "--output-mask", str(output_dir / "mask.nii.gz"),
-            "--output-json", str(result_json),
-            "--device", "cpu",
-            "--quality", "high",
-            "--job-id", f"imagecas_{case_id:04d}",
-            "--study-id", f"imagecas_{case_id:04d}",
+            sys.executable,
+            "pipeline_runner.py",
+            "--input",
+            str(ct_path),
+            "--output-mask",
+            str(output_dir / "segmentation_mask.nii.gz"),
+            "--output-json",
+            str(result_json),
+            "--device",
+            "gpu",
+            "--quality",
+            "high",
+            "--job-id",
+            f"imagecas_{case_id:04d}",
+            "--study-id",
+            f"imagecas_{case_id:04d}",
         ],
         cwd=base_dir,
     )
     if not result_json.exists():
-        raise RuntimeError(f"pipeline produced no {result_json}")
+        raise RuntimeError(f"pipeline_result_missing | {result_json}")
     return result_json
 
 
-def emit_case_bundle(
-    repo_root: Path,
+def _copy_if_exists(src: Path, dst: Path) -> bool:
+    if not src.exists():
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
+
+
+def _build_capabilities(result: dict[str, Any], has_leaflet_assets: bool) -> dict[str, dict[str, Any]]:
+    coronary_detection = result.get("coronary_detection")
+    coronary_available = isinstance(coronary_detection, dict)
+    planning = result.get("planning")
+    pears_available = isinstance(planning, dict) and isinstance(planning.get("pears"), dict)
+    return {
+        "cpr": {
+            "available": False,
+            "inferred": False,
+            "legacy": False,
+            "source": "unavailable",
+            "reason": "cpr_artifact_missing",
+        },
+        "coronary_ostia": {
+            "available": coronary_available,
+            "inferred": False,
+            "legacy": False,
+            "source": "artifact" if coronary_available else "unavailable",
+            "reason": None if coronary_available else "coronary_ostia_not_exported",
+        },
+        "leaflet_geometry": {
+            "available": has_leaflet_assets,
+            "inferred": False,
+            "legacy": False,
+            "source": "artifact" if has_leaflet_assets else "unavailable",
+            "reason": None if has_leaflet_assets else "leaflet_artifact_missing",
+        },
+        "pears_geometry": {
+            "available": pears_available,
+            "inferred": pears_available,
+            "legacy": False,
+            "source": "planning_artifact" if pears_available else "unavailable",
+            "reason": None if pears_available else "pears_planning_missing",
+        },
+    }
+
+
+def summarize_case(case_id: int, meta: Any, gate: Any) -> None:
+    z_mm = None
+    if meta.fov_mm is not None and len(meta.fov_mm) >= 3:
+        z_mm = float(meta.fov_mm[2])
+    z_text = "-" if z_mm is None else f"{z_mm:.1f}"
+    log(
+        f"[gate] case_id={case_id} z_mm={z_text} "
+        f"slice_mm={meta.slice_thickness_mm} blood_pool_hu={meta.blood_pool_hu_mean} "
+        f"allowed={gate.allowed_procedures} reasons={gate.failure_reasons} advisories={gate.advisories}"
+    )
+    log(f"[study_meta] case_id={case_id} payload={meta.to_manifest_dict()}")
+
+
+def build_minimal_manifest(
+    case_slug: str,
     case_id: int,
-    result_json: Path,
-    ct_path: Path,
-    meta_dict: dict,
-    gate_dict: dict,
-) -> Path:
-    """Write a minimal case bundle under cases/imagecas_<id>/.
-
-    Full promotion to default_clinical_case is a separate step — this keeps
-    the new case isolated so human review can happen before it replaces
-    the showcase.
-    """
-    case_slug = f"imagecas_{case_id:04d}"
-    case_dir = repo_root / "cases" / case_slug
-    artifacts = case_dir / "artifacts"
-    imaging = case_dir / "imaging_hidden"
-    artifacts.mkdir(parents=True, exist_ok=True)
-    imaging.mkdir(parents=True, exist_ok=True)
-
-    # Copy the raw CT into imaging_hidden (mirrors default_clinical_case layout)
-    dest_ct = imaging / f"{case_slug}_ct.nii.gz"
-    shutil.copy2(ct_path, dest_ct)
-
-    # The pipeline result.json carries measurements + planning + model blobs.
-    # Split it across the artifact files the Worker expects to read.
-    result = json.loads(result_json.read_text(encoding="utf-8"))
-
-    def maybe_write(key: str, target: Path) -> None:
-        val = result.get(key)
-        if val is None:
-            return
-        target.write_text(json.dumps(val, indent=2, ensure_ascii=False), encoding="utf-8")
-        log(f"wrote {target}")
-
-    maybe_write("measurements_structured", artifacts / "measurements.json")
-    if not (artifacts / "measurements.json").exists():
-        maybe_write("measurements", artifacts / "measurements.json")
-    maybe_write("planning", artifacts / "planning.json")
-    maybe_write("centerline", artifacts / "centerline.json")
-    maybe_write("annulus_plane", artifacts / "annulus_plane.json")
-    maybe_write("aortic_root_model", artifacts / "aortic_root_model.json")
-    maybe_write("leaflet_model", artifacts / "leaflet_model.json")
-
-    manifest = {
+    ct_rel: str,
+    label_rel: str,
+    meta_dict: dict[str, Any],
+    gate_dict: dict[str, Any],
+    data_source: str,
+    note: str,
+) -> dict[str, Any]:
+    return {
         "case_id": case_slug,
-        "case_role": ["ingested", "imagecas"],
+        "case_role": ["ingested", "imagecas", "reference"],
         "display_name": {
             "zh-CN": f"ImageCAS 病例 #{case_id}",
             "en": f"ImageCAS case #{case_id}",
@@ -290,82 +237,283 @@ def emit_case_bundle(
         "placeholder": False,
         "not_real_cta": False,
         "case_type": "real_pipeline_case",
-        "data_source": "real_ct_pipeline_output",
+        "data_source": data_source,
         "clinical_use": "research_preclinical_planning",
-        "note": "Ingested from ImageCAS (Zeng et al. 2023, CC-BY-4.0).",
-        "source_dataset": "ImageCAS",
-        "pipeline_version": str(result.get("pipeline_version", "unknown")),
+        "note": note,
+        "build_version": "imagecas-source",
+        "source_dataset": SOURCE_DATASET,
         "scan_date": None,
         "last_modified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "study_meta": meta_dict,
         "data_quality": gate_dict,
         "artifact_index": {
             "case_manifest": "artifacts/case_manifest.json",
-            "planning": "artifacts/planning.json",
-            "centerline": "artifacts/centerline.json",
-            "annulus_plane": "artifacts/annulus_plane.json",
-            "aortic_root_model": "artifacts/aortic_root_model.json",
-            "measurements": "artifacts/measurements.json",
-            "leaflet_model": "artifacts/leaflet_model.json",
         },
-        "imaging_index": {"raw_ct": f"imaging_hidden/{case_slug}_ct.nii.gz"},
+        "imaging_index": {
+            "raw_ct": ct_rel,
+            "raw_label": label_rel,
+        },
     }
-    (artifacts / "case_manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+
+
+def emit_case_bundle(
+    repo_root: Path,
+    case_id: int,
+    ct_path: Path,
+    label_path: Path,
+    meta_dict: dict[str, Any],
+    gate_dict: dict[str, Any],
+    result_json: Optional[Path],
+    output_dir: Optional[Path],
+    pipeline_error: Optional[str],
+) -> tuple[Path, dict[str, Any]]:
+    case_slug = f"imagecas_{case_id:04d}"
+    case_dir = repo_root / "cases" / case_slug
+    artifacts = case_dir / "artifacts"
+    imaging = case_dir / "imaging_hidden"
+    meshes = case_dir / "meshes"
+    reports = case_dir / "reports"
+    qa = case_dir / "qa"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    imaging.mkdir(parents=True, exist_ok=True)
+    meshes.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
+    qa.mkdir(parents=True, exist_ok=True)
+
+    dest_ct = imaging / f"{case_slug}_ct.nii.gz"
+    dest_label = imaging / f"{case_slug}_label.nii.gz"
+    shutil.copy2(ct_path, dest_ct)
+    shutil.copy2(label_path, dest_label)
+
+    manifest = build_minimal_manifest(
+        case_slug=case_slug,
+        case_id=case_id,
+        ct_rel=f"imaging_hidden/{dest_ct.name}",
+        label_rel=f"imaging_hidden/{dest_label.name}",
+        meta_dict=meta_dict,
+        gate_dict=gate_dict,
+        data_source="pipeline_geometry_incomplete",
+        note="ImageCAS CTA ingested; geometry output incomplete or still under review.",
     )
-    log(f"wrote {artifacts / 'case_manifest.json'}")
-    return case_dir
+    result: dict[str, Any] = {}
+    mesh_report: dict[str, Any] = {}
+    mesh_gate_all_pass = False
+    failure_flags: list[Any] = []
+
+    if result_json is not None and result_json.exists() and output_dir is not None:
+        result = json.loads(result_json.read_text(encoding="utf-8"))
+
+        def maybe_write(key: str, target: Path) -> bool:
+            value = result.get(key)
+            if value is None:
+                return False
+            target.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+            return True
+
+        if maybe_write("measurements_structured", artifacts / "measurements.json"):
+            manifest["artifact_index"]["measurements"] = "artifacts/measurements.json"
+        elif maybe_write("measurements", artifacts / "measurements.json"):
+            manifest["artifact_index"]["measurements"] = "artifacts/measurements.json"
+        if maybe_write("planning", artifacts / "planning.json"):
+            manifest["artifact_index"]["planning"] = "artifacts/planning.json"
+        if maybe_write("centerline", artifacts / "centerline.json"):
+            manifest["artifact_index"]["centerline"] = "artifacts/centerline.json"
+        if maybe_write("annulus_plane", artifacts / "annulus_plane.json"):
+            manifest["artifact_index"]["annulus_plane"] = "artifacts/annulus_plane.json"
+        if maybe_write("aortic_root_model", artifacts / "aortic_root_model.json"):
+            manifest["artifact_index"]["aortic_root_model"] = "artifacts/aortic_root_model.json"
+        if maybe_write("leaflet_model", artifacts / "leaflet_model.json"):
+            manifest["artifact_index"]["leaflet_model"] = "artifacts/leaflet_model.json"
+
+        mesh_index: dict[str, str] = {}
+        report_index: dict[str, str] = {}
+        if _copy_if_exists(output_dir / "aortic_root.stl", meshes / "aortic_root.stl"):
+            mesh_index["aortic_root_stl"] = "meshes/aortic_root.stl"
+        if _copy_if_exists(output_dir / "ascending_aorta.stl", meshes / "ascending_aorta.stl"):
+            mesh_index["ascending_aorta_stl"] = "meshes/ascending_aorta.stl"
+        if _copy_if_exists(output_dir / "leaflets.stl", meshes / "leaflets.stl"):
+            mesh_index["leaflets_stl"] = "meshes/leaflets.stl"
+        if _copy_if_exists(output_dir / "report.pdf", reports / "report.pdf"):
+            report_index["report_pdf"] = "reports/report.pdf"
+
+        mesh_report = report_to_manifest(
+            audit_case_meshes(
+                {
+                    "aortic_root": meshes / "aortic_root.stl",
+                    "ascending_aorta": meshes / "ascending_aorta.stl",
+                    "leaflets": meshes / "leaflets.stl",
+                }
+            )
+        )
+        mesh_gate_all_pass = bool(mesh_report) and all(
+            bool(entry.get("passes_gate")) for entry in mesh_report.values()
+        )
+        (qa / "mesh_qa.json").write_text(
+            json.dumps(mesh_report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        failure_flags = result.get("risk_flags", []) if isinstance(result.get("risk_flags"), list) else []
+        (qa / "failure_flags.json").write_text(
+            json.dumps(failure_flags, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        if mesh_index:
+            manifest["mesh_index"] = mesh_index
+        if report_index:
+            manifest["report_index"] = report_index
+        manifest["qa_index"] = {
+            "mesh_qa": "qa/mesh_qa.json",
+            "failure_flags": "qa/failure_flags.json",
+        }
+        if pipeline_error is None and gate_dict.get("passes_sizing_gate") and mesh_gate_all_pass:
+            manifest["data_source"] = "real_ct_pipeline_output"
+            manifest["note"] = "ImageCAS CTA ingested and passed the procedure-tiered sizing gate with geometry bundle exported."
+        manifest["pipeline_version"] = str(result.get("pipeline_version", "unknown"))
+        manifest["capabilities"] = _build_capabilities(
+            result,
+            (artifacts / "leaflet_model.json").exists() or "leaflets_stl" in mesh_index,
+        )
+        manifest["uncertainty_summary"] = {
+            "clinician_review_required": bool(failure_flags) or not mesh_gate_all_pass or pipeline_error is not None,
+            "pipeline_risk_flags": len(failure_flags),
+            "mesh_gate_all_pass": mesh_gate_all_pass,
+        }
+
+    quality_gates_payload = {
+        "study_meta": meta_dict,
+        "data_quality": gate_dict,
+        "mesh_qa": mesh_report,
+    }
+    if pipeline_error is not None:
+        quality_gates_payload["pipeline_error"] = pipeline_error
+        (qa / "pipeline_error.json").write_text(
+            json.dumps({"error": pipeline_error}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        qa_index = manifest.setdefault("qa_index", {})
+        qa_index["pipeline_error"] = "qa/pipeline_error.json"
+
+    (qa / "quality_gates.json").write_text(
+        json.dumps(quality_gates_payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    manifest.setdefault("qa_index", {})
+    manifest["qa_index"]["quality_gates"] = "qa/quality_gates.json"
+    if mesh_report:
+        manifest["mesh_qa"] = mesh_report
+
+    (artifacts / "case_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return case_dir, manifest
+
+
+def process_selected_case(
+    base_dir: Path,
+    repo_root: Path,
+    case_id: int,
+    img_path: Path,
+    label_path: Path,
+    dry_run: bool,
+) -> tuple[dict[str, Any], dict[str, Any], Optional[dict[str, Any]]]:
+    meta = extract_study_meta(img_path, mask_path=label_path)
+    gate = evaluate_gate(meta)
+    summarize_case(case_id, meta, gate)
+    meta_dict = meta.to_manifest_dict()
+    gate_dict = gate.to_manifest_dict()
+    if dry_run:
+        return meta_dict, gate_dict, None
+
+    if not gate.passes_sizing_gate:
+        case_dir, manifest = emit_case_bundle(
+            repo_root=repo_root,
+            case_id=case_id,
+            ct_path=img_path,
+            label_path=label_path,
+            meta_dict=meta_dict,
+            gate_dict=gate_dict,
+            result_json=None,
+            output_dir=None,
+            pipeline_error="gate_failed_before_geometry",
+        )
+        log(f"[bundle] gate-failed manifest only -> {case_dir}")
+        return meta_dict, gate_dict, manifest
+
+    output_dir = base_dir / "imagecas_output" / f"imagecas_{case_id:04d}"
+    pipeline_error: Optional[str] = None
+    result_json: Optional[Path] = None
+    try:
+        result_json = run_pipeline_on_case(base_dir, img_path, case_id, output_dir)
+    except Exception as exc:
+        pipeline_error = str(exc)
+        log(f"[pipeline] case_id={case_id} failed: {pipeline_error}")
+
+    case_dir, manifest = emit_case_bundle(
+        repo_root=repo_root,
+        case_id=case_id,
+        ct_path=img_path,
+        label_path=label_path,
+        meta_dict=meta_dict,
+        gate_dict=gate_dict,
+        result_json=result_json,
+        output_dir=output_dir,
+        pipeline_error=pipeline_error,
+    )
+    log(f"[bundle] emitted {case_dir}")
+    return meta_dict, gate_dict, manifest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--case-ids",
-        default=",".join(str(i) for i in range(1, 21)),
-        help="comma-separated ImageCAS case ids to try (default: 1..20)",
-    )
-    parser.add_argument(
-        "--stage-dir",
-        default=None,
-        help="Where to stash downloaded NIfTIs (default: <base>/imagecas_stage)",
-    )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="stop after gate evaluation — no pipeline, no case bundle")
-    args = parser.parse_args()
-
+    args = parse_args()
     base_dir = resolve_base()
     repo_root = resolve_repo_root(base_dir)
-    stage_root = Path(args.stage_dir) if args.stage_dir else base_dir / "imagecas_stage"
-    stage_root.mkdir(parents=True, exist_ok=True)
+    extracted_dir = Path(args.extracted_dir) if args.extracted_dir else base_dir / "demo_data" / "imagecas_1-200_extracted"
+    if not extracted_dir.exists():
+        raise SystemExit(f"extracted_dir_missing | {extracted_dir}")
 
-    # Ensure geometry package importable when running from base_dir
-    sys.path.insert(0, str(base_dir))
+    all_cases = enumerate_cases(extracted_dir)
+    selected_cases = select_cases(
+        all_cases,
+        parse_case_ids(args.case_ids),
+        args.case_index,
+        args.max_cases,
+    )
+    log(
+        f"extracted_dir={extracted_dir} total_cases={len(all_cases)} "
+        f"selected={len(selected_cases)} dry_run={args.dry_run}"
+    )
 
-    case_ids = [int(x.strip()) for x in args.case_ids.split(",") if x.strip()]
-    log(f"base_dir={base_dir}  repo_root={repo_root}  stage_root={stage_root}")
-    log(f"candidates={case_ids}  dry_run={args.dry_run}")
-
-    picked = stage_first_passing_case(case_ids, KAGGLE_DATASET, stage_root)
-    if picked is None:
-        log("no candidate passed the SCCT gate — increase --case-ids or relax thresholds")
-        return 2
-
-    cid, ct_path, mask_path, meta_dict, gate_dict = picked
-    log(f"✓ selected imagecas_{cid:04d} — running full pipeline")
+    success_manifest: Optional[dict[str, Any]] = None
+    for case_id, img_path, label_path in selected_cases:
+        _, gate_dict, manifest = process_selected_case(
+            base_dir=base_dir,
+            repo_root=repo_root,
+            case_id=case_id,
+            img_path=img_path,
+            label_path=label_path,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            continue
+        if manifest and manifest.get("data_source") == "real_ct_pipeline_output":
+            success_manifest = manifest
+            break
+        if gate_dict.get("passes_sizing_gate"):
+            log(f"[warn] case_id={case_id} passed gate but bundle stayed non-green")
 
     if args.dry_run:
-        log("--dry-run set; skipping pipeline + bundle emission")
         return 0
-
-    output_dir = base_dir / "imagecas_output" / f"imagecas_{cid:04d}"
-    result_json = run_pipeline_on_case(base_dir, ct_path, mask_path, cid, output_dir)
-    case_dir = emit_case_bundle(
-        repo_root, cid, result_json, ct_path, meta_dict, gate_dict
+    if success_manifest is None:
+        log("[done] no ImageCAS case produced a green bundle in the selected run")
+        return 2
+    log(
+        "[done] first_green_case "
+        f"case_id={success_manifest.get('case_id')} "
+        f"allowed={success_manifest.get('data_quality', {}).get('allowed_procedures')}"
     )
-    log(f"✓ case bundle emitted: {case_dir}")
-    log("next: git add cases/imagecas_*/ && git commit && git push")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
