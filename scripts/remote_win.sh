@@ -100,7 +100,7 @@ case "$SUB" in
     ;;
 esac
 
-HTTP_CODE=$(curl --no-buffer -sS \
+HTTP_CODE=$(curl --http1.1 --no-buffer -sS \
   -X POST "${BASE}/admin/run" \
   -H "content-type: application/json" \
   -H "x-provider-secret: ${SECRET}" \
