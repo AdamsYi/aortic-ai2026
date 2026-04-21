@@ -36,9 +36,12 @@ SUB="$1"
 shift
 
 case "$SUB" in
-  status|git_pull)
+  status)
     COMMAND="$SUB"
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1], "args": []}))' "$COMMAND")
+    ;;
+  git_pull)
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "git_pull", "args": sys.argv[1:]}))' "$@")
     ;;
   pip_sync)
     if [[ $# -ne 0 ]]; then
