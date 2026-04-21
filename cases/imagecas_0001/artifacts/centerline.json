@@ -1,0 +1,19 @@
+{
+  "method": "distance_core_fallback+minimum_cost_skeleton_path",
+  "point_count": 46,
+  "annulus_index": 0,
+  "stj_index": 12,
+  "sinus_peak_index": 12,
+  "ascending_reference_index": 24,
+  "skeletonization": "distance_transform",
+  "quality": {
+    "point_count": 46,
+    "total_length_mm": 55.598642109126004,
+    "mean_radius_mm": 16.775747983351998,
+    "min_radius_mm": 15.152822494506836,
+    "smoothness_score": 0.9960397009859352,
+    "method": "distance_core_fallback+minimum_cost_skeleton_path",
+    "quality_flag": "good",
+    "uncertainty_flag": "NONE"
+  }
+}

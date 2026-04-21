@@ -1,0 +1,155 @@
+{
+  "case_id": "imagecas_0001",
+  "case_role": [
+    "ingested",
+    "imagecas",
+    "reference"
+  ],
+  "display_name": {
+    "zh-CN": "ImageCAS 病例 #1",
+    "en": "ImageCAS case #1"
+  },
+  "placeholder": false,
+  "not_real_cta": false,
+  "case_type": "real_pipeline_case",
+  "data_source": "pipeline_geometry_incomplete",
+  "clinical_use": "research_preclinical_planning",
+  "note": "ImageCAS CTA ingested; geometry output incomplete or still under review.",
+  "build_version": "imagecas-source",
+  "source_dataset": {
+    "name": "ImageCAS",
+    "host": "Kaggle",
+    "kaggle_id": "xiaoweixumedicalai/imagecas",
+    "license": "apache-2.0",
+    "citation": "Zeng et al., ImageCAS: a large-scale dataset and benchmark for coronary artery segmentation based on CT, 2023.",
+    "label_semantics": "coronary_tree"
+  },
+  "scan_date": null,
+  "last_modified": "2026-04-21T12:16:12Z",
+  "study_meta": {
+    "slice_thickness_mm": 0.5,
+    "voxel_spacing_mm": [
+      0.376953125,
+      0.376953125,
+      0.5
+    ],
+    "is_tavi_root_covered": true,
+    "is_vsrr_root_covered": false,
+    "is_pears_covered": false,
+    "is_root_covered": false,
+    "is_iliofemoral_covered": false,
+    "is_cropped": true,
+    "contrast_phase": "arterial",
+    "fov_mm": [
+      193.0,
+      193.0,
+      137.5
+    ],
+    "blood_pool_hu_mean": 315.7446006792861,
+    "blood_pool_hu_source": "central-by-design"
+  },
+  "data_quality": {
+    "passes_sizing_gate": true,
+    "allowed_procedures": [
+      "TAVI"
+    ],
+    "failure_reasons": [
+      "vsrr_root_coverage_below_150mm",
+      "pears_coverage_below_200mm"
+    ],
+    "advisories": [
+      "iliofemoral_access_not_assessable_plan_separately"
+    ]
+  },
+  "artifact_index": {
+    "case_manifest": "artifacts/case_manifest.json",
+    "measurements": "artifacts/measurements.json",
+    "planning": "artifacts/planning.json",
+    "centerline": "artifacts/centerline.json",
+    "annulus_plane": "artifacts/annulus_plane.json",
+    "aortic_root_model": "artifacts/aortic_root_model.json",
+    "leaflet_model": "artifacts/leaflet_model.json"
+  },
+  "imaging_index": {
+    "raw_ct": "imaging_hidden/imagecas_0001_ct.nii.gz",
+    "raw_label": "imaging_hidden/imagecas_0001_label.nii.gz"
+  },
+  "mesh_index": {
+    "aortic_root_stl": "meshes/aortic_root.stl",
+    "ascending_aorta_stl": "meshes/ascending_aorta.stl",
+    "leaflets_stl": "meshes/leaflets.stl"
+  },
+  "qa_index": {
+    "mesh_qa": "qa/mesh_qa.json",
+    "failure_flags": "qa/failure_flags.json",
+    "quality_gates": "qa/quality_gates.json"
+  },
+  "pipeline_version": "aortic_geometry_pipeline_v3",
+  "capabilities": {
+    "cpr": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "cpr_artifact_missing"
+    },
+    "coronary_ostia": {
+      "available": true,
+      "inferred": false,
+      "legacy": false,
+      "source": "artifact",
+      "reason": null
+    },
+    "leaflet_geometry": {
+      "available": true,
+      "inferred": false,
+      "legacy": false,
+      "source": "artifact",
+      "reason": null
+    },
+    "pears_geometry": {
+      "available": true,
+      "inferred": true,
+      "legacy": false,
+      "source": "planning_artifact",
+      "reason": null
+    }
+  },
+  "uncertainty_summary": {
+    "clinician_review_required": true,
+    "pipeline_risk_flags": 4,
+    "mesh_gate_all_pass": false
+  },
+  "mesh_qa": {
+    "aortic_root": {
+      "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "passes_gate": false,
+      "failure_reasons": [
+        "trimesh_unavailable_in_runtime"
+      ]
+    },
+    "ascending_aorta": {
+      "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "passes_gate": false,
+      "failure_reasons": [
+        "trimesh_unavailable_in_runtime"
+      ]
+    },
+    "leaflets": {
+      "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "passes_gate": false,
+      "failure_reasons": [
+        "trimesh_unavailable_in_runtime"
+      ]
+    }
+  }
+}

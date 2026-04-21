@@ -1,0 +1,69 @@
+{
+  "study_meta": {
+    "slice_thickness_mm": 0.5,
+    "voxel_spacing_mm": [
+      0.376953125,
+      0.376953125,
+      0.5
+    ],
+    "is_tavi_root_covered": true,
+    "is_vsrr_root_covered": false,
+    "is_pears_covered": false,
+    "is_root_covered": false,
+    "is_iliofemoral_covered": false,
+    "is_cropped": true,
+    "contrast_phase": "arterial",
+    "fov_mm": [
+      193.0,
+      193.0,
+      137.5
+    ],
+    "blood_pool_hu_mean": 315.7446006792861,
+    "blood_pool_hu_source": "central-by-design"
+  },
+  "data_quality": {
+    "passes_sizing_gate": true,
+    "allowed_procedures": [
+      "TAVI"
+    ],
+    "failure_reasons": [
+      "vsrr_root_coverage_below_150mm",
+      "pears_coverage_below_200mm"
+    ],
+    "advisories": [
+      "iliofemoral_access_not_assessable_plan_separately"
+    ]
+  },
+  "mesh_qa": {
+    "aortic_root": {
+      "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "passes_gate": false,
+      "failure_reasons": [
+        "trimesh_unavailable_in_runtime"
+      ]
+    },
+    "ascending_aorta": {
+      "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "passes_gate": false,
+      "failure_reasons": [
+        "trimesh_unavailable_in_runtime"
+      ]
+    },
+    "leaflets": {
+      "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "passes_gate": false,
+      "failure_reasons": [
+        "trimesh_unavailable_in_runtime"
+      ]
+    }
+  }
+}

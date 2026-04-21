@@ -1,0 +1,32 @@
+{
+  "aortic_root": {
+    "tri_count": 0,
+    "non_manifold_edges": null,
+    "watertight": null,
+    "aspect_ratio_p95": null,
+    "passes_gate": false,
+    "failure_reasons": [
+      "trimesh_unavailable_in_runtime"
+    ]
+  },
+  "ascending_aorta": {
+    "tri_count": 0,
+    "non_manifold_edges": null,
+    "watertight": null,
+    "aspect_ratio_p95": null,
+    "passes_gate": false,
+    "failure_reasons": [
+      "trimesh_unavailable_in_runtime"
+    ]
+  },
+  "leaflets": {
+    "tri_count": 0,
+    "non_manifold_edges": null,
+    "watertight": null,
+    "aspect_ratio_p95": null,
+    "passes_gate": false,
+    "failure_reasons": [
+      "trimesh_unavailable_in_runtime"
+    ]
+  }
+}
