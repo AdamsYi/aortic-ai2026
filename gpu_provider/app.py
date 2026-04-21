@@ -676,6 +676,18 @@ def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return argv, _GPU_DIR
 
 
+def _cmd_pip_sync(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="pip_sync_takes_no_args")
+    return [
+        str(_GPU_DIR / ".venv" / "Scripts" / "pip.exe"),
+        "install",
+        "-r",
+        str(_GPU_DIR / "requirements.txt"),
+        "--disable-pip-version-check",
+    ], _GPU_DIR
+
+
 def _validate_commit_case_args(args: List[str]) -> str:
     if len(args) != 2 or args[0] != "--case-id":
         raise HTTPException(status_code=400, detail="commit_case_requires_case-id")
@@ -731,6 +743,7 @@ def _cmd_commit_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
 _ADMIN_WHITELIST = {
     "status": _cmd_status,
     "git_pull": _cmd_git_pull,
+    "pip_sync": _cmd_pip_sync,
     "ingest_imagecas": _cmd_ingest,
     "commit_case": _cmd_commit_case,
 }
