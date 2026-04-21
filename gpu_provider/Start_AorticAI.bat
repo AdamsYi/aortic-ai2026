@@ -15,7 +15,10 @@ echo [2/4] 正在关闭旧进程...
 taskkill /FI "WINDOWTITLE eq AorticAI Provider" /T /F >nul 2>nul
 taskkill /FI "WINDOWTITLE eq AorticAI Tunnel" /T /F >nul 2>nul
 taskkill /IM cloudflared.exe /F >nul 2>nul
-taskkill /IM uvicorn.exe /F >nul 2>nul
+rem uvicorn runs as python.exe -m uvicorn; kill whoever holds port 8000
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr "LISTENING" ^| findstr ":8000 "') do (
+  taskkill /F /PID %%P >nul 2>nul
+)
 
 echo [2/4] 正在启动 AI 服务（FastAPI）...
 START "AorticAI Provider" /MIN cmd /k "cd /d C:\AorticAI\gpu_provider && set PROVIDER_SECRET=aorticai-internal-2026 && .venv\Scripts\python.exe -m uvicorn app:app --host 0.0.0.0 --port 8000"
