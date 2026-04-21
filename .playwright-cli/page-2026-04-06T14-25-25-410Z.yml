@@ -1,0 +1,154 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "AorticAI" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Structural Heart Planning
+    - generic [ref=e8]: AVT D1 · Real CTA Pipeline
+    - generic [ref=e9]:
+      - button "Report" [ref=e10] [cursor=pointer]
+      - button "Submit Case" [ref=e11] [cursor=pointer]
+      - generic [ref=e12]:
+        - button "EN" [ref=e13] [cursor=pointer]
+        - button "中文" [ref=e14] [cursor=pointer]
+  - main [ref=e15]:
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e19]: No case loaded
+        - generic [ref=e20]:
+          - generic [ref=e21]: Focus
+          - button "Annulus" [disabled] [ref=e22]
+          - button "STJ" [disabled] [ref=e23]
+          - button "Root" [disabled] [ref=e24]
+          - button "Coronary" [disabled] [ref=e25]
+        - generic [ref=e26]:
+          - generic [ref=e27]: Layout
+          - button "2x2" [ref=e28] [cursor=pointer]
+          - button "Single" [ref=e29] [cursor=pointer]
+        - generic [ref=e30]:
+          - generic [ref=e31]: Aux
+          - combobox "Aux" [disabled] [ref=e32]:
+            - option "Annulus" [selected]
+            - option "STJ"
+            - option "Centerline"
+            - option "CPR"
+        - generic [ref=e33]:
+          - generic [ref=e34]: CL
+          - slider "CL" [disabled] [ref=e35]: "0"
+          - generic [ref=e36]: 0/0
+        - generic [ref=e38]: Cornerstone3D runtime ready. Opening showcase case...
+      - generic [ref=e39]:
+        - generic [ref=e40]:
+          - text: Tools
+          - button "Crosshair" [disabled] [ref=e41]
+          - button "Window/Level" [disabled] [ref=e42]
+          - button "Pan" [disabled] [ref=e43]
+          - button "Zoom" [disabled] [ref=e44]
+          - button "Length" [disabled] [ref=e45]
+          - button "Angle" [disabled] [ref=e46]
+          - button "Probe" [disabled] [ref=e47]
+          - button "Rectangle ROI" [disabled] [ref=e48]
+        - generic [ref=e49]:
+          - text: Preset
+          - combobox "Preset" [disabled] [ref=e50]:
+            - option "Soft tissue" [selected]
+            - option "CTA vessel"
+            - option "Calcium"
+            - option "Wide"
+          - button "Reset" [disabled] [ref=e51]
+        - generic [ref=e52]:
+          - text: Cine
+          - button "Play" [disabled] [ref=e53]
+          - combobox "Cine" [disabled] [ref=e54]:
+            - option "4 fps"
+            - option "8 fps" [selected]
+            - option "12 fps"
+        - generic [ref=e55]:
+          - text: Landmarks
+          - button "Annulus" [disabled] [ref=e56]
+          - button "Commissures" [disabled] [ref=e57]
+          - button "Sinus peaks" [disabled] [ref=e58]
+          - button "STJ" [disabled] [ref=e59]
+          - button "Coronary ostia" [disabled] [ref=e60]
+          - button "Centerline" [disabled] [ref=e61]
+        - generic [ref=e62]:
+          - text: Edit
+          - button "Undo" [disabled] [ref=e63]
+          - button "Delete Selected" [disabled] [ref=e64]
+          - button "Clear All" [disabled] [ref=e65]
+          - button "Back to Crosshair" [disabled] [ref=e66]
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - generic [ref=e70]: Axial
+          - generic [ref=e75]: Coronal
+          - generic [ref=e80]: Sagittal
+          - generic [ref=e84]:
+            - generic [ref=e85]: 3D
+            - generic [ref=e86]: mesh
+            - generic [ref=e89]:
+              - generic [ref=e90]:
+                - generic [ref=e91]:
+                  - checkbox "Root" [checked] [ref=e92]
+                  - text: Root
+                - slider [ref=e93]: "60"
+              - generic [ref=e94]:
+                - generic [ref=e95]:
+                  - checkbox "Leaflets" [checked] [ref=e96]
+                  - text: Leaflets
+                - slider [ref=e97]: "80"
+              - generic [ref=e98]:
+                - generic [ref=e99]:
+                  - checkbox "Ascending" [checked] [ref=e100]
+                  - text: Ascending
+                - slider [ref=e101]: "40"
+              - generic [ref=e102]:
+                - generic [ref=e103]:
+                  - checkbox "Annulus ring" [checked] [ref=e104]
+                  - text: Annulus ring
+                - slider [ref=e105]: "100"
+              - generic [ref=e106]:
+                - generic [ref=e107]:
+                  - checkbox "Annulus Plane" [checked] [ref=e108]
+                  - text: Annulus Plane
+                - generic [ref=e109]: plane + normal
+              - button "Export PNG" [ref=e110] [cursor=pointer]
+        - generic:
+          - generic:
+            - generic: Aux
+    - complementary [ref=e112]:
+      - generic [ref=e113]:
+        - generic [ref=e115]:
+          - generic [ref=e116]: Select Procedure
+          - generic [ref=e117]:
+            - button "TAVI" [ref=e118] [cursor=pointer]
+            - button "VSRR" [ref=e119] [cursor=pointer]
+            - button "PEARS" [ref=e120] [cursor=pointer]
+          - generic [ref=e121]: Sizing and planning results update below.
+        - generic [ref=e122]:
+          - generic [ref=e123]: Planning Results
+          - generic [ref=e125]:
+            - generic [ref=e126]: TAVI sizing
+            - generic [ref=e127]: "--"
+        - generic [ref=e129] [cursor=pointer]:
+          - generic [ref=e130]: All Measurements
+          - button "▼" [ref=e131]
+        - generic [ref=e133]: Export
+        - generic [ref=e136] [cursor=pointer]:
+          - generic [ref=e137]: Why This Matters
+          - button "▲" [expanded] [ref=e138]
+  - generic:
+    - generic:
+      - heading "AorticAI" [level=2]
+      - paragraph: Loading case manifest...
+      - generic: "Build: b7088b6e0146"
+      - generic:
+        - button "Retry"
+  - complementary [ref=e139]:
+    - generic [ref=e140]:
+      - strong [ref=e141]: Report Viewer
+      - generic [ref=e142]:
+        - link "Download" [ref=e143] [cursor=pointer]:
+          - /url: /api/cases/default_clinical_case/reports/report.pdf
+        - button "Close" [ref=e144] [cursor=pointer]
+  - generic:
+    - text: 1 四格 | 2 全屏 | W/L 窗宽 | +/- 缩放 | R 重置 | P 规划 | M 测量 | ESC 关闭 |
+    - generic: For research use only

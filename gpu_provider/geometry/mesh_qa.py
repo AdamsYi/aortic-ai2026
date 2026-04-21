@@ -112,7 +112,7 @@ def _aspect_ratio_p95(mesh) -> Optional[float]:
         return None
 
 
-def _analyze_boundary_loops(mesh) -> Tuple[Optional[int], Optional[bool]]:
+def _analyze_boundary_loops(mesh) -> Tuple[int, bool]:
     """Analyze boundary loops for tube_segment meshes.
 
     Returns:
@@ -122,46 +122,79 @@ def _analyze_boundary_loops(mesh) -> Tuple[Optional[int], Optional[bool]]:
 
     For tube_segment meshes (aortic_root, ascending_aorta), we expect 1-2
     boundary loops (open ends). Each loop must be a closed path.
+
+    Raises:
+        ValueError: If boundary analysis fails or returns invalid results.
     """
     if trimesh is None:
-        return None, None
+        raise ValueError("trimesh_unavailable_for_boundary_analysis")
+
+    # is_watertight means no boundary edges
+    if mesh.is_watertight:
+        return 0, True
+
+    # Get boundary edges - these are edges belonging to only  1 face
+    boundary = mesh.boundary_edges
+    if boundary is None or len(boundary) == 0:
+        return 0, True
+
+    # Count distinct boundary loops by following connected boundary edges
+    # trimesh.outline() returns the boundary as a collection of line strings
     try:
-        # is_watertight means no boundary edges
-        if mesh.is_watertight:
-            return 0, True
-
-        # Get boundary edges - these are edges belonging to only 1 face
-        boundary = mesh.boundary_edges
-        if boundary is None or len(boundary) == 0:
-            return 0, True
-
-        # Count distinct boundary loops by following connected boundary edges
-        # trimesh.outline() returns the boundary as a collection of line strings
         outline = mesh.outline()
-        if outline is None or len(outline.entities) == 0:
-            # Fallback: count boundary edge chains
-            return None, None
+    except Exception as e:
+        raise ValueError(f"outline_computation_failed: {e}")
 
-        # Count the number of separate curves in the outline
-        loop_count = len(outline.entities) if hasattr(outline, 'entities') else 0
+    if outline is None:
+        raise ValueError("outline_is_none")
 
-        # Check if each loop is closed (first vertex == last vertex)
-        all_closed = True
-        if hasattr(outline, 'vertices') and hasattr(outline, 'entities'):
-            for entity in outline.entities:
-                if hasattr(entity, 'points'):
-                    pts = entity.points
-                    if len(pts) < 2:
-                        all_closed = False
-                        break
-                    # Check if first and last points are the same
-                    if not np.allclose(pts[0], pts[-1]):
-                        all_closed = False
-                        break
+    # Handle different outline return types
+    # In newer trimesh, outline() returns a Path3D object
+    if hasattr(outline, 'entities'):
+        loop_count = len(outline.entities)
+    elif hasattr(outline, 'paths'):
+        loop_count = len(outline.paths)
+    else:
+        # Try to get vertices and infer loop count from boundary edges
+        loop_count = None
 
-        return loop_count, all_closed
-    except Exception:
-        return None, None
+    if loop_count is None or loop_count == 0:
+        # Fallback: estimate from boundary edge count
+        # Each closed loop has at least 3 edges
+        estimated_loops = len(boundary) // 3
+        if estimated_loops < 1:
+            raise ValueError(f"no_boundary_loops_detected_boundary_edges={len(boundary)}")
+        loop_count = estimated_loops
+
+    # Check if each loop is closed (first vertex == last vertex)
+    all_closed = True
+    if hasattr(outline, 'vertices') and hasattr(outline, 'entities'):
+        if len(outline.entities) == 0:
+            raise ValueError("outline_has_no_entities")
+        for entity in outline.entities:
+            if hasattr(entity, 'points'):
+                pts = entity.points
+                if len(pts) < 2:
+                    all_closed = False
+                    break
+                # Check if first and last points are the same
+                if not np.allclose(pts[0], pts[-1]):
+                    all_closed = False
+                    break
+    elif hasattr(outline, 'paths') and hasattr(outline, 'vertices'):
+        if len(outline.paths) == 0:
+            raise ValueError("outline_has_no_paths")
+        for path_idx in outline.paths:
+            pts = outline.vertices[path_idx] if isinstance(path_idx, (list, np.ndarray)) else None
+            if pts is not None and len(pts) >= 2:
+                if not np.allclose(pts[0], pts[-1]):
+                    all_closed = False
+                    break
+    else:
+        # Cannot verify loop closure - fail explicitly
+        raise ValueError(f"cannot_verify_loop_closure_outline_type={type(outline).__name__}")
+
+    return loop_count, all_closed
 
 
 def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
@@ -215,9 +248,15 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
         watertight = None
 
     # Analyze boundary loops for tube_segment meshes
-    boundary_loop_count, boundary_loops_all_closed = None, None
+    boundary_loop_count: Optional[int] = None
+    boundary_loops_all_closed: Optional[bool] = None
     if mesh_kind == "tube_segment":
-        boundary_loop_count, boundary_loops_all_closed = _analyze_boundary_loops(mesh)
+        try:
+            boundary_loop_count, boundary_loops_all_closed = _analyze_boundary_loops(mesh)
+        except ValueError:
+            # Boundary analysis failed - will be treated as failure for tube_segment
+            boundary_loop_count = -1
+            boundary_loops_all_closed = False
 
     aspect_p95 = _aspect_ratio_p95(mesh)
 
@@ -246,16 +285,18 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
     else:
         # tube_segment: allow open ends but require clean boundary loops
         # Expected: 1-2 boundary loops (open ends), all must be closed paths
-        if boundary_loop_count is not None:
-            if boundary_loop_count == 0:
-                # Watertight tube - acceptable
-                pass
-            elif boundary_loop_count > 2:
-                # Too many open ends - topology error
-                reasons.append(f"tube_segment_boundary_loops_excess_{boundary_loop_count}")
-            elif boundary_loops_all_closed is False:
-                # Boundary loops exist but are not closed paths
-                reasons.append("tube_segment_boundary_loops_not_closed")
+        if boundary_loop_count is None or boundary_loop_count < 0:
+            # Boundary analysis failed
+            reasons.append("tube_segment_boundary_analysis_failed")
+        elif boundary_loop_count == 0:
+            # Watertight tube - acceptable
+            pass
+        elif boundary_loop_count > 2:
+            # Too many open ends - topology error
+            reasons.append(f"tube_segment_boundary_loops_excess_{boundary_loop_count}")
+        elif boundary_loops_all_closed is False:
+            # Boundary loops exist but are not closed paths
+            reasons.append("tube_segment_boundary_loops_not_closed")
 
     return MeshQaEntry(
         tri_count=tri_count,
