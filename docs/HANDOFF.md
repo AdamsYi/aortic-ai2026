@@ -210,19 +210,19 @@ No new memory entries created. Existing memories remain authoritative:
 
 ```
 On branch main
-Your branch is ahead of 'origin/main' by 5 commits.
+Your branch is ahead of 'origin/main' by 6 commits.
 
 nothing to commit, working tree clean
 ```
 
 **Git log (most recent first):**
 ```
+165a083 docs: update HANDOFF.md with P0 #1 completion status
 3ac96cc feat(data-quality): per-procedure thresholds rewrite (P0 #1)
 9f8e407 docs: add HANDOFF.md for session-to-session continuity
 edcd008 refactor: reorganize scripts/ into subfolders + add IMAGING_CONSTANTS.md
 e753b24 wip: MPR clinical workflow draft (CrosshairsTool + ReferenceLines + Slab MIP + HU footer)
 24a0296 docs(imaging): split per-procedure CTA requirements (PEARS / TAVI / VSRR)
-6e36b76 fix(geometry): migrate trimesh cleanup to 4.x API and stop silently swallowing failures
 ```
 
 ### Auto-Memory Updates
