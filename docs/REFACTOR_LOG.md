@@ -243,3 +243,48 @@ Pipeline 已在 Win 跑完，bundle 位于 `C:\AorticAI\cases\imagecas_0001\`。
 - 不写 emoji、不写坟墓注释、不创建 .md 文档（REFACTOR_LOG / AGENTS / CLAUDE 索引内文件除外）
 - Python ↔ TypeScript 阈值必须 lockstep，改一边忘改另一边 = bug
 
+---
+
+## 7. Phase B2b 战场盘点（2026-04-22，交接前清理）
+
+> 本节为一次性盘点：上一会话调查 case 1 非流形边时暴露出若干系统性问题，并触发用户对 CTA 影像要求的重新学习。下一会话需以此为起点，而不是继续上一条调查路径。
+
+### 7.1 本会话实际产出
+
+| 类别 | 内容 | 落点 |
+|------|------|------|
+| 代码红线回退 | 上一会话执行端放宽 `non_manifold_edges <= 1000` + 加 `fill_holes(max_size=5)` — 两项都踩红线，已回退 | `994e639`、`1158951` |
+| 真 bug 修复 | `fetch_imagecas.py:450` `mesh_qa_error` 未初始化导致 `UnboundLocalError`；trimesh 4.x 移除 `remove_duplicate_faces` / `remove_degenerate_faces`，旧 `except Exception: return mesh` 静默吞错 — cleanup **在 Win 上已经无操作数月**，历史 `mesh_qa.json` 数字全部是 raw MC 未清理输出 | `4312d28`、`6e36b76` |
+| 工具 | 新增 `scan_imagecas_meshqa.py`（跨病例扫描）、`diagnose_nme_seam.py`（只读 seam 诊断） | `6a850ff`、`cef2980` |
+| 文档 | `docs/imaging/{pears,tavi,vsrr,README}.md` — 按术式拆分的 CTA 要求文档，替换旧 `docs/CTA_IMAGING_REQUIREMENTS.md`（删除） | 本次 commit |
+
+### 7.2 战略复盘（用户主导）
+
+调查 `aortic_root.stl` 46 条非流形边期间，独立评估揭示：
+
+1. **ImageCAS 数据集错位** — label semantics 是冠脉树，不是主动脉根部。`aortic_root.stl` 其实来自 TotalSegmentator 推断，不是 ImageCAS 标签。"ImageCAS 走通"不等于"AorticAI 走通"。
+2. **自发明的 gate** — `nme == 0` 不在 SCCT 2019 里；是项目内部门槛。为达到这个内部门槛投入巨量时间 = 沉没成本陷阱。
+3. **真正的 P0（CLAUDE.md §"进行中"）未动** — Zenodo TAVI 数据集未接、瓣叶仍然是 12 三角形六棱锥占位、MPR 临床工作流未实装。
+4. **影像要求理解有误** — 用户指出 "你对 cta 影像要求是不是有点问题" 正确。旧 `data_quality.py` 阈值把 PEARS（Exstent 2018 规定 0.75 mm / 120 mm）和 TAVI（SCCT 2019 规定 1.0 mm 根 + 1.5 mm 外周 / 130+350 mm）混成一套共享阈值，术式差异完全丢失。
+
+### 7.3 新共识（下会话起点）
+
+- **术式优先级**：PEARS > TAVI > VSRR（2026-04-22 用户指令，与 CLAUDE.md 旧排序不同）
+- **CTA 影像要求权威来源**：`docs/imaging/{pears,tavi,vsrr}.md`；`data_quality.py` 下一步必须按这三份文档改写（per-procedure 常量 + phase + ECG-gating 新字段）
+- **旧 `MIN_CONTRAST_BLOOD_POOL_HU = 300.0` 记忆条目过严** — SCCT 2019 line 160 实际为 250 HU。memory 中 "SCCT 2021" 疑似笔误，权威仍是 2019（Blanke et al.）
+- **46 非流形边调查暂停** — 除非阻塞 P0，否则不再跟进；`diagnose_nme_seam.py` 尚有 `nme_midpoint_count=0` bug（在未 merge_vertices 的 raw mesh 上算 nme）留作后续
+
+### 7.4 待用户拍板（阻塞下一步代码修改）
+
+1. **SCCT 2021 命名**：给出真实 DOI/PMC，或确认订正为 SCCT 2019
+2. **VSRR 多相位**：严格拒收单相位 vs "多相位优先 + 单相位附警告"
+3. **重写顺序**：(a) 直接按三文档改 `data_quality.py` / (b) 先看 Zenodo 15094600 实际数据差多少 / (c) 先更新 memory 再改代码
+
+### 7.5 工作树状态（未提交）
+
+- `apps/web/src/{main.ts,shell/dom.ts,shell/template.ts,styles.css}`（MPR crosshair/slab preset/HU footer 工作中）
+- `src/generated/*`（build artifacts）
+- `wrangler.toml`（`BUILD_VERSION` bump）
+
+这批改动属 CLAUDE.md P0 #3（MPR 临床工作流）早期投稿，未在本次清理中处理；下会话决定是续做还是丢弃。
+
