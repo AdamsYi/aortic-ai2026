@@ -263,13 +263,6 @@ def _finalize_surface_mesh(mesh: SurfaceMesh) -> SurfaceMesh:
         tm.remove_degenerate_faces()
         tm.remove_unreferenced_vertices()
 
-        # Try to fix non-manifold edges by filling small holes
-        # This handles common marching-cubes artifacts
-        try:
-            tm.fill_holes(max_size=5)  # Only fill small holes (<=5 edges)
-        except Exception:
-            pass  # fill_holes may fail on complex topology - continue anyway
-
         # Re-compute normals if needed
         if tm.face_normals is None:
             tm.fix_normals()
