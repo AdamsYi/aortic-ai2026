@@ -260,16 +260,9 @@ def audit_mesh(stl_path: Path, logical_name: str) -> MeshQaEntry:
         if tri_count < min_tris:
             reasons.append(f"tri_count_below_{min_tris}")
 
-    # Non-manifold edges: strict for solid, tolerance for tube_segment
+    # Non-manifold edges are a hard failure for every mesh kind.
     if non_manifold_edges is not None and non_manifold_edges > 0:
-        if mesh_kind == "solid":
-            # Solid meshes (leaflets, annulus_ring) must be watertight with no non-manifold edges
-            reasons.append("non_manifold_edges_detected")
-        elif non_manifold_edges > 1000:
-            # tube_segment with excessive non-manifold edges indicates real topology damage
-            reasons.append(f"non_manifold_edges_excessive_{non_manifold_edges}")
-        # else: tube_segment with <=1000 non-manifold edges is acceptable for research
-        # (will be logged in report but not a failure)
+        reasons.append("non_manifold_edges_detected")
 
     # Aspect ratio always fails if exceeded
     if aspect_p95 is not None and aspect_p95 > MAX_ASPECT_P95:
