@@ -230,49 +230,32 @@ def mesh_meta(mesh: SurfaceMesh, out_path: Path | None = None) -> dict[str, obje
 def _finalize_surface_mesh(mesh: SurfaceMesh) -> SurfaceMesh:
     """Apply standard mesh cleanup to remove marching-cubes topology artifacts.
 
-    Equivalent to what Mimics / 3D Slicer / 3mensio pipelines do by default:
-    - Merge duplicate vertices
-    - Fix winding order
-    - Fix normals consistency
-    - Remove duplicate/degenerate faces
-    - Remove unreferenced vertices
-    - Attempt to fix non-manifold edges (fill small holes)
-
-    Does NOT: smooth, decimate, or fill large holes (those change geometry).
+    Keeps only topology-preserving cleanup:
+    - validate/process the mesh
+    - drop duplicate faces
+    - drop degenerate faces
+    - drop unreferenced vertices
     """
     if trimesh is None:
-        # trimesh unavailable - return as-is
-        return mesh
+        raise RuntimeError("surface_mesh_cleanup_requires_trimesh")
 
     if mesh.faces.shape[0] == 0:
-        # Empty mesh - nothing to clean
         return mesh
 
-    try:
-        # Convert SurfaceMesh to trimesh.Trimesh
-        tm = trimesh.Trimesh(
-            vertices=mesh.vertices_world,
-            faces=mesh.faces,
-            face_normals=mesh.normals_world if mesh.normals_world.shape[0] == mesh.faces.shape[0] else None,
-            process=False  # we'll process manually
-        )
-
-        # Standard cleanup
-        tm.process(validate=True)  # merges duplicate vertices, fixes winding
-        tm.remove_duplicate_faces()
-        tm.remove_degenerate_faces()
-        tm.remove_unreferenced_vertices()
-
-        # Re-compute normals if needed
-        if tm.face_normals is None:
-            tm.fix_normals()
-
-        # Convert back to SurfaceMesh
-        return SurfaceMesh(
-            vertices_world=np.asarray(tm.vertices, dtype=np.float64),
-            faces=np.asarray(tm.faces, dtype=np.int32),
-            normals_world=np.asarray(tm.face_normals, dtype=np.float64),
-        )
-    except Exception:
-        # If cleanup fails, return original mesh - let caller decide
-        return mesh
+    tm = trimesh.Trimesh(
+        vertices=mesh.vertices_world,
+        faces=mesh.faces,
+        face_normals=mesh.normals_world if mesh.normals_world.shape[0] == mesh.faces.shape[0] else None,
+        process=False,
+    )
+    tm.process(validate=True)
+    tm.update_faces(tm.unique_faces())
+    tm.update_faces(tm.nondegenerate_faces())
+    tm.remove_unreferenced_vertices()
+    if tm.face_normals is None or len(tm.face_normals) != len(tm.faces):
+        tm.fix_normals()
+    return SurfaceMesh(
+        vertices_world=np.asarray(tm.vertices, dtype=np.float64),
+        faces=np.asarray(tm.faces, dtype=np.int32),
+        normals_world=np.asarray(tm.face_normals, dtype=np.float64),
+    )

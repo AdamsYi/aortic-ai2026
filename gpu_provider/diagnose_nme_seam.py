@@ -64,14 +64,19 @@ def non_manifold_edge_midpoints(mesh: trimesh.Trimesh) -> np.ndarray:
 
 
 def standard_cleanup(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    if trimesh is None:
+        raise RuntimeError("standard_cleanup_requires_trimesh")
     cleaned = trimesh.Trimesh(
         vertices=np.asarray(mesh.vertices, dtype=np.float64).copy(),
         faces=np.asarray(mesh.faces, dtype=np.int64).copy(),
         process=False,
     )
     cleaned.process(validate=True)
-    cleaned.remove_duplicate_faces()
-    cleaned.remove_degenerate_faces()
+    cleaned.update_faces(cleaned.unique_faces())
+    cleaned.update_faces(cleaned.nondegenerate_faces())
+    cleaned.remove_unreferenced_vertices()
+    if cleaned.face_normals is None or len(cleaned.face_normals) != len(cleaned.faces):
+        cleaned.fix_normals()
     return cleaned
 
 
