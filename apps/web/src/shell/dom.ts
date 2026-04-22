@@ -64,6 +64,7 @@ export const DOM = {
   slabMipToggle: null as HTMLButtonElement | null,
   slabThicknessSlider: null as HTMLInputElement | null,
   slabThicknessValue: null as HTMLSpanElement | null,
+  slabPresetButtons: [] as HTMLButtonElement[],
   resetViewportButton: null as HTMLButtonElement | null,
   auxMode: null as HTMLSelectElement | null,
   centerlineSlider: null as HTMLInputElement | null,
@@ -127,4 +128,6 @@ export const DOM = {
   viewportBadges: {} as Record<ViewportKey, HTMLDivElement>,
   viewportFooters: {} as Record<ViewportKey, HTMLDivElement>,
   viewportPlaceholders: {} as Record<ViewportKey, HTMLDivElement>,
+  statusHu: null as HTMLSpanElement | null,
+  statusPosition: null as HTMLSpanElement | null,
 };

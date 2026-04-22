@@ -238,6 +238,9 @@ function renderShell(): void {
   DOM.slabMipToggle = document.getElementById('slab-mip-toggle') as HTMLButtonElement;
   DOM.slabThicknessSlider = document.getElementById('slab-thickness-slider') as HTMLInputElement;
   DOM.slabThicknessValue = document.getElementById('slab-thickness-value') as HTMLSpanElement;
+  DOM.slabPresetButtons = Array.from(document.querySelectorAll('.slab-preset')) as HTMLButtonElement[];
+  DOM.statusHu = document.getElementById('status-hu') as HTMLSpanElement | null;
+  DOM.statusPosition = document.getElementById('status-position') as HTMLSpanElement | null;
   DOM.resetViewportButton = document.getElementById('reset-viewport') as HTMLButtonElement;
   DOM.auxMode = document.getElementById('aux-mode') as HTMLSelectElement;
   DOM.centerlineSlider = document.getElementById('centerline-slider') as HTMLInputElement;
@@ -459,6 +462,21 @@ function renderShell(): void {
     slabThicknessMm = Number.isFinite(raw) ? Math.max(0, Math.min(40, raw)) : 0;
     if (slabMipEnabled) applySlabModeToSession();
     syncSlabUi();
+  });
+  // Slab preset buttons: quick selection (5mm, 10mm, 20mm)
+  DOM.slabPresetButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!viewerInteractive()) return;
+      const preset = Number.parseInt(btn.dataset.slabPreset || '10', 10);
+      slabThicknessMm = preset;
+      slabMipEnabled = true;
+      if (DOM.slabThicknessSlider) DOM.slabThicknessSlider.value = String(preset);
+      // Update active state on preset buttons
+      DOM.slabPresetButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      applySlabModeToSession();
+      syncSlabUi();
+    });
   });
   DOM.cineSpeed?.addEventListener('change', () => {
     if (!viewerInteractive()) return;
@@ -1374,20 +1392,30 @@ function applyPrimaryToolBindings(toolGroup = session ? ToolGroupManager.getTool
     AngleTool.toolName,
     ProbeTool.toolName,
     RectangleROITool.toolName,
-    CrosshairsTool.toolName,
   ];
+  // CrosshairsTool is handled separately — it stays enabled for MPR linkage
   primaryTools.forEach((toolName) => {
     toolGroup.setToolPassive(toolName, { removeAllBindings: true });
   });
+
+  // CrosshairsTool: always enabled for MPR viewport synchronization
+  // When active, it responds to mouse/wheel interaction for synchronized navigation
+  if (currentPrimaryTool === 'crosshair') {
+    toolGroup.setToolActive(CrosshairsTool.toolName, {
+      bindings: [{ mouseButton: ToolEnums.MouseBindings.Primary }],
+    });
+  } else {
+    toolGroup.setToolPassive(CrosshairsTool.toolName, { removeAllBindings: true });
+  }
+
   // ReferenceLines stays enabled as a passive overlay at all times so each
-  // MPR viewport always shows where the other two are slicing. Source viewport
-  // is picked per-viewport in the activation pass below (Cornerstone3D needs
-  // a configured sourceViewportId to render lines correctly).
+  // MPR viewport always shows where the other two are slicing.
   try {
     toolGroup.setToolEnabled(ReferenceLinesTool.toolName);
   } catch {
     // Tool group may not have the tool added yet on legacy boot paths.
   }
+
   toolGroup.setToolActive(PanTool.toolName, {
     bindings: [{ mouseButton: ToolEnums.MouseBindings.Auxiliary }],
   });
@@ -1640,6 +1668,21 @@ function refreshViewportBadges(): void {
     const crosshairLabel = currentPrimaryTool === 'crosshair' ? 'crosshair on' : 'crosshair off';
     footer.innerHTML = `<span>${sliceLabel}</span><span>${worldLabel}</span><span>${activeToolLabel}</span>${huLabel ? `<span class="footer-hu">${huLabel}</span>` : ''}<span>${crosshairLabel}</span>`;
   });
+
+  // Status bar: HU reading + position
+  if (DOM.statusHu) {
+    if (lastProbeHuSample && Number.isFinite(lastProbeHuSample.hu)) {
+      DOM.statusHu.textContent = `HU: ${Math.round(lastProbeHuSample.hu)}`;
+    } else if (world) {
+      DOM.statusHu.textContent = `Pos: [${world[0].toFixed(1)}, ${world[1].toFixed(1)}, ${world[2].toFixed(1)}]`;
+    } else {
+      DOM.statusHu.textContent = 'HU: —';
+    }
+  }
+  if (DOM.statusPosition && world) {
+    DOM.statusPosition.textContent = `Z: ${world[2].toFixed(1)} mm`;
+  }
+
   if (DOM.mprStatus) {
     DOM.mprStatus.textContent = `Preset ${WINDOW_PRESETS[currentWindowPreset].label} · Tool ${PRIMARY_TOOL_LABELS[currentPrimaryTool]} · ${cineActive ? `cine ${cineFps} fps` : 'cine off'}`;
   }
@@ -1841,17 +1884,57 @@ function handleGlobalShortcuts(event: KeyboardEvent): void {
 
   if (!viewerInteractive()) return;
 
-  // Layout shortcuts
-  if (key === '1') { event.preventDefault(); setLayoutMode('grid-2x2'); return; }
-  if (key === '2') { event.preventDefault(); setLayoutMode('single'); return; }
+  // Layout shortcuts (Shift + number)
+  if (event.shiftKey && key === '1') { event.preventDefault(); setLayoutMode('grid-2x2'); return; }
+  if (event.shiftKey && key === '2') { event.preventDefault(); setLayoutMode('single'); return; }
 
-  // Tool shortcuts (uppercase letter = tool activation)
+  // Tool shortcuts (number row)
+  if (key === '1') { event.preventDefault(); activateToolMode('crosshair'); showShortcutToast('Crosshair'); return; }
+  if (key === '2') { event.preventDefault(); activateToolMode('windowLevel'); showShortcutToast('Window/Level'); return; }
+  if (key === '3') { event.preventDefault(); activateToolMode('pan'); showShortcutToast('Pan'); return; }
+  if (key === '4') { event.preventDefault(); activateToolMode('zoom'); showShortcutToast('Zoom'); return; }
+  if (key === '5') { event.preventDefault(); activateToolMode('length'); showShortcutToast('Length'); return; }
+  if (key === '6') { event.preventDefault(); activateToolMode('angle'); showShortcutToast('Angle'); return; }
+  if (key === '7') { event.preventDefault(); activateToolMode('probe'); showShortcutToast('Probe'); return; }
+  if (key === '8') { event.preventDefault(); activateToolMode('rectangleRoi'); showShortcutToast('ROI'); return; }
+
+  // Tool shortcuts (letter keys)
   if (key === 'w' || key === 'W') { event.preventDefault(); activateToolMode('windowLevel'); showShortcutToast('Window/Level'); return; }
   if (key === 'l' || key === 'L') { event.preventDefault(); activateToolMode('length'); showShortcutToast('Length'); return; }
   if (key === 'p' || key === 'P') { event.preventDefault(); activateToolMode('pan'); showShortcutToast('Pan'); return; }
   if (key === 'z' || key === 'Z') { event.preventDefault(); activateToolMode('zoom'); showShortcutToast('Zoom'); return; }
   if (key === 'c' || key === 'C') { event.preventDefault(); activateToolMode('crosshair'); showShortcutToast('Crosshair'); return; }
   if (key === 'a' || key === 'A') { event.preventDefault(); activateToolMode('angle'); showShortcutToast('Angle'); return; }
+
+  // Slab MIP toggle (M key)
+  if (key === 'm' || key === 'M') {
+    event.preventDefault();
+    if (DOM.slabMipToggle) DOM.slabMipToggle.click();
+    showShortcutToast(slabMipEnabled ? 'Slab MIP On' : 'Slab MIP Off');
+    return;
+  }
+
+  // Slab thickness adjustment (+/- with Shift or Ctrl)
+  if ((event.shiftKey || event.ctrlKey) && (key === '+' || key === '=')) {
+    event.preventDefault();
+    const newThickness = Math.min(40, slabThicknessMm + 5);
+    slabThicknessMm = newThickness;
+    if (DOM.slabThicknessSlider) DOM.slabThicknessSlider.value = String(newThickness);
+    if (slabMipEnabled) applySlabModeToSession();
+    syncSlabUi();
+    showShortcutToast(`Slab: ${newThickness}mm`);
+    return;
+  }
+  if ((event.shiftKey || event.ctrlKey) && (key === '-' || key === '_')) {
+    event.preventDefault();
+    const newThickness = Math.max(0, slabThicknessMm - 5);
+    slabThicknessMm = newThickness;
+    if (DOM.slabThicknessSlider) DOM.slabThicknessSlider.value = String(newThickness);
+    if (slabMipEnabled) applySlabModeToSession();
+    syncSlabUi();
+    showShortcutToast(`Slab: ${newThickness}mm`);
+    return;
+  }
 
   // Zoom
   if (key === '+' || key === '=') { event.preventDefault(); adjustViewportZoom(true); return; }
@@ -2195,12 +2278,25 @@ async function createViewerSession(casePayload: WorkstationCasePayload): Promise
     toolGroup.addTool(AngleTool.toolName);
     toolGroup.addTool(ProbeTool.toolName);
     toolGroup.addTool(RectangleROITool.toolName);
-    toolGroup.addTool(CrosshairsTool.toolName);
-    // ReferenceLines renders a single sourceViewport's plane onto its peers.
-    // Axial is the primary orientation for TAVI sizing so we seed it there;
-    // future work can instance three tool groups for true 3-way reference.
+
+    // CrosshairsTool: enables synchronized crosshairs across all MPR viewports
+    toolGroup.addTool(CrosshairsTool.toolName, {
+      interactionSourceTypes: ['Mouse', 'Wheel'],
+    });
+
+    // ReferenceLinesTool: tri-directional reference lines for clinical MPR workflow
+    // Each viewport shows reference lines from the other two viewports
     toolGroup.addTool(ReferenceLinesTool.toolName, {
       sourceViewportId: VIEWPORT_IDS.axial,
+      targetViewportIds: [VIEWPORT_IDS.sagittal, VIEWPORT_IDS.coronal],
+    });
+    toolGroup.addTool(ReferenceLinesTool.toolName, {
+      sourceViewportId: VIEWPORT_IDS.sagittal,
+      targetViewportIds: [VIEWPORT_IDS.axial, VIEWPORT_IDS.coronal],
+    });
+    toolGroup.addTool(ReferenceLinesTool.toolName, {
+      sourceViewportId: VIEWPORT_IDS.coronal,
+      targetViewportIds: [VIEWPORT_IDS.axial, VIEWPORT_IDS.sagittal],
     });
 
     syncs.push(
