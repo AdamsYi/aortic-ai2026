@@ -18,6 +18,27 @@ This report does **not** change any generation logic. It records facts for Adams
   - `cases/imagecas_0001/meshes/aortic_root.stl`
   - `cases/imagecas_0001/imaging_hidden/imagecas_0001_label.nii.gz`
   - `cases/imagecas_0001/artifacts/aortic_root_model.json`
+- One-shot local probe script: `/tmp/imagecas_case1_seam_probe.py`
+- One-shot local probe output: `/tmp/imagecas_case1_seam_probe.json`
+
+## Correction of the Previous Wrong Premise
+
+The previous version of this report incorrectly treated the ImageCAS Kaggle `coronary_tree` label as the direct source of `aortic_root.stl`.
+
+That premise was wrong.
+
+The actual generation chain for case 1 is:
+
+1. `fetch_imagecas.py` sends the **CT volume only** into `pipeline_runner.py`
+2. `build_real_multiclass_mask.py` runs TotalSegmentator open-task aorta segmentation
+3. The provider builds a **multiclass** volume:
+   - `1 = aortic_root`
+   - `2 = valve_leaflets`
+   - `3 = ascending_aorta`
+4. `pipeline_runner.py` exports `aortic_root.stl` from `root_mask == 1`
+5. `pipeline_runner.py` exports `ascending_aorta.stl` from `ascending_mask == 3`
+
+So the Kaggle coronary-tree label is relevant as dataset metadata, but it is **not** the direct input mesh source for the root STL.
 
 ## Immediate False-Green Proof
 
@@ -30,7 +51,7 @@ The committed bundle on `origin/ingest/imagecas_1` claims:
 
 That state violates AGENTS.md §1. The bundle was green only because the QA gate had been relaxed.
 
-## Input Label Volume Facts
+## Dataset Label Facts (Corrected Scope)
 
 The committed source label is ImageCAS coronary-tree annotation, not a blood-pool/root lumen mask. Read-only stats from `imagecas_0001_label.nii.gz`:
 
@@ -41,8 +62,9 @@ The committed source label is ImageCAS coronary-tree annotation, not a blood-poo
 Interpretation:
 
 - Two connected components are consistent with left/right coronary trees.
-- The source label is sparse coronary anatomy, not the root segmentation volume used by the root STL export.
-- Therefore these label stats are useful as dataset context, but they are **not sufficient** to explain the aortic root STL topology by themselves.
+- The source label is sparse coronary anatomy.
+- It is useful as dataset context only.
+- It cannot by itself explain the committed `aortic_root.stl`, because that STL is produced from the provider's TotalSegmentator-derived multiclass mask.
 
 ## Aortic Root Mesh Diagnostics
 
@@ -69,6 +91,59 @@ Notes:
 - The shipped `638` count and the independent `69` count do not match. That means the previous mesh QA implementation was not only permissive, it also appears to be counting non-manifold pathology differently from a direct unique-edge audit.
 - That discrepancy does **not** change the clinical conclusion: the true count is still non-zero, so the mesh must fail the gate.
 - Duplicate-face removal does **not** repair the topology. It still leaves `46` non-manifold edges and also exposes `46` boundary edges.
+
+## Seam Hypothesis Verification
+
+### Target hypothesis
+
+The new hypothesis to test was:
+
+> `root_mask` and `ascending_mask` are split from the same multiclass volume; if their seam is the real defect source, the root non-manifold cluster should localize near the root↔ascending transition band.
+
+### Exact mask-level replay status
+
+The exact requested replay could not be completed this turn because:
+
+- `segmentation_mask.nii.gz` was **not** committed into `origin/ingest/imagecas_1`
+- the Win provider tunnel was offline during this task (`Cloudflare 530 / error 1033`)
+
+So the exact pair of numbers below remains unavailable for now:
+
+- root-only mesh from committed multiclass mask before `_finalize_surface_mesh()`
+- merged `(root|ascending)` mask mesh before `_finalize_surface_mesh()`
+
+### Available proxy test from committed geometry
+
+Even without the intermediate multiclass file, the committed root and ascending STLs already let us test the seam hypothesis spatially.
+
+If the seam were the main cause, the root non-manifold edge cluster should sit close to the ascending mesh.
+
+Measured from the 69 independent root non-manifold edge midpoints to the nearest ascending-aorta mesh vertex:
+
+| metric | value |
+|---|---:|
+| min distance to ascending mesh | 44.98 mm |
+| p50 distance to ascending mesh | 57.37 mm |
+| p95 distance to ascending mesh | 63.73 mm |
+| count within 10 mm of ascending mesh | 0 / 69 |
+| annulus → STJ center distance | 14.20 mm |
+
+Interpretation:
+
+- The bad-edge cluster is **not** sitting on the root↔ascending seam.
+- The cluster is tens of millimeters away from the ascending mesh.
+- Therefore the current evidence **refutes** the seam-as-primary-root-cause hypothesis on the committed geometry.
+
+### Verification table
+
+| case_id | artifact | metric | value | readout |
+|---|---|---|---:|---|
+| 1 | committed root STL | root-only non-manifold edges | 69 | independent direct edge audit |
+| 1 | committed root STL after duplicate+degenerate cleanup | root-only non-manifold edges | 46 | still fails |
+| 1 | committed root STL | nearest ascending distance min | 44.98 mm | too far for seam explanation |
+| 1 | committed root STL | nearest ascending distance p50 | 57.37 mm | too far for seam explanation |
+| 1 | committed root STL | nearest ascending distance p95 | 63.73 mm | too far for seam explanation |
+| 1 | committed root STL | within 10 mm of ascending mesh | 0 / 69 | seam hypothesis not supported |
 
 ## Spatial Distribution of the Non-Manifold Region
 
@@ -98,7 +173,8 @@ Interpretation:
 
 - The defect cluster sits well **above the STJ level**, not at the annulus plane.
 - The committed STL has `boundary_edges = 0` before local duplicate-face cleanup, so this does **not** look like a simple ROI cut plane left open.
-- The defect is concentrated in one distal/lateral patch of the root/ascending junction rather than being random global mesh noise.
+- The defect is concentrated in one distal/lateral patch of the root mesh.
+- Combined with the ascending-distance measurements, this patch is **not** behaving like a root↔ascending split seam.
 
 ## What We Could Not Recover This Turn
 
@@ -107,27 +183,28 @@ The Win provider tunnel was offline during this diagnosis (`Cloudflare 530 / err
 - raw marching-cubes output directly from the internal segmentation mask
 - post-`process(validate=True)` but pre-export mesh
 - case 23 / case 47 comparison on the provider
+- exact root-only vs merged `(root|ascending)` mask replay from `segmentation_mask.nii.gz`
 
 Those fields remain unavailable from the committed branch alone because the branch contains only the final exported STL and not the intermediate segmentation mask / lumen mask.
 
 ## Conclusion
 
-### Recommended conclusion: C
+### Recommended conclusion: B'
 
-**C = trimesh standard cleanup is not enough; stronger topology repair or an upstream topology-safe surface-generation change is required.**
+**B' = the dominant problem is upstream voxel-label roughness / branch-stub geometry inside the root mask before export, not the root↔ascending split seam.**
 
-Why C is the best fit from the current evidence:
+Why B' is the best fit from the current evidence:
 
 1. The false-green state came from an explicit QA relaxation, not from a clean mesh.
 2. The committed STL still has real non-manifold topology under an independent edge audit.
 3. Standard duplicate/degenerate cleanup does not fix the defect; it leaves `46` non-manifold edges.
-4. The defect is localized in one anatomical zone above the STJ, which suggests a real topological problem in the exported surface, not just a bookkeeping glitch.
-5. The source ImageCAS label is coronary-tree annotation, so "the Kaggle label itself is a broken aortic root lumen mask" is not the right causal story.
+4. The defect cluster is tens of millimeters away from the ascending mesh, so the seam hypothesis is not supported by the committed geometry.
+5. The actual mesh source is the provider multiclass root mask, not the Kaggle coronary-tree label.
 
 ### What this conclusion is **not**
 
-- Not A: there is no evidence here for a simple ROI-cut open surface. The committed mesh starts with `boundary_edges = 0`.
-- Not yet B as the primary call: marching-cubes parameters may still contribute, but the current evidence already shows that the present "standard cleanup only" path cannot guarantee a manifold root mesh.
+- Not A': the committed bad-edge cluster is not sitting on the root↔ascending seam.
+- Not C' as the current best call: there is no positive evidence yet that the seam contributes materially to case 1.
 
 ## Decision Hint for Next Step
 
@@ -135,7 +212,8 @@ If AdamsYi wants the smallest honest next move:
 
 1. Revert the fake-green PR state.
 2. Keep non-manifold hard-fail at zero.
-3. Re-run case 1 or a different case with provider-side intermediate capture enabled.
-4. Only then decide whether to:
-   - swap cases, or
-   - introduce a stronger topology repair tool, with explicit proof that it does not change inner/outer blood-pool topology.
+3. Re-run case 1 with provider-side intermediate capture enabled, specifically preserving:
+   - `segmentation_mask.nii.gz`
+   - root-only marching-cubes mesh before cleanup
+   - merged `(root|ascending)` marching-cubes mesh before cleanup
+4. If the mask-level replay still shows defects away from the seam, treat this as an upstream root-mask roughness problem and test topology-safe morphological smoothing before marching cubes, with explicit measurement-regression checks.
