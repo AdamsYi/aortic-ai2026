@@ -1165,6 +1165,15 @@ def _cmd_inspect_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return [sys.executable, "-u", "-c", snippet, case_slug, str(_REPO_ROOT)], _REPO_ROOT
 
 
+def _cmd_diagnose_nme_seam(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if len(args) != 2 or args[0] != "--case-id":
+        raise HTTPException(status_code=400, detail="diagnose_nme_seam_requires_case-id")
+    case_id = args[1]
+    if not _CASE_ID_RE.match(case_id):
+        raise HTTPException(status_code=400, detail="case-id_invalid_format")
+    return [sys.executable, "-u", "-m", "gpu_provider.diagnose_nme_seam", "--case-id", case_id], _REPO_ROOT
+
+
 _ADMIN_WHITELIST = {
     "status": _cmd_status,
     "git_pull": _cmd_git_pull,
@@ -1182,6 +1191,7 @@ _ADMIN_WHITELIST = {
 
 _ADMIN_READONLY_WHITELIST = {
     "inspect_case": _cmd_inspect_case,
+    "diagnose_nme_seam": _cmd_diagnose_nme_seam,
 }
 
 

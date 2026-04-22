@@ -17,6 +17,7 @@
 #   ./scripts/remote_win.sh install_7zip
 #   ./scripts/remote_win.sh commit_case 5
 #   ./scripts/remote_win.sh inspect_case 5
+#   ./scripts/remote_win.sh diagnose_nme_seam --case-id 5
 #   ./scripts/remote_win.sh scan_imagecas_meshqa --case-ids 1,23,47
 #
 # Env overrides:
@@ -29,7 +30,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam> [args...]" >&2
   exit 2
 fi
 
@@ -105,6 +106,13 @@ case "$SUB" in
       exit 2
     fi
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "inspect_case", "args": ["--case-id", sys.argv[1]]}))' "$1")
+    ;;
+  diagnose_nme_seam)
+    if [[ $# -ne 2 || "$1" != "--case-id" || ! "$2" =~ ^[0-9]+$ ]]; then
+      echo "Usage: $0 diagnose_nme_seam --case-id <digits>" >&2
+      exit 2
+    fi
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "diagnose_nme_seam", "args": sys.argv[1:]}))' "$@")
     ;;
   *)
     echo "unknown subcommand: $SUB" >&2
