@@ -5,6 +5,7 @@
 # Usage:
 #   ./scripts/remote_win.sh status
 #   ./scripts/remote_win.sh git_pull
+#   ./scripts/remote_win.sh git_sync        # Force sync to origin (fetch + reset --hard)
 #   ./scripts/remote_win.sh pip_sync
 #   ./scripts/remote_win.sh ingest --dry-run --case-ids 1,2,3
 #   ./scripts/remote_win.sh ingest --case-ids 5
@@ -28,7 +29,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|pip_sync|ingest|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|git_sync|pip_sync|ingest|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case> [args...]" >&2
   exit 2
 fi
 
@@ -36,9 +37,16 @@ SUB="$1"
 shift
 
 case "$SUB" in
-  status|git_pull)
+  status)
     COMMAND="$SUB"
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1], "args": []}))' "$COMMAND")
+    ;;
+  git_pull)
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "git_pull", "args": sys.argv[1:]}))' "$@")
+    ;;
+  git_sync)
+    # Force sync: fetch + reset --hard. This is the "just make it work" command.
+    BODY='{"command":"git_sync","args":[]}'
     ;;
   pip_sync)
     if [[ $# -ne 0 ]]; then

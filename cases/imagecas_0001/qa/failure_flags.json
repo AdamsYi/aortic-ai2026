@@ -1,0 +1,22 @@
+[
+  {
+    "id": "coronary_detection_requires_review",
+    "severity": "critical",
+    "message": "Coronary ostial detection requires clinician review before proceeding"
+  },
+  {
+    "id": "leaflet_geometry_uncertain",
+    "severity": "moderate",
+    "message": "Leaflet reconstruction is partial or uncertain"
+  },
+  {
+    "id": "heavy_valve_calcification",
+    "severity": "high",
+    "message": "Valve/root calcium burden is elevated (HU>130)"
+  },
+  {
+    "id": "commissure_angles_approx_120",
+    "severity": "critical",
+    "message": "commissure angles approx 120"
+  }
+]

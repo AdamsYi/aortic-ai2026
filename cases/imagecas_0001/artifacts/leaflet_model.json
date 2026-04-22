@@ -1,0 +1,146 @@
+{
+  "status": "uncertain",
+  "coaptation_height_mm": null,
+  "coaptation_surface_area_mm2": null,
+  "coaptation_level_mm": null,
+  "raw_coaptation_height_mm": null,
+  "effective_height_mean_mm": null,
+  "geometric_height_mean_mm": null,
+  "root_symmetry_index": null,
+  "hinge_lines": [
+    {
+      "leaflet_id": 1,
+      "point_count": 16,
+      "status": "uncertain"
+    },
+    {
+      "leaflet_id": 2,
+      "point_count": 33,
+      "status": "uncertain"
+    },
+    {
+      "leaflet_id": 3,
+      "point_count": 23,
+      "status": "uncertain"
+    }
+  ],
+  "commissures": [
+    {
+      "id": "commissure_1",
+      "index": 1,
+      "source_sinus_index": 1,
+      "angle_deg": 4.726727478468604,
+      "radius_mm": 17.722584461641027,
+      "curvature_score": -0.060023881426059855,
+      "world": [
+        8.894187025319601,
+        166.15722132296773,
+        144.95540627899956
+      ],
+      "voxel": [
+        139.05531732143194,
+        265.2020586391683,
+        211.01081103212022
+      ],
+      "method": "sinus_rim_saddle_points"
+    },
+    {
+      "id": "commissure_2",
+      "index": 17,
+      "source_sinus_index": 17,
+      "angle_deg": 80.47108835565166,
+      "radius_mm": 17.555910685578233,
+      "curvature_score": -0.09021500587311236,
+      "world": [
+        -7.045543962139137,
+        182.28008139201438,
+        145.42649252510338
+      ],
+      "voxel": [
+        181.34102854204787,
+        307.97358379643197,
+        211.95298352432786
+      ],
+      "method": "sinus_rim_saddle_points"
+    },
+    {
+      "id": "commissure_3",
+      "index": 48,
+      "source_sinus_index": 48,
+      "angle_deg": 245.92884238350285,
+      "radius_mm": 18.493782739072067,
+      "curvature_score": -0.09467441114700517,
+      "world": [
+        26.449667153473357,
+        193.06108822774473,
+        144.66357421438076
+      ],
+      "voxel": [
+        92.48326641151111,
+        336.5739749875923,
+        210.4271469028826
+      ],
+      "method": "sinus_rim_saddle_points"
+    }
+  ],
+  "regularization": {
+    "applied": false,
+    "commissure_height_reference_mm": 13.264570296899977,
+    "stj_height_mm": 18.112664760791333,
+    "raw_coaptation_height_mm": null
+  },
+  "leaflets": [
+    {
+      "leaflet_id": 1,
+      "name": "leaflet_1",
+      "voxel_count": 0,
+      "geometric_height_mm": null,
+      "effective_height_mm": null,
+      "free_edge_height_mm": null,
+      "raw_geometric_height_mm": null,
+      "raw_effective_height_mm": null,
+      "raw_free_edge_height_mm": null,
+      "hinge_point_count": 16,
+      "mesh_vertices": 0,
+      "mesh_faces": 0,
+      "status": "uncertain",
+      "regularized": false
+    },
+    {
+      "leaflet_id": 2,
+      "name": "leaflet_2",
+      "voxel_count": 0,
+      "geometric_height_mm": null,
+      "effective_height_mm": null,
+      "free_edge_height_mm": null,
+      "raw_geometric_height_mm": null,
+      "raw_effective_height_mm": null,
+      "raw_free_edge_height_mm": null,
+      "hinge_point_count": 33,
+      "mesh_vertices": 0,
+      "mesh_faces": 0,
+      "status": "uncertain",
+      "regularized": false
+    },
+    {
+      "leaflet_id": 3,
+      "name": "leaflet_3",
+      "voxel_count": 0,
+      "geometric_height_mm": null,
+      "effective_height_mm": null,
+      "free_edge_height_mm": null,
+      "raw_geometric_height_mm": null,
+      "raw_effective_height_mm": null,
+      "raw_free_edge_height_mm": null,
+      "hinge_point_count": 23,
+      "mesh_vertices": 0,
+      "mesh_faces": 0,
+      "status": "uncertain",
+      "regularized": false
+    }
+  ],
+  "mesh": {
+    "vertices": 0,
+    "faces": 0
+  }
+}

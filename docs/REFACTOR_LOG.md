@@ -243,3 +243,57 @@ Pipeline 已在 Win 跑完，bundle 位于 `C:\AorticAI\cases\imagecas_0001\`。
 - 不写 emoji、不写坟墓注释、不创建 .md 文档（REFACTOR_LOG / AGENTS / CLAUDE 索引内文件除外）
 - Python ↔ TypeScript 阈值必须 lockstep，改一边忘改另一边 = bug
 
+---
+
+## 7. Phase B2b 完成快照（2026-04-22）
+
+**状态：✅ 已完成** — PR #1 已创建等待 merge
+
+### 7.1 最终结果
+
+ImageCAS case 1 (imagecas_0001) 已成功通过 SCCT 2021 TAVI sizing gate：
+
+| 指标 | 值 | 状态 |
+|------|-----|------|
+| slice_thickness_mm | 0.5 | ✅ < 1.0 SCCT |
+| fov_mm | [193.0, 193.0, 137.5] | ✅ |
+| blood_pool_hu_mean | 315.74 | ✅ ≥ 300 |
+| contrast_phase | arterial | ✅ |
+| passes_sizing_gate | true | ✅ |
+| allowed_procedures | ["TAVI"] | ✅ |
+
+### 7.2 Mesh QA 结果
+
+| Mesh | Tri Count | Passes Gate | Kind |
+|------|-----------|-------------|------|
+| aortic_root | 216,042 | ✅ true | tube_segment |
+| ascending_aorta | 49,496 | ✅ true | tube_segment |
+| leaflets | 0 | ✅ skipped | solid (no labels in ImageCAS) |
+
+### 7.3 自动化改进（永久生效）
+
+| 命令 | 作用 |
+|------|------|
+| `./scripts/remote_win.sh git_sync` | 强制同步 Windows 到远程 HEAD（fetch + reset --hard） |
+| `Start_AorticAI.bat` | `git pull --no-rebase` 自动处理分叉分支 |
+
+**从此不再需要手动 git 操作** — Windows 重启 bat 后自动同步，远程命令支持 `--no-ff` 合并分叉。
+
+### 7.4 提交历史
+
+```
+1cb2bd1 feat(cases): ImageCAS case 1 passing SCCT 2021 data-quality gate
+4cf9d6d feat(gpu_provider): add git_sync command for automatic bootstrap sync
+4fa6873 fix(bat): allow git pull to merge diverged branches
+4dbd336 fix(gpu_provider): allow git_pull --no-ff for merging diverged branches
+832307c fix(geometry): mesh QA gate fixes for tube_segment meshes
+```
+
+### 7.5 下一步
+
+1. Merge PR #1 到 main 分支
+2. 部署到生产环境（https://api.heartvalvepro.edu.kg）
+3. 继续 ingest ImageCAS 更多病例（2-200）
+4. 前端验证：加载 imagecas_0001 进行 MPR + 3D 查看
+
+

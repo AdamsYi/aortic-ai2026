@@ -685,8 +685,30 @@ def _cmd_status(_args: List[str]) -> tuple[List[str], Optional[Path]]:
     return [sys.executable, "-c", snippet], _REPO_ROOT
 
 
-def _cmd_git_pull(_args: List[str]) -> tuple[List[str], Optional[Path]]:
-    return ["git", "pull", "--ff-only"], _REPO_ROOT
+def _cmd_git_pull(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    # Default to --ff-only for safety, but allow --no-ff for merging diverged branches
+    allowed_flags = {"--ff-only", "--no-ff", "--no-commit", "--rebase"}
+    clean: List[str] = []
+    for arg in args:
+        if arg in allowed_flags:
+            clean.append(arg)
+        else:
+            raise HTTPException(status_code=400, detail=f"git_pull_arg_not_allowed:{arg}")
+    if not clean:
+        clean = ["--ff-only"]  # default
+    return ["git", "pull", *clean], _REPO_ROOT
+
+
+def _cmd_git_sync(_args: List[str]) -> tuple[List[str], Optional[Path]]:
+    # Force sync to origin/ingest/imagecas_1, discarding any local uncommitted changes
+    # This is the "just make it work" command for bootstrap scenarios
+    # Use cmd /c to chain fetch && reset --hard
+    return ["cmd", "/c", "git", "fetch", "origin", "ingest/imagecas_1", "&&", "git", "reset", "--hard", "origin/ingest/imagecas_1"], _REPO_ROOT
+
+
+def _cmd_git_reset_hard(_args: List[str]) -> tuple[List[str], Optional[Path]]:
+    # Reset to origin/ingest/imagecas_1. Use with caution.
+    return ["git", "reset", "--hard", "origin/ingest/imagecas_1"], _REPO_ROOT
 
 
 def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
@@ -1158,6 +1180,8 @@ def _cmd_inspect_case(args: List[str]) -> tuple[List[str], Optional[Path]]:
 _ADMIN_WHITELIST = {
     "status": _cmd_status,
     "git_pull": _cmd_git_pull,
+    "git_sync": _cmd_git_sync,
+    "git_reset_hard": _cmd_git_reset_hard,
     "pip_sync": _cmd_pip_sync,
     "ingest_imagecas": _cmd_ingest,
     "ingest_zenodo": _cmd_ingest_zenodo,
