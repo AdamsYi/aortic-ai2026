@@ -303,6 +303,7 @@ def emit_case_bundle(
     result: dict[str, Any] = {}
     mesh_report: dict[str, Any] = {}
     mesh_gate_all_pass = False
+    mesh_qa_error: Optional[str] = None
     failure_flags: list[Any] = []
 
     if result_json is not None and result_json.exists() and output_dir is not None:
@@ -345,7 +346,6 @@ def emit_case_bundle(
         # RuntimeError and record it as a pipeline error rather than a gate failure.
         # Only audit meshes listed in source_dataset.available_meshes; skip others
         # and mark them with skipped_reason.
-        mesh_qa_error: Optional[str] = None
         mesh_report: Dict[str, Any] = {}
         mesh_gate_all_pass = False
 
