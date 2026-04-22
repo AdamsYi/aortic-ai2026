@@ -7,7 +7,7 @@ import { buildDefaultCaseBundle } from './build_default_case_bundle.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(__dirname, '..', '..'); // scripts/build/../.. = repo root
 const distRoot = path.join(repoRoot, 'dist');
 const distAssetsRoot = path.join(distRoot, 'assets');
 const wranglerPath = path.join(repoRoot, 'wrangler.toml');
@@ -23,8 +23,7 @@ const buildVersionInputPaths = [
   'schemas',
   'services/api',
   'src/index.ts',
-  'scripts/build_workstation.mjs',
-  'scripts/build_default_case_bundle.mjs',
+  'scripts/build',
   'package.json',
   'package-lock.json',
   'tsconfig.workstation.json',

@@ -19,7 +19,8 @@ export function renderShellHTML(): string {
           <span>Structural Heart</span>
         </div>
         <div class="header-case" id="header-case-info">
-          <strong>Demo Case</strong> &mdash; TAVI Planning
+          <span class="case-badge">Demo</span>
+          <strong>TAVI Planning</strong>
         </div>
         <div class="header-spacer"></div>
         <div class="header-actions">
@@ -37,7 +38,7 @@ export function renderShellHTML(): string {
       </header>
 
       <!-- ───────────────────────────────────────────────────────────────────
-           TOOLBAR — Contextual controls (44px)
+           TOOLBAR — Floating pill controls
            ─────────────────────────────────────────────────────────────────── -->
       <div class="viewer-toolbar">
         <div class="toolbar-group">
@@ -50,40 +51,27 @@ export function renderShellHTML(): string {
           </select>
         </div>
         <div class="toolbar-group">
-          <span class="toolbar-label">Aux</span>
-          <select id="aux-mode" class="tbar-select">
-            <option value="annulus">Annulus</option>
-            <option value="stj">STJ</option>
-            <option value="centerline">Centerline</option>
-          </select>
-        </div>
-        <div class="toolbar-group">
           <span class="toolbar-label">Slab MIP</span>
           <button type="button" id="slab-mip-toggle" class="btn btn-icon" title="Toggle Slab MIP">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="2" y="4" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.5"/>
-              <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" stroke-width="1.5"/>
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <rect x="2.5" y="5" width="13" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="5" y1="9" x2="13" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </button>
           <div class="slab-presets">
-            <button type="button" class="btn btn-sm slab-preset" data-slab-preset="5">5mm</button>
-            <button type="button" class="btn btn-sm slab-preset" data-slab-preset="10">10mm</button>
-            <button type="button" class="btn btn-sm slab-preset" data-slab-preset="20">20mm</button>
+            <button type="button" class="slab-preset" data-slab-preset="5">5mm</button>
+            <button type="button" class="slab-preset" data-slab-preset="10">10mm</button>
+            <button type="button" class="slab-preset" data-slab-preset="20">20mm</button>
           </div>
           <input id="slab-thickness-slider" type="range" min="0" max="40" value="0" step="1" class="tbar-range" disabled />
           <span id="slab-thickness-value" class="status-chip">0 mm</span>
         </div>
         <div class="toolbar-group">
-          <span class="toolbar-label">Cine</span>
-          <button type="button" id="cine-toggle" class="btn btn-icon" title="Play/Pause Cine">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <polygon points="4,2 14,8 4,14"/>
-            </svg>
-          </button>
-          <select id="cine-speed" class="tbar-select">
-            <option value="4">4 fps</option>
-            <option value="8" selected>8 fps</option>
-            <option value="12">12 fps</option>
+          <span class="toolbar-label">Aux</span>
+          <select id="aux-mode" class="tbar-select">
+            <option value="annulus">Annulus</option>
+            <option value="stj">STJ</option>
+            <option value="centerline">Centerline</option>
           </select>
         </div>
         <div class="toolbar-spacer" style="flex:1;"></div>
@@ -130,30 +118,30 @@ export function renderShellHTML(): string {
 
         <!-- Measurement tools -->
         <button type="button" class="tool-rail-btn" data-tool-mode="length" title="Length (L)">
-          <svg viewBox="0 0 18 18" fill="none">
-            <line x1="2" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="2" y1="5" x2="2" y2="13" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="16" y1="5" x2="16" y2="13" stroke="currentColor" stroke-width="1.5"/>
+          <svg viewBox="0 0 20 20" fill="none">
+            <line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="4" y1="6" x2="4" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="16" y1="6" x2="16" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </button>
         <button type="button" class="tool-rail-btn" data-tool-mode="angle" title="Angle (A)">
-          <svg viewBox="0 0 18 18" fill="none">
-            <line x1="3" y1="14" x2="9" y2="4" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="9" y1="4" x2="15" y2="14" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M6 12 A4 4 0 0 1 12 12" stroke="currentColor" stroke-width="1" fill="none"/>
+          <svg viewBox="0 0 20 20" fill="none">
+            <line x1="4" y1="16" x2="10" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="10" y1="5" x2="16" y2="16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M7 13.5 A3.5 3.5 0 0 1 13 13.5" stroke="currentColor" stroke-width="1.25" fill="none" stroke-linecap="round"/>
           </svg>
         </button>
         <button type="button" class="tool-rail-btn" data-tool-mode="probe" title="HU Probe">
-          <svg viewBox="0 0 18 18" fill="none">
-            <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.5" fill="none"/>
-            <circle cx="9" cy="9" r="1" fill="currentColor"/>
-            <line x1="9" y1="2" x2="9" y2="6" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="9" y1="12" x2="9" y2="16" stroke="currentColor" stroke-width="1.5"/>
+          <svg viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="10" cy="10" r="1.5" fill="currentColor"/>
+            <line x1="10" y1="2" x2="10" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="10" y1="15" x2="10" y2="18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </button>
         <button type="button" class="tool-rail-btn" data-tool-mode="roi" title="ROI">
-          <svg viewBox="0 0 18 18" fill="none">
-            <rect x="3" y="4" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" stroke-dasharray="2 1.5"/>
+          <svg viewBox="0 0 20 20" fill="none">
+            <rect x="4" y="5" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-dasharray="2 1.5"/>
           </svg>
         </button>
 
@@ -269,12 +257,12 @@ export function renderShellHTML(): string {
       </main>
 
       <!-- ───────────────────────────────────────────────────────────────────
-           MEASUREMENT DRAWER — Collapsible right panel
+           MEASUREMENT DRAWER — Apple sidebar design
            ─────────────────────────────────────────────────────────────────── -->
       <aside class="measurement-drawer expanded" id="measurement-drawer">
         <button type="button" class="drawer-toggle" id="drawer-toggle" title="Toggle Drawer">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 3l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
 
@@ -299,7 +287,7 @@ export function renderShellHTML(): string {
               <button type="button" class="btn" data-planning-tab="VSRR">VSRR</button>
               <button type="button" class="btn" data-planning-tab="PEARS">PEARS</button>
             </div>
-            <div id="planning-grid" class="planning-summary-content" style="margin-top: 8px;">
+            <div id="planning-grid" class="planning-summary-content" style="margin-top: 12px;">
               <div class="planning-item skeleton-shimmer">
                 <div class="planning-item-title">Loading...</div>
                 <div class="planning-item-value">—</div>
@@ -311,7 +299,11 @@ export function renderShellHTML(): string {
           <div class="drawer-section">
             <div class="drawer-section-header">
               All Measurements
-              <button type="button" class="btn btn-icon" id="toggle-measurements-panel" style="float:right;height:24px;width:24px;">▼</button>
+              <button type="button" class="btn btn-icon" id="toggle-measurements-panel" style="height:28px;width:28px;" title="Toggle">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M3.5 5.25l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
             </div>
             <div id="measurement-grid-wrap" class="measurement-grid-expanded">
               <div class="metric-grid" id="measurement-grid">
@@ -324,12 +316,29 @@ export function renderShellHTML(): string {
           </div>
 
           <!-- Export -->
-          <div class="drawer-section">
+          <div class="drawer-section" style="margin-top: auto;">
             <div class="drawer-section-header">Export</div>
-            <div class="download-list" id="download-list" style="display:flex;flex-direction:column;gap:4px;">
-              <button type="button" class="btn" id="export-csv">Export CSV</button>
-              <button type="button" class="btn" id="export-stl">Export STL</button>
-              <button type="button" class="btn" id="export-report">Export Report</button>
+            <div class="download-list" id="download-list" style="display:flex;flex-direction:column;gap:8px;">
+              <button type="button" class="btn" id="export-csv">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2v8m0 0l-2-2m2 2l2-2M3 12a1 1 0 011-1h8a1 1 0 011 1v1a1 1 0 01-1 1H4a1 1 0 01-1-1v-1z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                CSV
+              </button>
+              <button type="button" class="btn" id="export-stl">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 1L1 5v6l7 4 7-4V5L8 1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                  <path d="M1 5l7 3 7-3M8 8v7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                STL
+              </button>
+              <button type="button" class="btn" id="export-report">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 2h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M9 2v4h4M5 10h6M5 13h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                Report
+              </button>
             </div>
           </div>
 
@@ -337,7 +346,7 @@ export function renderShellHTML(): string {
       </aside>
 
       <!-- ───────────────────────────────────────────────────────────────────
-           STATUS BAR — Keyboard shortcuts + HU info
+           STATUS BAR — Minimal info strip
            ─────────────────────────────────────────────────────────────────── -->
       <div class="status-bar">
         <div class="status-item">
@@ -351,13 +360,12 @@ export function renderShellHTML(): string {
         </div>
         <div class="status-spacer"></div>
         <div class="keyboard-shortcuts">
-          <span><span class="kbd">1-8</span> Tools</span>
-          <span><span class="kbd">M</span> Slab MIP</span>
-          <span><span class="kbd">Shift+/</span> Thickness</span>
+          <span><span class="kbd">1</span> Crosshair</span>
+          <span><span class="kbd">W</span> W/L</span>
+          <span><span class="kbd">M</span> Slab</span>
           <span><span class="kbd">R</span> Reset</span>
-          <span><span class="kbd">ESC</span> Cancel</span>
         </div>
-        <div class="status-item" style="margin-left: 16px;">
+        <div class="status-item" style="margin-left: 24px; color: var(--gray-400);">
           For research use only
         </div>
       </div>

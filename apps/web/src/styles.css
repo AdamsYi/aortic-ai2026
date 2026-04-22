@@ -1,107 +1,181 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   AorticAI Structural Heart Workstation — Commercial Grade Clinical UI
-   Design Philosophy: Syngo.via + 3mensio + Oscura MD fusion
-   Target: TAVI/VSRR/PEARS surgical planning for structural heart specialists
-
-   Layout: Header(40px) | Toolbar(44px) | Workspace(1fr) | Status(22px)
-   Columns: ToolRail(48px) | Viewport(1fr) | MeasurementDrawer(320px collapsible)
+   AorticAI — Commercial Grade Investor Demo UI
+   Design Philosophy: Apple minimalism × Nike functional aesthetics
+   - Pure black imaging surfaces (clinical standard)
+   - Apple-style elevation (subtle shadows, no borders)
+   - Nike action gradients (primary CTA moments)
+   - Generous whitespace for premium feel
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ────────────────────────────────────────────────────────────────────────────
-   DESIGN TOKENS — Clinical Color Science
-   Reference: DICOM GSDF perceptual linearization, medical display calibration
+   DESIGN TOKENS — Apple/Nike Fusion
    ──────────────────────────────────────────────────────────────────────────── */
 :root {
-  /* ─── Neutral Gray Scale (perceptually uniform) ────────────────────────── */
-  --gray-0:   #ffffff;  --gray-50:  #fafbfc;  --gray-100: #f2f4f7;
-  --gray-200: #e4e7ec;  --gray-300: #d0d5dd;  --gray-400: #98a2b3;
-  --gray-500: #667085;  --gray-600: #475467;  --gray-700: #344054;
-  --gray-800: #1d2939;  --gray-900: #101828;
+  /* ─── Pure Neutral Scale (Apple-style perceptual uniformity) ───────────── */
+  --white: #ffffff;
+  --black: #000000;
 
-  /* ─── Clinical Blue (Siemens/Philips fusion) ───────────────────────────── */
-  --primary-50:   #eff8ff;  --primary-100: #d1e9ff;  --primary-200: #b2ddff;
-  --primary-300:  #66b2ff;  --primary-400: #1a91ff;  --primary-500: #0073dc;
-  --primary-600:  #005eb8;  --primary-700: #004a91;  --primary-800: #003c73;
+  --gray-50:  #f9fafb;   /* surface background */
+  --gray-100: #f3f4f6;   /* hover states */
+  --gray-200: #e5e7eb;   /* subtle dividers */
+  --gray-300: #d1d5db;   /* disabled states */
+  --gray-400: #9ca3af;   /* placeholder text */
+  --gray-500: #6b7280;   /* secondary text */
+  --gray-600: #4b5563;   /* primary text (soft) */
+  --gray-700: #374151;   /* primary text */
+  --gray-800: #1f2937;   /* primary text (bold) */
+  --gray-900: #111827;   /* near-black */
 
-  /* ─── Semantic Colors (clinical status) ────────────────────────────────── */
-  --success-50:  #f6fef9;  --success-500: #12b76a;  --success-700: #027a48;
-  --warning-50:  #fffae5;  --warning-500: #f79009;  --warning-700: #b54708;
-  --error-50:    #fef3f2;  --error-500:   #f04438;  --error-700:   #b42318;
-  --info-50:     #f0f9ff;  --info-500:    #0ba5ec;  --info-700:    #026aa2;
+  /* ─── AorticAI Brand Blue (Nike-style action gradient base) ────────────── */
+  /* Inspired by medical precision + athletic performance */
+  --brand-50:  #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-200: #bfdbfe;
+  --brand-300: #93c5fd;
+  --brand-400: #60a5fa;
+  --brand-500: #3b82f6;  /* Primary brand */
+  --brand-600: #2563eb;  /* Hover state */
+  --brand-700: #1d4ed8;  /* Active state */
+  --brand-800: #1e40af;
+  --brand-900: #1e3a8a;
 
-  /* ─── Surface Hierarchy (elevation system) ─────────────────────────────── */
-  --surface-app:      var(--gray-100);   /* application background */
-  --surface-elevated: var(--gray-0);     /* cards, panels */
-  --surface-sunken:   var(--gray-200);   /* wells, inputs */
-  --surface-overlay:  rgba(255,255,255,0.98); /* modals, drawers */
+  /* ─── Brand Gradient (Nike action moments) ─────────────────────────────── */
+  --gradient-brand: linear-gradient(135deg, var(--brand-500) 0%, var(--brand-700) 100%);
+  --gradient-brand-hover: linear-gradient(135deg, var(--brand-600) 0%, var(--brand-800) 100%);
 
-  /* ─── Imaging Surface (viewport always black) ──────────────────────────── */
-  --imaging-bg:       #000000;
-  --imaging-border:   #2a2a2a;
+  /* ─── Semantic Colors (clinical precision) ─────────────────────────────── */
+  --success-bg: #dcfce7;
+  --success-text: #15803d;
+  --success-border: #86efac;
 
-  /* ─── Typography ───────────────────────────────────────────────────────── */
-  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono:  'JetBrains Mono', 'SF Mono', Consolas, monospace;
-  --font-num:   'Inter', var(--font-mono); /* tabular nums for measurements */
+  --warning-bg: #fef3c7;
+  --warning-text: #b45309;
+  --warning-border: #fcd34d;
 
-  /* ─── Font Sizes (clinical readability) ────────────────────────────────── */
-  --text-xs:  10px;  --text-sm: 11px;  --text-base: 12px;
-  --text-lg:  13px;  --text-xl: 14px;  --text-2xl: 16px;
+  --error-bg: #fee2e2;
+  --error-text: #b91c1c;
+  --error-border: #fca5a5;
 
-  /* ─── Font Weights ─────────────────────────────────────────────────────── */
-  --font-normal:   400;  --font-medium: 500;  --font-semibold: 600; --font-bold: 700;
+  --info-bg: #dbeafe;
+  --info-text: #1d4ed8;
+  --info-border: #93c5fd;
 
-  /* ─── Spacing (4px grid) ───────────────────────────────────────────────── */
-  --space-0:  0px;   --space-05: 2px;   --space-1:  4px;   --space-2:  8px;
-  --space-3:  12px;  --space-4:  16px;  --space-5:  20px;  --space-6:  24px;
-  --space-8:  32px;  --space-10: 40px;  --space-12: 48px;
+  /* ─── Imaging Surface (clinical black — DICOM standard) ───────────────── */
+  --imaging-bg: #000000;
+  --imaging-border: #1a1a1a;
+  --imaging-overlay: rgba(0, 0, 0, 0.7);
 
-  /* ─── Borders ──────────────────────────────────────────────────────────── */
-  --border-width:    1px;
-  --border-width-lg: 2px;
-  --radius-sm:       4px;
-  --radius-md:       6px;
-  --radius-lg:       8px;
-  --radius-xl:       12px;
+  /* ─── Typography (Apple system stack) ──────────────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 
-  /* ─── Shadows (elevation levels) ───────────────────────────────────────── */
-  --shadow-xs: 0 1px 2px rgba(16,24,40,0.04);
-  --shadow-sm: 0 1px 3px rgba(16,24,40,0.06), 0 1px 2px rgba(16,24,40,0.04);
-  --shadow-md: 0 4px 8px rgba(16,24,40,0.08), 0 2px 4px rgba(16,24,40,0.04);
-  --shadow-lg: 0 12px 16px rgba(16,24,40,0.10), 0 4px 8px rgba(16,24,40,0.04);
-  --shadow-xl: 0 20px 24px rgba(16,24,40,0.12), 0 8px 16px rgba(16,24,40,0.06);
+  /* ─── Font Sizes (clinical readability + Apple scale) ──────────────────── */
+  --text-xs:   0.625rem;  /* 10px */
+  --text-sm:   0.6875rem; /* 11px */
+  --text-base: 0.75rem;   /* 12px */
+  --text-lg:   0.8125rem; /* 13px */
+  --text-xl:   0.875rem;  /* 14px */
+  --text-2xl:  1rem;      /* 16px */
+  --text-3xl:  1.25rem;   /* 20px */
+  --text-4xl:  1.5rem;    /* 24px */
 
-  /* ─── Transitions ──────────────────────────────────────────────────────── */
-  --transition-fast:   100ms ease;
-  --transition-normal: 150ms ease;
-  --transition-slow:   200ms ease;
+  /* ─── Font Weights (Apple-style hierarchy) ─────────────────────────────── */
+  --font-regular: 400;
+  --font-medium:  500;
+  --font-semibold: 600;
+  --font-bold:    700;
+  --font-display: 700;
+
+  /* ─── Spacing (8px grid system) ────────────────────────────────────────── */
+  --space-0:  0px;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* ─── Borders (Apple-style: minimal, subtle) ───────────────────────────── */
+  --border-subtle: 1px solid var(--gray-200);
+  --border-default: 1px solid var(--gray-300);
+  --border-strong: 1px solid var(--gray-400);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* ─── Shadows (Apple elevation system) ─────────────────────────────────── */
+  --shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.10), 0 4px 8px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.12), 0 8px 16px rgba(0, 0, 0, 0.06);
+  --shadow-2xl: 0 40px 80px rgba(0, 0, 0, 0.15), 0 16px 32px rgba(0, 0, 0, 0.08);
+
+  /* Brand glow for CTAs */
+  --glow-brand: 0 0 0 3px rgba(59, 130, 246, 0.15), 0 4px 12px rgba(59, 130, 246, 0.20);
+  --glow-brand-hover: 0 0 0 3px rgba(59, 130, 246, 0.25), 0 8px 24px rgba(59, 130, 246, 0.30);
+
+  /* ─── Transitions (Apple smoothness) ───────────────────────────────────── */
+  --transition-fast: 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* ─── Layout Dimensions ────────────────────────────────────────────────── */
-  --header-height:     40px;
-  --toolbar-height:    44px;
-  --rail-width:        48px;
-  --drawer-width:      320px;
-  --drawer-collapsed:  8px;
-  --status-height:     22px;
+  --header-height: 48px;
+  --toolbar-height: 48px;
+  --rail-width: 56px;
+  --drawer-width: 340px;
+  --drawer-collapsed: 0px;
+  --status-height: 28px;
+
+  /* ─── Z-Index Scale ────────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
    RESET & BASE
    ──────────────────────────────────────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 html, body {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: var(--surface-app);
-  color: var(--gray-900);
+  background: var(--gray-50);
+  color: var(--gray-800);
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+}
+
+/* Selection color (Apple-style brand highlight) */
+::selection {
+  background: var(--brand-200);
+  color: var(--gray-900);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -114,29 +188,31 @@ html, body {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  background: var(--gray-100);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   HEADER — Ultra-minimal, brand + case info only
+   HEADER — Apple minimal (elevated, borderless)
    ──────────────────────────────────────────────────────────────────────────── */
 .app-header {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: 0 var(--space-4);
-  background: var(--surface-elevated);
-  border-bottom: var(--border-width) solid var(--gray-200);
-  box-shadow: var(--shadow-xs);
-  z-index: 100;
+  gap: var(--space-6);
+  padding: 0 var(--space-6);
+  background: var(--white);
+  border-bottom: var(--border-subtle);
+  box-shadow: var(--shadow-subtle);
+  z-index: var(--z-sticky);
 }
 
 .header-brand {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding-right: var(--space-4);
-  border-right: var(--border-width) solid var(--gray-200);
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  padding-right: var(--space-6);
+  border-right: var(--border-subtle);
 }
 
 .header-brand h1 {
@@ -144,19 +220,23 @@ html, body {
   font-weight: var(--font-bold);
   color: var(--gray-900);
   letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .header-brand span {
   font-size: var(--text-xs);
   color: var(--gray-500);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
+  font-weight: var(--font-medium);
 }
 
 .header-case {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--text-sm);
   color: var(--gray-600);
-  font-weight: var(--font-medium);
 }
 
 .header-case strong {
@@ -164,7 +244,20 @@ html, body {
   font-weight: var(--font-semibold);
 }
 
-.header-spacer { flex: 1; }
+.case-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+}
+
+.header-spacer {
+  flex: 1;
+}
 
 .header-actions {
   display: flex;
@@ -173,64 +266,84 @@ html, body {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   TOOLBAR — Contextual secondary controls
+   TOOLBAR — Floating pill design (Apple-style)
    ──────────────────────────────────────────────────────────────────────────── */
 .viewer-toolbar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-4);
-  background: var(--surface-elevated);
-  border-bottom: var(--border-width) solid var(--gray-200);
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-6);
+  background: var(--white);
+  border-bottom: var(--border-subtle);
 }
 
 .toolbar-group {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding-right: var(--space-3);
-  border-right: var(--border-width) solid var(--gray-200);
+  padding-right: var(--space-4);
+  margin-right: var(--space-2);
+  border-right: var(--border-subtle);
 }
 
-.toolbar-group:last-child { border-right: none; }
+.toolbar-group:last-child {
+  border-right: none;
+  margin-right: 0;
+  padding-right: 0;
+}
 
 .toolbar-label {
   font-size: var(--text-xs);
   color: var(--gray-500);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: var(--font-medium);
-}
-
-/* Slab MIP preset buttons */
-.slab-presets {
-  display: flex;
-  gap: var(--space-05);
-}
-.slab-preset {
-  height: 24px;
-  padding: 0 var(--space-2);
-  font-size: var(--text-xs);
-}
-.slab-preset.active {
-  background: var(--primary-600);
-  border-color: var(--primary-600);
-  color: var(--gray-0);
+  letter-spacing: 0.08em;
+  font-weight: var(--font-semibold);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   LEFT TOOL RAIL — Icon-only vertical navigation
+   SLAB MIP PRESETS — Nike-style action buttons
+   ──────────────────────────────────────────────────────────────────────────── */
+.slab-presets {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.slab-preset {
+  height: 28px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  background: var(--gray-100);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--gray-700);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.slab-preset:hover {
+  background: var(--gray-200);
+}
+
+.slab-preset.active {
+  background: var(--gradient-brand);
+  color: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   LEFT TOOL RAIL — Icon navigation (Apple dock style)
    ──────────────────────────────────────────────────────────────────────────── */
 .tool-rail {
   grid-row: 3 / 4;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--space-2) 0;
-  background: var(--surface-elevated);
-  border-right: var(--border-width) solid var(--gray-200);
-  gap: var(--space-1);
+  padding: var(--space-3) 0;
+  background: var(--white);
+  border-right: var(--border-subtle);
+  gap: var(--space-2);
 }
 
 .tool-rail-btn {
@@ -243,27 +356,36 @@ html, body {
   background: transparent;
   cursor: pointer;
   border-radius: var(--radius-md);
-  transition: background var(--transition-fast);
+  transition: all var(--transition-base);
   position: relative;
+  color: var(--gray-500);
 }
 
 .tool-rail-btn:hover {
   background: var(--gray-100);
+  color: var(--gray-700);
 }
 
 .tool-rail-btn.active {
-  background: var(--primary-50);
-  color: var(--primary-600);
+  background: var(--brand-50);
+  color: var(--brand-600);
+}
+
+.tool-rail-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--brand-600);
+  border-radius: var(--radius-full);
 }
 
 .tool-rail-btn svg {
-  width: 18px;
-  height: 18px;
-}
-
-.tool-rail-btn.active svg {
-  fill: var(--primary-600);
-  stroke: var(--primary-600);
+  width: 20px;
+  height: 20px;
 }
 
 .tool-rail-sep {
@@ -271,26 +393,27 @@ html, body {
   height: var(--border-width);
   background: var(--gray-200);
   margin: var(--space-2) 0;
+  border-radius: var(--radius-full);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   CONTEXTUAL TOOL PANEL — Expands from rail
+   CONTEXTUAL TOOL PANEL — Apple-style popover
    ──────────────────────────────────────────────────────────────────────────── */
 .tool-context-panel {
   position: absolute;
   left: var(--rail-width);
   top: var(--header-height);
   width: 200px;
-  background: var(--surface-elevated);
-  border: var(--border-width) solid var(--gray-200);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  box-shadow: var(--shadow-lg);
+  background: var(--white);
+  border: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
   padding: var(--space-2);
-  z-index: 50;
+  z-index: var(--z-dropdown);
   transform: translateX(-100%);
   opacity: 0;
   pointer-events: none;
-  transition: transform var(--transition-normal), opacity var(--transition-normal);
+  transition: all var(--transition-base);
 }
 
 .tool-context-panel.visible {
@@ -304,16 +427,21 @@ html, body {
   color: var(--gray-500);
   text-transform: uppercase;
   margin-bottom: var(--space-2);
+  padding: var(--space-2);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.06em;
 }
 
 .tool-context-option {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: var(--text-sm);
+  color: var(--gray-700);
+  transition: background var(--transition-base);
 }
 
 .tool-context-option:hover {
@@ -321,7 +449,7 @@ html, body {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   VIEWPORT STAGE — Main imaging area
+   VIEWPORT STAGE — Pure black imaging surface
    ──────────────────────────────────────────────────────────────────────────── */
 .viewport-stage {
   grid-row: 3 / 4;
@@ -332,16 +460,19 @@ html, body {
     "mpr-three mpr-three mpr-three";
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 60% 40%;
-  gap: 2px;
+  gap: 4px;
   background: var(--gray-200);
+  padding: 4px;
   overflow: hidden;
 }
 
 .viewport-card {
   position: relative;
   background: var(--imaging-bg);
-  border: var(--border-width) solid var(--imaging-border);
+  border: none;
+  border-radius: var(--radius-sm);
   overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--imaging-border);
 }
 
 .viewport-card[data-viewport="axial"] { grid-area: mpr-axial; }
@@ -356,12 +487,13 @@ html, body {
   transform: translateX(-50%);
   font-size: var(--text-xs);
   font-weight: var(--font-semibold);
-  color: var(--gray-900);
-  background: rgba(255,255,255,0.95);
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  color: var(--white);
+  background: var(--imaging-overlay);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
+  backdrop-filter: blur(8px);
   z-index: 10;
   pointer-events: none;
 }
@@ -371,20 +503,76 @@ html, body {
   bottom: var(--space-2);
   left: var(--space-2);
   font-size: var(--text-xs);
-  color: rgba(255,255,255,0.8);
+  color: rgba(255, 255, 255, 0.7);
   font-family: var(--font-mono);
   z-index: 10;
   pointer-events: none;
+  background: var(--imaging-overlay);
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(8px);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   MEASUREMENT DRAWER — Collapsible right panel
+   3D STAGE CONTROLS — Floating overlay
+   ──────────────────────────────────────────────────────────────────────────── */
+.three-stage {
+  width: 100%;
+  height: 100%;
+}
+
+.three-layer-controls {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  gap: var(--space-1);
+  z-index: 10;
+}
+
+.three-layer-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--white);
+  border: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 140px;
+}
+
+.three-layer-panel label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--gray-700);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-base);
+}
+
+.three-layer-panel label:hover {
+  background: var(--gray-100);
+}
+
+.three-layer-panel input[type="checkbox"] {
+  accent-color: var(--brand-600);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   MEASUREMENT DRAWER — Apple sidebar design
    ──────────────────────────────────────────────────────────────────────────── */
 .measurement-drawer {
   grid-row: 3 / 4;
   grid-column: 3 / 4;
-  background: var(--surface-elevated);
-  border-left: var(--border-width) solid var(--gray-200);
+  background: var(--white);
+  border-left: var(--border-subtle);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -404,10 +592,10 @@ html, body {
   top: 50%;
   left: 0;
   transform: translateY(-50%);
-  width: 16px;
+  width: 20px;
   height: 64px;
-  background: var(--gray-200);
-  border: var(--border-width) solid var(--gray-300);
+  background: var(--white);
+  border: var(--border-subtle);
   border-left: none;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
@@ -415,21 +603,41 @@ html, body {
   align-items: center;
   justify-content: center;
   z-index: 10;
+  color: var(--gray-500);
+  transition: all var(--transition-base);
 }
 
 .drawer-toggle:hover {
-  background: var(--primary-100);
-  border-color: var(--primary-300);
+  background: var(--brand-50);
+  color: var(--brand-600);
 }
 
 .drawer-content {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-3);
+  padding: var(--space-4);
+}
+
+/* Custom scrollbar (Apple-style) */
+.drawer-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.drawer-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.drawer-content::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: var(--radius-full);
+}
+
+.drawer-content::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
 }
 
 .drawer-section {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
 }
 
 .drawer-section-header {
@@ -437,52 +645,178 @@ html, body {
   font-weight: var(--font-semibold);
   color: var(--gray-500);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   padding-bottom: var(--space-2);
-  border-bottom: var(--border-width) solid var(--gray-200);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-/* Key measurement display */
+/* ────────────────────────────────────────────────────────────────────────────
+   KEY MEASUREMENT CARD — Nike stats display
+   ──────────────────────────────────────────────────────────────────────────── */
 .key-measurement {
   text-align: center;
-  padding: var(--space-4) 0;
-  border-bottom: var(--border-width) solid var(--gray-100);
+  padding: var(--space-6) 0;
+  background: var(--gray-50);
+  border-radius: var(--radius-xl);
+  margin-bottom: var(--space-4);
 }
 
 .key-measurement-label {
   font-size: var(--text-xs);
   color: var(--gray-500);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
+  font-weight: var(--font-medium);
   margin-bottom: var(--space-2);
 }
 
 .key-measurement-value {
-  font-family: var(--font-num);
-  font-size: 32px;
+  font-family: var(--font-sans);
+  font-size: 40px;
   font-weight: var(--font-bold);
   color: var(--gray-900);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
 }
 
 .key-measurement-unit {
   font-size: var(--text-sm);
   color: var(--gray-500);
-  margin-left: 2px;
+  font-weight: var(--font-medium);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   STATUS BAR
+   PROCEDURE TABS — Nike-style segmented control
+   ──────────────────────────────────────────────────────────────────────────── */
+.proc-tabs {
+  display: flex;
+  background: var(--gray-100);
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  gap: 4px;
+}
+
+.proc-tabs .btn {
+  flex: 1;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--gray-600);
+  font-weight: var(--font-medium);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+}
+
+.proc-tabs .btn:hover:not(:disabled) {
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+.proc-tabs .btn.btn-primary {
+  background: var(--white);
+  color: var(--gray-900);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   PLANNING SUMMARY — Metric grid
+   ──────────────────────────────────────────────────────────────────────────── */
+.planning-summary-content {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.planning-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-50);
+  border-radius: var(--radius-lg);
+  transition: background var(--transition-base);
+}
+
+.planning-item:hover {
+  background: var(--gray-100);
+}
+
+.planning-item-title {
+  font-size: var(--text-sm);
+  color: var(--gray-600);
+  font-weight: var(--font-medium);
+}
+
+.planning-item-value {
+  font-size: var(--text-lg);
+  color: var(--gray-900);
+  font-weight: var(--font-semibold);
+  font-family: var(--font-sans);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   METRIC GRID — Clinical data display
+   ──────────────────────────────────────────────────────────────────────────── */
+.measurement-grid-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-50);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+}
+
+.metric-row:hover {
+  background: var(--gray-100);
+}
+
+.metric-name {
+  font-size: var(--text-sm);
+  color: var(--gray-600);
+  font-weight: var(--font-medium);
+}
+
+.metric-value {
+  font-size: var(--text-lg);
+  color: var(--gray-900);
+  font-weight: var(--font-semibold);
+  font-family: var(--font-sans);
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.metric-unit {
+  font-size: var(--text-xs);
+  color: var(--gray-500);
+  font-weight: var(--font-normal);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   STATUS BAR — Minimal info strip
    ──────────────────────────────────────────────────────────────────────────── */
 .status-bar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: 0 var(--space-4);
-  background: var(--surface-elevated);
-  border-top: var(--border-width) solid var(--gray-200);
+  gap: var(--space-6);
+  padding: 0 var(--space-6);
+  background: var(--white);
+  border-top: var(--border-subtle);
   font-size: var(--text-xs);
   color: var(--gray-500);
 }
@@ -495,13 +829,16 @@ html, body {
 
 .status-item strong {
   color: var(--gray-700);
+  font-weight: var(--font-semibold);
 }
 
-.status-spacer { flex: 1; }
+.status-spacer {
+  flex: 1;
+}
 
 .keyboard-shortcuts {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--space-4);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--gray-400);
@@ -511,45 +848,46 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
   background: var(--gray-100);
-  border: var(--border-width) solid var(--gray-300);
+  border: var(--border-subtle);
   border-radius: var(--radius-sm);
   font-size: 10px;
   color: var(--gray-700);
+  font-weight: var(--font-medium);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.1);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   BUTTONS — Clinical grade interaction
+   BUTTONS — Nike action design
    ──────────────────────────────────────────────────────────────────────────── */
 button, .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  height: 32px;
-  padding: 0 var(--space-3);
-  border: var(--border-width) solid var(--gray-300);
-  border-radius: var(--radius-md);
-  background: var(--gray-0);
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--white);
   color: var(--gray-700);
   font-size: var(--text-sm);
-  font-weight: var(--font-medium);
+  font-weight: var(--font-semibold);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all var(--transition-base);
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--gray-300);
 }
 
 button:hover:not(:disabled), .btn:hover:not(:disabled) {
   background: var(--gray-50);
-  border-color: var(--gray-400);
-  color: var(--gray-900);
+  box-shadow: inset 0 0 0 1px var(--gray-400);
 }
 
 button:active:not(:disabled), .btn:active:not(:disabled) {
-  background: var(--gray-100);
   transform: scale(0.98);
 }
 
@@ -558,66 +896,113 @@ button:disabled, .btn:disabled {
   cursor: not-allowed;
 }
 
+/* Primary button (Nike CTA style) */
 .btn-primary {
-  background: var(--primary-600) !important;
-  border-color: var(--primary-600) !important;
-  color: var(--gray-0) !important;
+  background: var(--gradient-brand) !important;
+  color: var(--white) !important;
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--brand-600) !important;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-700) !important;
-  border-color: var(--primary-700) !important;
+  background: var(--gradient-brand-hover) !important;
+  box-shadow: var(--shadow-md), var(--glow-brand) !important;
 }
 
+/* Icon button */
 .btn-icon {
-  width: 32px;
+  width: 36px;
   padding: 0;
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
-   SELECT / INPUTS
-   ──────────────────────────────────────────────────────────────────────────── */
-select, input[type="text"], input[type="number"] {
-  height: 32px;
+.btn-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Small button */
+.btn-sm {
+  height: 28px;
   padding: 0 var(--space-2);
-  border: var(--border-width) solid var(--gray-300);
-  border-radius: var(--radius-md);
-  background: var(--gray-0);
+  font-size: var(--text-xs);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   SELECTS / INPUTS — Apple form design
+   ──────────────────────────────────────────────────────────────────────────── */
+select, input[type="text"], input[type="number"], input[type="password"] {
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--white);
   color: var(--gray-900);
   font-size: var(--text-sm);
   font-family: var(--font-sans);
+  font-weight: var(--font-medium);
+  transition: all var(--transition-base);
 }
 
 select:focus, input:focus {
   outline: none;
-  border-color: var(--primary-500);
-  box-shadow: 0 0 0 3px var(--primary-100);
+  border-color: var(--brand-400);
+  box-shadow: var(--glow-brand);
+}
+
+select {
+  cursor: pointer;
+  padding-right: var(--space-8);
+}
+
+/* Range input */
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 120px;
+  height: 4px;
+  background: var(--gray-300);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--brand-600);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all var(--transition-base);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   BANNERS — Clinical alerts
+   BANNERS — Clinical alerts (Apple-style)
    ──────────────────────────────────────────────────────────────────────────── */
 .banner {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  margin: var(--space-2) var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  margin: var(--space-4);
+  box-shadow: var(--shadow-md);
 }
 
 .banner-error {
-  background: var(--error-50);
-  border: 1px solid var(--error-500);
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
 }
 
 .banner-warning {
-  background: var(--warning-50);
-  border: 1px solid var(--warning-500);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
 }
 
 .banner-icon {
-  font-size: 16px;
+  font-size: 18px;
   flex-shrink: 0;
 }
 
@@ -625,56 +1010,333 @@ select:focus, input:focus {
   font-size: var(--text-sm);
   font-weight: var(--font-semibold);
   color: var(--gray-900);
+  margin-bottom: 2px;
 }
 
 .banner-description {
   font-size: var(--text-sm);
-  color: var(--gray-600);
-  margin-top: 2px;
+  color: var(--gray-700);
 }
 
-.hidden { display: none !important; }
-
 /* ────────────────────────────────────────────────────────────────────────────
-   BOOT OVERLAY
+   BOOT OVERLAY — Apple loading experience
    ──────────────────────────────────────────────────────────────────────────── */
 .boot-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(255,255,255,0.98);
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(20px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 999;
+  z-index: var(--z-modal);
 }
 
 .boot-card {
   text-align: center;
-  padding: var(--space-8);
+  padding: var(--space-10);
 }
 
 .boot-card h2 {
-  font-size: var(--text-2xl);
+  font-size: var(--text-3xl);
   color: var(--gray-900);
   margin-bottom: var(--space-2);
+  font-weight: var(--font-bold);
+  letter-spacing: -0.02em;
 }
 
 .boot-card p {
   color: var(--gray-500);
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-8);
+  font-size: var(--text-base);
 }
 
 .boot-progress {
-  width: 300px;
+  width: 280px;
   height: 4px;
   background: var(--gray-200);
-  border-radius: 2px;
+  border-radius: var(--radius-full);
   overflow: hidden;
   margin: 0 auto;
 }
 
 .boot-progress-bar {
   height: 100%;
-  background: var(--primary-600);
-  transition: width 0.3s ease;
+  background: var(--gradient-brand);
+  transition: width var(--transition-spring);
+  border-radius: var(--radius-full);
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   SKELETON LOADING — Apple shimmer
+   ──────────────────────────────────────────────────────────────────────────── */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--gray-100) 0%,
+    var(--gray-200) 50%,
+    var(--gray-100) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   MODALS — Apple sheet design
+   ──────────────────────────────────────────────────────────────────────────── */
+.submit-case-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.submit-case-modal-card {
+  background: var(--white);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-2xl);
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+}
+
+.submit-case-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-6);
+  border-bottom: var(--border-subtle);
+}
+
+.submit-case-modal-head h3 {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--gray-900);
+}
+
+.submit-case-form {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.submit-case-form label {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--gray-700);
+}
+
+.submit-case-form input[type="file"],
+.submit-case-form input[type="text"],
+.submit-case-form input[type="password"] {
+  width: 100%;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   ANNOTATION PANEL — Floating clinical tool
+   ──────────────────────────────────────────────────────────────────────────── */
+.annotate-panel {
+  position: absolute;
+  top: var(--header-height);
+  right: var(--drawer-width);
+  width: 320px;
+  background: var(--white);
+  border: var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2xl);
+  z-index: var(--z-overlay);
+  overflow: hidden;
+}
+
+.annotate-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  background: var(--gray-50);
+  border-bottom: var(--border-subtle);
+}
+
+.annotate-panel-head strong {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--gray-900);
+}
+
+.annotate-panel-mode {
+  font-size: var(--text-xs);
+  color: var(--gray-500);
+}
+
+.annotate-panel-body {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.annotate-target-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.annotate-target-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-3);
+  border: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.annotate-target-btn:hover {
+  background: var(--gray-50);
+}
+
+.annotate-target-btn.active {
+  background: var(--brand-50);
+  border-color: var(--brand-300);
+}
+
+.annotate-target-btn .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  margin-right: var(--space-2);
+}
+
+.annotate-coord {
+  font-size: var(--text-xs);
+  color: var(--gray-500);
+  font-family: var(--font-mono);
+}
+
+.annotate-computed {
+  background: var(--gray-50);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+}
+
+.annotate-computed div {
+  margin-bottom: var(--space-1);
+}
+
+.annotate-note {
+  width: 100%;
+  min-height: 60px;
+  padding: var(--space-3);
+  border: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  resize: vertical;
+}
+
+.annotate-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.annotate-actions .btn {
+  flex: 1;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   REPORT DRAWER — Slide-out panel
+   ──────────────────────────────────────────────────────────────────────────── */
+.report-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 600px;
+  background: var(--white);
+  box-shadow: var(--shadow-2xl);
+  z-index: var(--z-modal);
+  transform: translateX(100%);
+  transition: transform var(--transition-slow);
+  display: flex;
+  flex-direction: column;
+}
+
+.report-drawer.visible {
+  transform: translateX(0);
+}
+
+.report-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-6);
+  border-bottom: var(--border-subtle);
+}
+
+.report-drawer-head h3 {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--gray-900);
+}
+
+.report-drawer-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-6);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   UTILITY CLASSES
+   ──────────────────────────────────────────────────────────────────────────── */
+.hidden {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Text selection */
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.font-bold { font-weight: var(--font-bold); }
+.font-semibold { font-weight: var(--font-semibold); }
+.text-brand { color: var(--brand-600); }
+.text-error { color: var(--error-text); }
+.text-warning { color: var(--warning-text); }
+.text-success { color: var(--success-text); }
+
+/* Flex utilities */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }

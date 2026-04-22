@@ -1244,6 +1244,10 @@ export default {
       }
 
       if ((request.method === "GET" || request.method === "HEAD") && path === "/") {
+        return respond(html(renderLandingPage(getBuildVersion())));
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/app") {
         return respond(html(renderDemoHtml(getBuildVersion())));
       }
 
@@ -7960,6 +7964,540 @@ function renderDemoHtml(buildVersion: string): string {
   <div id="app"></div>
   <script>window.__AORTIC_BUILD_VERSION__=${JSON.stringify(buildVersion)};</script>
   <script type="module" src="${jsSrc}"></script>
+</body>
+</html>`;
+}
+
+function renderLandingPage(buildVersion: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="AorticAI — AI-powered structural heart surgery planning platform for TAVI, VSRR, and PEARS procedures" />
+  <meta name="aortic-build-version" content="${buildVersion}" />
+  <title>AorticAI — Structural Heart Planning Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --black: #000000;
+      --white: #ffffff;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+      --brand-500: #3b82f6;
+      --brand-600: #2563eb;
+      --brand-700: #1d4ed8;
+      --gradient-brand: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+      --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.08);
+      --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.10);
+      --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.12);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--white);
+      color: var(--gray-900);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+    /* Navigation */
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--gray-200);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+    }
+    .nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+    .nav-brand {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--gray-900);
+      letter-spacing: -0.02em;
+    }
+    .nav-brand span { color: var(--gray-500); font-weight: 500; margin-left: 8px; }
+    .nav-actions { display: flex; gap: 16px; align-items: center; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 40px;
+      padding: 0 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 150ms ease;
+      border: none;
+    }
+    .btn-secondary {
+      background: var(--gray-100);
+      color: var(--gray-700);
+    }
+    .btn-secondary:hover { background: var(--gray-200); }
+    .btn-primary {
+      background: var(--gradient-brand);
+      color: var(--white);
+      box-shadow: var(--shadow-sm), 0 0 0 1px var(--brand-600);
+    }
+    .btn-primary:hover {
+      box-shadow: var(--shadow-md), 0 0 0 1px var(--brand-700);
+      transform: translateY(-1px);
+    }
+
+    /* Hero */
+    .hero {
+      padding-top: 140px;
+      padding-bottom: 80px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: var(--gray-100);
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gray-600);
+      margin-bottom: 24px;
+    }
+    .hero-badge .dot {
+      width: 8px;
+      height: 8px;
+      background: var(--brand-600);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .hero h1 {
+      font-size: clamp(40px, 8vw, 72px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      background: linear-gradient(180deg, var(--gray-900) 0%, var(--gray-600) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: clamp(18px, 3vw, 22px);
+      color: var(--gray-500);
+      max-width: 640px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .hero-cta .btn { min-width: 160px; }
+
+    /* Features */
+    .features { padding: 100px 0; background: var(--gray-50); }
+    .section-header { text-align: center; margin-bottom: 64px; }
+    .section-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--brand-600);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(28px, 5vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--gray-900);
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 32px;
+    }
+    .feature-card {
+      background: var(--white);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: var(--shadow-sm);
+      transition: all 200ms ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-xl);
+    }
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--gradient-brand);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      color: var(--white);
+    }
+    .feature-icon svg { width: 24px; height: 24px; }
+    .feature-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--gray-900);
+      margin-bottom: 8px;
+    }
+    .feature-desc {
+      font-size: 15px;
+      color: var(--gray-500);
+      line-height: 1.6;
+    }
+
+    /* Stats */
+    .stats { padding: 100px 0; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 40px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: clamp(36px, 6vw, 56px);
+      font-weight: 700;
+      color: var(--brand-600);
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+    }
+    .stat-label {
+      font-size: 14px;
+      color: var(--gray-500);
+      font-weight: 500;
+    }
+
+    /* Procedures */
+    .procedures { padding: 100px 0; background: var(--gray-900); color: var(--white); }
+    .procedures .section-title { color: var(--white); }
+    .procedure-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 32px;
+      margin-top: 48px;
+    }
+    .procedure-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 32px;
+      transition: all 200ms ease;
+    }
+    .procedure-card:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .procedure-name {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      background: var(--gradient-brand);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .procedure-full {
+      font-size: 15px;
+      color: var(--gray-400);
+      margin-bottom: 20px;
+    }
+    .procedure-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .procedure-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--gray-300);
+    }
+    .procedure-list li::before {
+      content: '✓';
+      color: var(--brand-500);
+      font-weight: 700;
+    }
+
+    /* CTA */
+    .cta {
+      padding: 120px 0;
+      text-align: center;
+    }
+    .cta h2 {
+      font-size: clamp(32px, 6vw, 48px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .cta p {
+      font-size: 18px;
+      color: var(--gray-500);
+      margin-bottom: 32px;
+    }
+
+    /* Footer */
+    .footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--gray-200);
+      text-align: center;
+      font-size: 13px;
+      color: var(--gray-500);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .procedure-grid { grid-template-columns: 1fr; }
+      .nav-actions { gap: 8px; }
+      .btn { padding: 0 16px; height: 36px; font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="nav">
+    <div class="container">
+      <div class="nav-brand">AorticAI<span>Structural Heart</span></div>
+      <div class="nav-actions">
+        <a href="https://heartvalvepro.edu.kg/app" class="btn btn-secondary">Launch App</a>
+        <a href="https://heartvalvepro.edu.kg/app" class="btn btn-primary">Request Demo</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        Now Live: PEARS External Support Planning
+      </div>
+      <h1>Surgical Precision,<br>Powered by AI</h1>
+      <p>
+        The first AI-native platform for structural heart surgery planning.
+        From CTA to 3D model in minutes — not hours. Trusted by cardiac surgeons
+        for TAVI, VSRR, and personalized PEARS procedures.
+      </p>
+      <div class="hero-cta">
+        <a href="https://heartvalvepro.edu.kg/app" class="btn btn-primary">Start Planning Free</a>
+        <a href="#features" class="btn btn-secondary">Learn More</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="features">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">Capabilities</div>
+        <h2 class="section-title">Everything you need for structural heart planning</h2>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="feature-title">Automated Segmentation</div>
+          <div class="feature-desc">
+            AI-powered aortic root segmentation with sub-millimeter accuracy.
+            Annulus, sinuses, STJ, and coronary ostia detected automatically.
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 6v6l4 2"/>
+            </svg>
+          </div>
+          <div class="feature-title">Real-time Measurements</div>
+          <div class="feature-desc">
+            Instant annulus diameter, sinus dimensions, and coronary height
+            measurements. All values include uncertainty quantification.
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M3 9h18M9 21V9"/>
+            </svg>
+          </div>
+          <div class="feature-title">Multi-Planar Reformation</div>
+          <div class="feature-desc">
+            Clinical-grade MPR with linked crosshairs, slab MIP, and
+            adjustable window/level. Full DICOM toolset in the browser.
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+              <line x1="12" y1="22.08" x2="12" y2="12"/>
+            </svg>
+          </div>
+          <div class="feature-title">3D Model Export</div>
+          <div class="feature-desc">
+            High-fidelity STL export ready for 3D printing.
+            Root, leaflets, annulus ring, and ascending aorta included.
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+          </div>
+          <div class="feature-title">Data Quality Gates</div>
+          <div class="feature-desc">
+            Automatic CTA quality assessment against SCCT 2019 and
+            manufacturer guidelines. Never size on inadequate data.
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </svg>
+          </div>
+          <div class="feature-title">Procedure Planning</div>
+          <div class="feature-desc">
+            TAVI, VSRR, and PEARS-specific planning workflows with
+            procedure-specific recommendations and alerts.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <section class="stats">
+    <div class="container">
+      <div class="stats-grid">
+        <div>
+          <div class="stat-value">&lt;3 min</div>
+          <div class="stat-label">CTA to Model</div>
+        </div>
+        <div>
+          <div class="stat-value">0.3mm</div>
+          <div class="stat-label">Mean Accuracy</div>
+        </div>
+        <div>
+          <div class="stat-value">100%</div>
+          <div class="stat-label">Browser-Based</div>
+        </div>
+        <div>
+          <div class="stat-value">SCCT</div>
+          <div class="stat-label">Guideline Compliant</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Procedures -->
+  <section class="procedures">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">Procedures</div>
+        <h2 class="section-title">Supported Surgical Applications</h2>
+      </div>
+      <div class="procedure-grid">
+        <div class="procedure-card">
+          <div class="procedure-name">TAVI</div>
+          <div class="procedure-full">Transcatheter Aortic Valve Implantation</div>
+          <ul class="procedure-list">
+            <li>Annulus sizing (min/max/equivalent diameter)</li>
+            <li>Sinus of Valsalva assessment</li>
+            <li>Coronary ostia height mapping</li>
+            <li>Access route evaluation (iliofemoral)</li>
+            <li>Device selection support (Evolut, SAPIEN)</li>
+          </ul>
+        </div>
+        <div class="procedure-card">
+          <div class="procedure-name">VSRR</div>
+          <div class="procedure-full">Valve-Sparing Root Replacement</div>
+          <ul class="procedure-list">
+            <li>Multi-phase cardiac analysis</li>
+            <li>STJ and sinus geometry quantification</li>
+            <li>Commissure symmetry assessment</li>
+            <li>Reimplantation vs remodeling planning</li>
+            <li>Grayscale and color Doppler integration</li>
+          </ul>
+        </div>
+        <div class="procedure-card">
+          <div class="procedure-name">PEARS</div>
+          <div class="procedure-full">Personalized External Aortic Root Support</div>
+          <ul class="procedure-list">
+            <li>Patient-specific ExoVasc design</li>
+            <li>0.75mm slice thickness validation</li>
+            <li>Diastolic phase gating (60-80% R-R)</li>
+            <li>External sleeve geometry optimization</li>
+            <li>Manufacturing-ready STL output</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to transform your workflow?</h2>
+      <p>Join cardiac surgeons using AorticAI for precision planning.</p>
+      <a href="https://heartvalvepro.edu.kg/app" class="btn btn-primary" style="min-width: 200px; height: 48px; font-size: 16px;">
+        Launch AorticAI
+      </a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <p>&copy; 2026 AorticAI. For research use only. Not intended for clinical diagnosis.</p>
+    </div>
+  </footer>
 </body>
 </html>`;
 }
