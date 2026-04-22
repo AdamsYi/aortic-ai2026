@@ -188,7 +188,7 @@ function renderShell(): void {
   DOM.bootStage = document.getElementById('boot-stage') as HTMLDivElement;
   DOM.dataSourceBanner = document.getElementById('data-source-banner') as HTMLDivElement;
   DOM.dataQualityGateBanner = document.getElementById('data-quality-gate-banner') as HTMLDivElement;
-  DOM.dataQualityGateReasons = document.getElementById('data-quality-gate-banner-reasons') as HTMLUListElement;
+  DOM.dataQualityGateReasons = document.getElementById('data-quality-reasons') as HTMLUListElement;
   DOM.coronaryReviewBanner = document.getElementById('coronary-review-banner') as HTMLDivElement;
   DOM.coronaryReviewAcknowledge = document.getElementById('coronary-review-ack') as HTMLButtonElement;
   DOM.headerCaseInfo = document.getElementById('header-case-info') as HTMLDivElement;
@@ -311,11 +311,11 @@ function renderShell(): void {
   DOM.whyMattersBody = document.getElementById('why-matters-body') as HTMLDivElement;
 
   (['axial', 'sagittal', 'coronal', 'aux'] as ViewportKey[]).forEach((key) => {
-    DOM.viewportElements[key] = document.getElementById(`viewport-${key}`) as HTMLDivElement;
-    DOM.viewportCards[key] = document.getElementById(`viewport-card-${key}`) as HTMLDivElement;
-    DOM.viewportBadges[key] = document.getElementById(`viewport-badge-${key}`) as HTMLDivElement;
-    DOM.viewportFooters[key] = document.getElementById(`viewport-footer-${key}`) as HTMLDivElement;
-    DOM.viewportPlaceholders[key] = document.getElementById(`viewport-placeholder-${key}`) as HTMLDivElement;
+    DOM.viewportElements[key] = document.getElementById(`viewport-element-${key}`) as HTMLDivElement;
+    DOM.viewportCards[key] = document.getElementById(`viewport-${key}`) as HTMLDivElement;
+    DOM.viewportBadges[key] = document.getElementById(`viewport-badge-${key}`) as HTMLDivElement | null;
+    DOM.viewportFooters[key] = document.getElementById(`viewport-footer-${key}`) as HTMLDivElement | null;
+    DOM.viewportPlaceholders[key] = document.getElementById(`viewport-placeholder-${key}`) as HTMLDivElement | null;
   });
 
   DOM.submitCaseButton?.addEventListener('click', () => setSubmitCaseModalOpen(true));
