@@ -73,6 +73,15 @@
           "type": ["string", "null"],
           "enum": ["non_contrast", "arterial", "venous", "unknown", null]
         },
+        "cardiac_phase": {
+          "type": ["string", "null"],
+          "enum": ["systole", "diastole", "multi_phase", "unknown", null],
+          "description": "P0 #1: Cardiac phase for procedure-specific gating (PEARS=diastole, TAVI=systole, VSRR=multi_phase)"
+        },
+        "is_ecg_gated": {
+          "type": ["boolean", "null"],
+          "description": "P0 #1: Whether retrospective ECG-gating was used (required for PEARS/TAVI/VSRR)"
+        },
         "fov_mm": {
           "type": ["array", "null"],
           "items": { "type": "number" },

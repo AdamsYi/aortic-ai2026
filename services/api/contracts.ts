@@ -118,6 +118,7 @@ export interface AcceptanceReview {
 }
 
 export type ContrastPhase = "non_contrast" | "arterial" | "venous" | "unknown";
+export type CardiacPhase = "systole" | "diastole" | "multi_phase" | "unknown";
 
 export interface StudyMeta {
   slice_thickness_mm: number | null;
@@ -129,6 +130,8 @@ export interface StudyMeta {
   is_iliofemoral_covered: boolean | null;
   is_cropped?: boolean | null;
   contrast_phase: ContrastPhase | null;
+  cardiac_phase?: CardiacPhase | null;  // P0 #1: systole/diastole/multi_phase
+  is_ecg_gated?: boolean | null;  // P0 #1: retrospective ECG-gating detected
   fov_mm: [number, number, number] | null;
   blood_pool_hu_mean: number | null;
   blood_pool_hu_source?: "mask" | "central-fallback" | "central-by-design" | null;
@@ -167,35 +170,59 @@ export interface MeshQaEntry {
 export type MeshQaReport = Record<string, MeshQaEntry>;
 
 /**
- * Clinical data-quality gate thresholds (TAVI-grade sizing).
+ * Clinical data-quality gate thresholds (per-procedure, P0 #1 rewrite 2026-04-22).
  *
- * Source: SCCT 2019 Expert Consensus on CT for TAVR (Blanke et al.,
- * J Cardiovasc Comput Tomogr 2019;13:1-20). Section 4 recommends:
- *   - slice thickness ≤ 1.0 mm reconstructed (isotropic preferred)
- *   - annular contrast opacification ≥ 300 HU on the targeted phase
- *   - retrospective ECG-gated acquisition (arterial / cardiac phase)
+ * Source documents:
+ *   - PEARS: Exstent EXWI01-02 (2018) manufacturer protocol
+ *   - TAVI: SCCT 2019 Expert Consensus (Blanke et al., JCCT 13:1-20)
+ *   - VSRR: Bissell 2016 RadioGraphics + Kim 2020 Korean J Radiol (no society consensus)
  *
- * These are the mainstream inclusion thresholds used by public TAVI
- * research datasets (Zenodo, MM-WHS, ASOCA). Values tighter than this
- * (e.g. 0.625 mm) describe reconstruction hardware, not acquisition
- * quality, and would reject most legitimate research CTAs.
- * Keep in lockstep with gpu_provider/geometry/data_quality.py and
- * schemas/case_manifest.json.
- *
- * @deprecated These are legacy combined thresholds that mix procedures.
- * Authoritative per-procedure thresholds live in IMAGING_CONSTANTS.md
- * and docs/imaging/{pears,tavi,vsrr}.md. This constant is kept for
- * backwards compatibility until P0 #1 rewrite is complete.
+ * Keep in lockstep with:
+ *   - gpu_provider/geometry/data_quality.py (Python constants)
+ *   - schemas/case_manifest.json (study_meta + data_quality schema)
+ *   - IMAGING_CONSTANTS.md (summary table)
+ *   - docs/imaging/{pears,tavi,vsrr}.md (authoritative sources)
  */
 export const DATA_QUALITY_THRESHOLDS = {
-  maxSliceThicknessMm: 1.0,
-  minContrastBloodPoolHu: 300,
-  maxContrastBloodPoolHu: 600,
-  acceptedContrastPhases: ["arterial", "cardiac"] as const,
-  taviRootCoverageMinZMm: 80,
-  vsrrRootCoverageMinZMm: 150,
-  pearsCoverageMinZMm: 200,
-  iliofemoralCoverageMinZMm: 280,
+  // === SHARED (all procedures) ===
+  maxContrastBloodPoolHu: 600,  // Internal heuristic; not guideline-sourced
+
+  // === PEARS — Exstent EXWI01-02 (2018) ===
+  pears: {
+    maxSliceThicknessMm: 0.75,  // Exstent §3 (stricter than TAVI/VSRR)
+    coverageMinZMm: 120,  // Exstent §4: LVOT-20mm → brachiocephalic+20mm (~100-140mm)
+    minContrastBloodPoolHu: 250,  // Proxy: SCCT 2019 line 160 (Exstent publishes no number)
+    requiresEcgGating: true,  // Exstent §2
+    requiredPhase: "diastole" as const,  // Exstent §2: 60-80% R-R (opposite of TAVI!)
+    rejectIfStitched: true,  // Exstent §5: single-unit reconstruction required
+    isotropicVoxelRequired: true,  // Exstent §3
+  },
+
+  // === TAVI — SCCT 2019 (Blanke et al.) ===
+  tavi: {
+    rootMaxSliceThicknessMm: 1.0,  // SCCT Table 5 line 298
+    peripheralMaxSliceThicknessMm: 1.5,  // SCCT Table 5 line 272
+    rootCoverageMinZMm: 130,  // SCCT Table 5 line 293: root + arch (was 80mm, non-compliant)
+    peripheralCoverageMinZMm: 350,  // SCCT lines 164-167: to lesser trochanter (was 280mm)
+    minContrastBloodPoolHu: 250,  // SCCT line 160 (was 300HU, too strict)
+    preferredContrastBloodPoolHu: 350,  // Soft target; 250-350 = marginal warn
+    rootRequiresEcgGating: true,  // SCCT Table 5
+    peripheralRequiresEcgGating: false,  // SCCT Table 5
+    requiredPhase: "systole" as const,  // SCCT Table 6 line 563: 30-40% R-R
+  },
+
+  // === VSRR — Bissell 2016 + Kim 2020 ===
+  vsrr: {
+    maxSliceThicknessMm: 1.0,  // Inferred from SCCT 2019 TAVI root (proxy)
+    coverageMinZMm: 130,  // Anatomical: annulus → brachiocephalic (was 150mm, no source)
+    minContrastBloodPoolHu: 250,  // Proxy: SCCT 2019 (no VSRR-specific number)
+    requiresEcgGating: true,  // Bissell 2016; Kim 2020
+    requiredPhase: "multi_phase" as const,  // Bissell 2016: systole + diastole required (strict!)
+    rrReconstructionIntervalPct: 10,  // Kim 2020: 10% R-R intervals
+  },
+
+  // === ILIOFEMORAL (TAVI peripheral access) ===
+  iliofemoralCoverageMinZMm: 350,  // SCCT lines 164-167: lesser trochanter
 } as const;
 
 export const MESH_QA_THRESHOLDS: Record<string, { minTris: number }> = {
