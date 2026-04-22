@@ -695,6 +695,16 @@ def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
     return argv, _REPO_ROOT
 
 
+def _cmd_scan_imagecas_meshqa(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    clean = _validate_ingest_args(args)
+    if "--dry-run" in clean or any(tok.startswith("--dry-run") for tok in clean):
+        raise HTTPException(status_code=400, detail="scan_imagecas_meshqa_requires_full_pipeline")
+    if not any(tok == "--case-ids" or tok.startswith("--case-ids=") for tok in clean):
+        raise HTTPException(status_code=400, detail="scan_imagecas_meshqa_requires_case-ids")
+    argv = [sys.executable, "-u", "-m", "gpu_provider.scan_imagecas_meshqa", *clean]
+    return argv, _REPO_ROOT
+
+
 def _validate_ingest_zenodo_args(args: List[str]) -> List[str]:
     allowed: List[str] = []
     i = 0
@@ -1160,6 +1170,7 @@ _ADMIN_WHITELIST = {
     "git_pull": _cmd_git_pull,
     "pip_sync": _cmd_pip_sync,
     "ingest_imagecas": _cmd_ingest,
+    "scan_imagecas_meshqa": _cmd_scan_imagecas_meshqa,
     "ingest_zenodo": _cmd_ingest_zenodo,
     "zenodo_inspect": _cmd_zenodo_inspect,
     "tcia_probe": _cmd_tcia_probe,
