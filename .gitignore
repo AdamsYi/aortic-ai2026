@@ -13,3 +13,4 @@ output/
 *.pid
 gpu_provider/.venv/
 gpu_provider/__pycache__/
+src/generated/

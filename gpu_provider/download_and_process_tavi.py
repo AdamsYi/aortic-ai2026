@@ -507,7 +507,7 @@ def emit_case_bundle(
         "case_type": "real_pipeline_case",
         "data_source": "real_ct_pipeline_output",
         "clinical_use": "research_preclinical_planning",
-        "note": "Ingested from Zenodo TAVI and passed the SCCT 2021 source CTA gate.",
+        "note": "Ingested from Zenodo TAVI and passed the SCCT 2019 source CTA gate.",
         "build_version": "zenodo-tavi-source",
         "source_dataset": SOURCE_DATASET,
         "pipeline_version": str(result.get("pipeline_version", "unknown")),

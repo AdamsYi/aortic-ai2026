@@ -169,7 +169,7 @@ export type MeshQaReport = Record<string, MeshQaEntry>;
 /**
  * Clinical data-quality gate thresholds (TAVI-grade sizing).
  *
- * Source: SCCT 2021 Expert Consensus on CT for TAVR (Blanke et al.,
+ * Source: SCCT 2019 Expert Consensus on CT for TAVR (Blanke et al.,
  * J Cardiovasc Comput Tomogr 2019;13:1-20). Section 4 recommends:
  *   - slice thickness ≤ 1.0 mm reconstructed (isotropic preferred)
  *   - annular contrast opacification ≥ 300 HU on the targeted phase
@@ -179,8 +179,13 @@ export type MeshQaReport = Record<string, MeshQaEntry>;
  * research datasets (Zenodo, MM-WHS, ASOCA). Values tighter than this
  * (e.g. 0.625 mm) describe reconstruction hardware, not acquisition
  * quality, and would reject most legitimate research CTAs.
- * Keep in lockstep with gpu_provider/geometry/mesh_qa.py and
+ * Keep in lockstep with gpu_provider/geometry/data_quality.py and
  * schemas/case_manifest.json.
+ *
+ * @deprecated These are legacy combined thresholds that mix procedures.
+ * Authoritative per-procedure thresholds live in IMAGING_CONSTANTS.md
+ * and docs/imaging/{pears,tavi,vsrr}.md. This constant is kept for
+ * backwards compatibility until P0 #1 rewrite is complete.
  */
 export const DATA_QUALITY_THRESHOLDS = {
   maxSliceThicknessMm: 1.0,

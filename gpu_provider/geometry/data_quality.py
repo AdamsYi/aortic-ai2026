@@ -3,6 +3,7 @@
 Must stay in lockstep with:
   services/api/contracts.ts   → shared gate thresholds
   schemas/case_manifest.json  → study_meta + data_quality
+  IMAGING_CONSTANTS.md        → per-procedure threshold summary
 
 Dual-sided gate constants mirrored in TypeScript:
   MAX_SLICE_THICKNESS_MM
@@ -14,8 +15,13 @@ Dual-sided gate constants mirrored in TypeScript:
   PEARS_COVERAGE_MIN_Z_MM
   ILIOFEMORAL_COVERAGE_MIN_Z_MM
 
-Source of thresholds: SCCT 2021 Expert Consensus on CT for TAVR
+Source of thresholds: SCCT 2019 Expert Consensus on CT for TAVR
 (Blanke et al., J Cardiovasc Comput Tomogr 2019;13:1-20).
+
+@deprecated: These are legacy combined thresholds that mix procedures.
+Authoritative per-procedure thresholds live in IMAGING_CONSTANTS.md
+and docs/imaging/{pears,tavi,vsrr}.md. This module is the target of
+P0 #1 rewrite (per-procedure constants + phase + ECG-gating fields).
 """
 from __future__ import annotations
 
