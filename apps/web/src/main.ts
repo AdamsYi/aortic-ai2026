@@ -2557,20 +2557,6 @@ async function createViewerSession(casePayload: WorkstationCasePayload): Promise
       });
     });
 
-    // Debug overlay - show viewport status on screen
-    const debugDiv = document.createElement('div');
-    debugDiv.id = 'viewport-debug';
-    debugDiv.style.cssText = 'position:fixed;top:0;left:0;background:rgba(0,0,0,0.9);color:#0f0;font:11px monospace;padding:8px;z-index:99999;max-height:100vh;overflow:auto;';
-    debugDiv.innerHTML = `<strong>Viewport Debug</strong><br/>Build: ${BUILD_VERSION}<br/>`;
-    (Object.keys(VIEWPORT_IDS) as ViewportKey[]).forEach((key) => {
-      const el = DOM.viewportElements[key];
-      const rect = el?.getBoundingClientRect();
-      debugDiv.innerHTML += `${key}: ${el ? 'OK' : 'MISSING'} (${rect?.width || 0}x${rect?.height || 0})<br/>`;
-    });
-    debugDiv.innerHTML += `<br/>Volume: ${volumeId ? 'LOADED' : 'FAILED'}<br/>`;
-    debugDiv.innerHTML += `ImageIds: ${imageIds.length}<br/>`;
-    document.body.appendChild(debugDiv);
-
     const cprUrl = typeof casePayload.cpr_sources?.straightened_nifti === 'string'
       ? casePayload.cpr_sources.straightened_nifti
       : null;

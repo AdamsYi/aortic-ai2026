@@ -1782,6 +1782,22 @@ input[type="range"]:disabled {
   padding-left: 18px;
 }
 
+.shortcut-toast {
+  position: fixed;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(2, 7, 12, 0.92);
+  border: 1px solid rgba(134, 155, 177, 0.36);
+  color: rgba(221, 233, 244, 0.92);
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: var(--text-sm);
+  z-index: var(--z-toast);
+  pointer-events: none;
+  box-shadow: var(--shadow-lg);
+}
+
 .job-progress-banner {
   position: absolute;
   top: calc(var(--header-height) + 12px);

@@ -1,0 +1,3 @@
+[    3117ms] [LOG] CornerstoneRender: using GPU rendering @ http://127.0.0.1:8787/assets/app.c0b2ff437de0.js?v=c0b2ff437de0:20733
+[   26041ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8787/api/cases/default_clinical_case/artifacts/annulus_plane:0
+[   26101ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8787/workstation/cases/default_clinical_case:0

@@ -1,0 +1,20 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Debug MPR" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Single Cornerstone viewport · direct NIfTI load · no tool groups
+    - generic [ref=e8]:
+      - generic [ref=e9]: Build b751d10973b8
+      - generic [ref=e10]: /default-case/imaging_hidden/ct_showcase_root_roi.nii.gz
+  - main [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]: Axial
+      - generic [ref=e15]:
+        - img
+    - complementary [ref=e17]:
+      - generic [ref=e18]:
+        - heading "Status" [level=2] [ref=e19]
+        - generic [ref=e20]: Loading direct NIfTI source…
+      - generic [ref=e21]:
+        - heading "Console Helpers" [level=2] [ref=e22]
+        - generic [ref=e23]: window.__AORTIC_DEBUG__.runNiftiLoaderProbe()

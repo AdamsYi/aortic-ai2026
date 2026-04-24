@@ -1,0 +1,251 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "AorticAI" [level=1] [ref=e6]
+      - generic [ref=e7]: Structural Heart Workstation
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - generic [ref=e11]: Demo
+          - generic [ref=e12]: Showcase Planning
+        - generic [ref=e13]: "Loading runtime: Loading measurements..."
+      - generic [ref=e14]:
+        - generic [ref=e15]: CTA Aortic Root
+        - generic [ref=e16]: Clinical planning
+        - generic [ref=e17]: Awaiting case
+    - generic [ref=e18]:
+      - generic "Case mode" [ref=e19]:
+        - link "Showcase" [ref=e20] [cursor=pointer]:
+          - /url: "?case=showcase"
+        - link "Latest" [ref=e21] [cursor=pointer]:
+          - /url: "?case=latest"
+      - button "Load Case" [ref=e22] [cursor=pointer]
+      - button "Auto Annotate" [ref=e23] [cursor=pointer]
+      - button "Report" [ref=e24] [cursor=pointer]
+      - button "Manual Review" [ref=e25] [cursor=pointer]
+      - button "EN" [ref=e26] [cursor=pointer]
+      - button "中文" [ref=e27] [cursor=pointer]
+  - generic [ref=e28]:
+    - generic [ref=e29]:
+      - generic [ref=e30]: Window
+      - combobox [disabled] [ref=e31] [cursor=pointer]:
+        - option "Soft Tissue" [selected]
+        - option "CTA Vessel"
+        - option "Calcium"
+        - option "Wide"
+    - generic [ref=e32]:
+      - generic [ref=e33]: Slab
+      - button "Toggle Slab MIP" [ref=e34] [cursor=pointer]:
+        - img [ref=e35]
+      - generic [ref=e37]:
+        - button "5 mm" [ref=e38] [cursor=pointer]
+        - button "10 mm" [ref=e39] [cursor=pointer]
+        - button "20 mm" [ref=e40] [cursor=pointer]
+      - slider [disabled] [ref=e41]: "0"
+      - generic [ref=e42]: 0 mm
+    - generic [ref=e43]:
+      - generic [ref=e44]: Cine
+      - button "Play" [disabled] [ref=e45]
+      - combobox [disabled] [ref=e46] [cursor=pointer]:
+        - option "8 fps" [selected]
+        - option "12 fps"
+        - option "18 fps"
+    - generic [ref=e47]:
+      - generic [ref=e48]: Aux
+      - combobox [disabled] [ref=e49] [cursor=pointer]:
+        - option "Annulus" [selected]
+        - option "STJ"
+        - option "Centerline"
+        - option "CPR"
+      - slider [disabled] [ref=e50]: "0"
+      - generic [ref=e51]: "-"
+    - generic [ref=e52]:
+      - generic [ref=e53]: Layout
+      - generic [ref=e54]:
+        - button "Grid" [ref=e55] [cursor=pointer]
+        - button "Focus" [ref=e56] [cursor=pointer]
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - button "Annulus" [disabled] [ref=e59]
+        - button "STJ" [disabled] [ref=e60]
+        - button "Root" [disabled] [ref=e61]
+        - button "Coronary" [disabled] [ref=e62]
+      - generic:
+        - generic [ref=e65]: Provider check pending
+        - generic [ref=e66]: Awaiting case
+        - generic [ref=e67]: Cornerstone3D runtime ready. Opening showcase case...
+  - navigation [ref=e68]:
+    - button "Crosshair (1)" [disabled] [ref=e69]:
+      - img [ref=e70]
+    - button "Window/Level (W)" [disabled] [ref=e72]:
+      - img [ref=e73]
+    - button "Pan (P)" [disabled] [ref=e76]:
+      - img [ref=e77]
+    - button "Zoom (Z)" [disabled] [ref=e80]:
+      - img [ref=e81]
+    - button "Length (L)" [disabled] [ref=e84]:
+      - img [ref=e85]
+    - button "Angle (A)" [disabled] [ref=e86]:
+      - img [ref=e87]
+    - button "HU Probe" [disabled] [ref=e91]:
+      - img [ref=e92]
+    - button "ROI" [disabled] [ref=e95]:
+      - img [ref=e96]
+    - button "Annulus" [disabled] [ref=e98]:
+      - img [ref=e99]
+    - button "STJ" [disabled] [ref=e101]:
+      - img [ref=e102]
+    - button "Coronary Ostia" [disabled] [ref=e104]:
+      - img [ref=e105]
+    - button "Reset Viewports (R)" [disabled] [ref=e108]:
+      - img [ref=e109]
+  - generic:
+    - heading "Window / Level" [level=4]
+    - generic:
+      - generic:
+        - generic: Soft Tissue
+      - generic:
+        - generic: CTA Vessel
+      - generic:
+        - generic: Calcium
+      - generic:
+        - generic: Wide
+  - main [ref=e111]:
+    - generic [ref=e112]:
+      - generic [ref=e113]: Axial
+      - generic [ref=e115]:
+        - generic [ref=e116]: 1.0x
+        - generic [ref=e117]: "-"
+    - generic [ref=e118]:
+      - generic [ref=e119]: Sagittal
+      - generic [ref=e121]:
+        - generic [ref=e122]: 1.0x
+        - generic [ref=e123]: "-"
+    - generic [ref=e124]:
+      - generic [ref=e125]: Coronal
+      - generic [ref=e127]:
+        - generic [ref=e128]: 1.0x
+        - generic [ref=e129]: "-"
+    - generic [ref=e130]:
+      - generic [ref=e131]: 3D Preview
+      - generic [ref=e133]:
+        - button "Toggle Layers" [ref=e134] [cursor=pointer]:
+          - img [ref=e135]
+        - button "Screenshot" [ref=e140] [cursor=pointer]:
+          - img [ref=e141]
+        - generic [ref=e144]:
+          - generic [ref=e145]:
+            - checkbox "Aortic Root" [checked] [ref=e146]
+            - text: Aortic Root
+          - generic [ref=e147]:
+            - checkbox "Leaflets" [checked] [ref=e148]
+            - text: Leaflets
+          - generic [ref=e149]:
+            - checkbox "Ascending" [checked] [ref=e150]
+            - text: Ascending
+          - generic [ref=e151]:
+            - checkbox "Annulus Ring" [checked] [ref=e152]
+            - text: Annulus Ring
+      - generic [ref=e154]: 60 fps
+  - complementary [ref=e155]:
+    - button "Toggle Drawer" [ref=e156] [cursor=pointer]:
+      - img
+    - generic [ref=e158]:
+      - generic [ref=e160]: Case Overview
+      - generic [ref=e162]:
+        - generic [ref=e163]: Workflow Focus
+        - generic [ref=e164]:
+          - generic [ref=e166]:
+            - generic [ref=e167]: Annulus
+            - button "Crosshair" [disabled] [ref=e168]
+          - generic [ref=e171]: STJ
+          - generic [ref=e174]: Root
+          - generic [ref=e177]: Coronary
+      - generic [ref=e178]:
+        - generic [ref=e179]: Key Measurements
+        - generic [ref=e181]:
+          - generic [ref=e182]: Annulus Diameter
+          - generic [ref=e183]: "-mm"
+      - generic [ref=e184]:
+        - generic [ref=e185]:
+          - text: Procedure & Planning
+          - button "▲" [ref=e186] [cursor=pointer]
+        - generic [ref=e187]:
+          - generic [ref=e188]:
+            - button "TAVI" [ref=e189] [cursor=pointer]
+            - button "VSRR" [ref=e190] [cursor=pointer]
+            - button "PEARS" [ref=e191] [cursor=pointer]
+          - generic [ref=e193]:
+            - generic [ref=e194]: Planning
+            - generic [ref=e195]: Loading...
+            - generic [ref=e196]: "-"
+      - generic [ref=e197]:
+        - generic [ref=e198]:
+          - text: All Measurements
+          - button "▼" [ref=e199] [cursor=pointer]
+        - generic [ref=e200]:
+          - generic [ref=e201]: Annotation Controls
+          - generic [ref=e202]:
+            - button "Undo" [disabled] [ref=e203]
+            - button "Delete" [disabled] [ref=e204]
+            - button "Clear" [disabled] [ref=e205]
+      - generic [ref=e206]:
+        - generic [ref=e207]: Acceptance & QA
+        - generic [ref=e208]: Awaiting acceptance review
+        - list
+        - generic [ref=e210]: Capabilities
+        - generic [ref=e211]:
+          - generic [ref=e212]: Quality Checks
+          - list
+        - generic [ref=e213]:
+          - generic [ref=e214]: Evidence
+          - list
+      - generic [ref=e215]:
+        - generic [ref=e216]: Auto Annotation
+        - generic [ref=e217]:
+          - generic [ref=e218]: Auto annotation is ready
+          - generic [ref=e219]: Root, annulus, sinus, STJ, coronary ostia, and leaflet geometry will be requested together.
+      - generic [ref=e220]:
+        - generic [ref=e221]: PEARS Panel
+        - generic [ref=e223]: PEARS planning data will appear here when available.
+      - generic [ref=e225]:
+        - text: Why This Matters
+        - button "▲" [expanded] [ref=e226] [cursor=pointer]
+      - generic [ref=e227]:
+        - generic [ref=e228]: Export
+        - generic [ref=e229]:
+          - button "CSV" [ref=e230] [cursor=pointer]
+          - button "STL" [ref=e231] [cursor=pointer]
+          - button "Report" [ref=e232] [cursor=pointer]
+  - generic [ref=e233]:
+    - strong [ref=e235]: Demo Patient
+    - generic [ref=e237]: "HU: -"
+    - generic [ref=e239]: "-"
+    - generic [ref=e240]:
+      - generic [ref=e241]:
+        - generic [ref=e242]: "1"
+        - text: Crosshair
+      - generic [ref=e243]:
+        - generic [ref=e244]: W
+        - text: W/L
+      - generic [ref=e245]:
+        - generic [ref=e246]: M
+        - text: Slab
+      - generic [ref=e247]:
+        - generic [ref=e248]: R
+        - text: Reset
+      - generic [ref=e249]:
+        - generic [ref=e250]: F1
+        - text: Annulus
+    - generic [ref=e251]: For research use only
+  - generic [ref=e253]:
+    - heading "AorticAI" [level=2] [ref=e254]
+    - paragraph [ref=e255]: Loading measurements...
+    - generic [ref=e258]: "Build: c0b2ff437de0"
+    - generic [ref=e259]: loading_runtime
+  - generic [ref=e261]:
+    - heading "Planning Report" [level=3] [ref=e262]
+    - generic [ref=e263]:
+      - link "Download PDF" [ref=e264] [cursor=pointer]:
+        - /url: /api/cases/default_clinical_case/reports/report.pdf
+      - button "Close" [ref=e265] [cursor=pointer]
