@@ -39,7 +39,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import zhCN from './i18n/zh-CN';
 import enUS from './i18n/en';
 import { DOM } from './shell/dom';
-import { renderShellHTML } from './shell/template';
+import { renderDebugMprHTML, renderShellHTML } from './shell/template';
 import { escapeHtml, renderViewportCard } from './shell/html';
 import type {
   Point3, NiftiVoxelArray, VolumeSource, PlaneDefinition, CenterlinePayload,
@@ -92,6 +92,14 @@ if (!ROOT) {
   throw new Error('missing_app_root');
 }
 const APP_ROOT = ROOT as HTMLDivElement;
+
+type DebugWindow = Window & {
+  __AORTIC_DEBUG__?: {
+    cornerstoneNiftiImageLoader: typeof cornerstoneNiftiImageLoader;
+    createNiftiImageIdsAndCacheMetadata: typeof createNiftiImageIdsAndCacheMetadata;
+    runNiftiLoaderProbe: () => Promise<string[]>;
+  };
+};
 
 let cornerstoneReady = false;
 let toolsRegistered = false;
@@ -176,6 +184,93 @@ const I18N: Record<Locale, Record<string, string>> = {
   'zh-CN': zhCN,
   en: enUS,
 };
+
+function isDebugMprRoute(): boolean {
+  return window.location.pathname === '/debug-mpr';
+}
+
+function errorSummary(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name || 'unknown_error';
+  return String(error || 'unknown_error');
+}
+
+function errorStack(error: unknown): string {
+  if (error instanceof Error) return error.stack || `${error.name}: ${error.message}`;
+  return String(error || 'unknown_error');
+}
+
+function logStepStart(scope: string, step: string, extra?: Record<string, unknown>): void {
+  const detail = extra ? ` ${JSON.stringify(extra)}` : '';
+  console.log(`[${scope}] ${step}${detail}`);
+}
+
+function logStepError(scope: string, step: string, error: unknown, extra?: Record<string, unknown>): void {
+  const detail = extra ? ` ${JSON.stringify(extra)}` : '';
+  console.error(`[${scope}] ${step} failed: ${errorStack(error)}${detail}`);
+}
+
+function summarizeNiftiHeader(header: any): Record<string, unknown> {
+  return {
+    dims: [Number(header?.dims?.[1] || 0), Number(header?.dims?.[2] || 0), Number(header?.dims?.[3] || 0)],
+    frames: Number(header?.dims?.[4] || 1),
+    datatypeCode: Number(header?.datatypeCode || 0),
+    numBitsPerVoxel: Number(header?.numBitsPerVoxel || 0),
+    littleEndian: Boolean(header?.littleEndian),
+    pixDims: [Number(header?.pixDims?.[1] || 0), Number(header?.pixDims?.[2] || 0), Number(header?.pixDims?.[3] || 0)],
+    sclSlope: Number(header?.scl_slope || 0),
+    sclInter: Number(header?.scl_inter || 0),
+  };
+}
+
+async function inspectNiftiSource(url: string): Promise<Record<string, unknown>> {
+  const rawBuffer = await fetchArrayBuffer(url);
+  const compressed = nifti.isCompressed(rawBuffer);
+  const parsedBuffer = compressed ? (nifti.decompress(rawBuffer) as ArrayBuffer) : rawBuffer;
+  if (!nifti.isNIFTI(parsedBuffer)) {
+    throw new Error('nifti_header_parse_failed');
+  }
+  const header = nifti.readHeader(parsedBuffer) as any;
+  const image = nifti.readImage(header, parsedBuffer) as ArrayBuffer;
+  const voxels = readNiftiTypedArray(header, image);
+  return {
+    compressed,
+    rawBytes: rawBuffer.byteLength,
+    parsedBytes: parsedBuffer.byteLength,
+    voxelCount: voxels.length,
+    typedArray: voxels.constructor.name,
+    ...summarizeNiftiHeader(header),
+  };
+}
+
+function logViewportImageDataState(renderingEngine: RenderingEngine, viewportIds: string[], label: string): void {
+  viewportIds.forEach((viewportId) => {
+    try {
+      const viewport = renderingEngine.getViewport(viewportId) as any;
+      const imageDataResult = viewport?.getImageData?.();
+      const imageData = imageDataResult?.imageData || imageDataResult || null;
+      console.log(`[${label}] ${viewportId} imageData:`, imageData ? 'OK' : 'NULL', {
+        dimensions: imageData?.getDimensions?.(),
+        spacing: imageData?.getSpacing?.(),
+      });
+    } catch (error) {
+      logStepError(label, `viewport_imageData:${viewportId}`, error);
+    }
+  });
+}
+
+function attachDebugConsoleHelpers(): void {
+  (window as DebugWindow).__AORTIC_DEBUG__ = {
+    cornerstoneNiftiImageLoader,
+    createNiftiImageIdsAndCacheMetadata,
+    runNiftiLoaderProbe: async () => {
+      const imageIds = await createNiftiImageIdsAndCacheMetadata({
+        url: resolveAbsoluteUrl('/default-case/imaging_hidden/ct_showcase_root_roi.nii.gz'),
+      });
+      console.log('[debug:nifti-loader-probe] Image IDs:', imageIds);
+      return imageIds;
+    },
+  };
+}
 
 /* DOM handle registry extracted to ./shell/dom.ts (imported above).
  * FallbackPreviewVolume, FallbackMprState, MANUAL_REVIEW_FIELDS imported from ./types.ts */
@@ -313,9 +408,9 @@ function renderShell(): void {
   (['axial', 'sagittal', 'coronal', 'aux'] as ViewportKey[]).forEach((key) => {
     DOM.viewportElements[key] = document.getElementById(`viewport-element-${key}`) as HTMLDivElement;
     DOM.viewportCards[key] = document.getElementById(`viewport-${key}`) as HTMLDivElement;
-    DOM.viewportBadges[key] = document.getElementById(`viewport-badge-${key}`) as HTMLDivElement | null;
-    DOM.viewportFooters[key] = document.getElementById(`viewport-footer-${key}`) as HTMLDivElement | null;
-    DOM.viewportPlaceholders[key] = document.getElementById(`viewport-placeholder-${key}`) as HTMLDivElement | null;
+    DOM.viewportBadges[key] = document.getElementById(`viewport-badge-${key}`) as HTMLDivElement;
+    DOM.viewportFooters[key] = document.getElementById(`viewport-footer-${key}`) as HTMLDivElement;
+    DOM.viewportPlaceholders[key] = document.getElementById(`viewport-placeholder-${key}`) as HTMLDivElement;
   });
 
   DOM.submitCaseButton?.addEventListener('click', () => setSubmitCaseModalOpen(true));
@@ -565,6 +660,16 @@ function renderShell(): void {
   setBootStage('loading_shell');
 }
 
+function renderDebugMprShell(): HTMLDivElement {
+  document.getElementById('pre-load')?.remove();
+  APP_ROOT.innerHTML = renderDebugMprHTML();
+  const viewport = document.getElementById('debug-mpr-viewport') as HTMLDivElement | null;
+  if (!viewport) {
+    throw new Error('missing_debug_mpr_viewport');
+  }
+  return viewport;
+}
+
 /* renderViewportCard moved to ./shell/html.ts */
 
 function viewportFallbackTitle(key: ViewportKey): string {
@@ -731,7 +836,8 @@ function showMprFailure(error: unknown): void {
   stopCine();
   const text = humanizeViewerError(error);
   lastMprError = text;
-  if (DOM.mprStatus) DOM.mprStatus.textContent = `Live MPR unavailable. Software MPR mode is active.`;
+  console.error(`[showMprFailure] MPR initialization failed: ${errorStack(error)}`);
+  if (DOM.mprStatus) DOM.mprStatus.textContent = text;
   (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
     if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'double-oblique mpr' : 'software mpr';
     if (DOM.viewportFooters[key]) {
@@ -760,13 +866,14 @@ function showThreeFailure(error: unknown): void {
 
 function humanizeViewerError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || '');
+  const detail = errorSummary(error);
   if (message.includes('VolumeViewports cannot be used whilst CPU Fallback Rendering is enabled')) {
-    return 'Interactive volume rendering is unavailable in this browser. Showing software MPR instead.';
+    return `Interactive volume rendering is unavailable in this browser. Showing software MPR instead. Cause: ${detail}`;
   }
   if (message.includes('timeout')) {
-    return 'Interactive volume rendering timed out. Showing software MPR instead.';
+    return `Interactive volume rendering timed out. Showing software MPR instead. Cause: ${detail}`;
   }
-  return 'Interactive volume rendering is unavailable. Showing software MPR instead.';
+  return `Interactive volume rendering failed. Showing software MPR instead. Cause: ${detail}`;
 }
 
 function humanizeThreeError(error: unknown): string {
@@ -775,6 +882,37 @@ function humanizeThreeError(error: unknown): string {
     return '3D preview is unavailable in this browser.';
   }
   return '3D preview is temporarily unavailable.';
+}
+
+/**
+ * Detect if the browser has GPU acceleration available for Cornerstone3D.
+ * Returns true if WebGL2 is available and not forced into CPU fallback mode.
+ */
+function hasGPUAcceleration(): boolean {
+  try {
+    // Check for WebGL2 context
+    const testCanvas = document.createElement('canvas');
+    const gl = testCanvas.getContext('webgl2', { powerPreference: 'high-performance' });
+    if (!gl) return false;
+
+    // Check for GPU vendor/renderer info via WebGL debug extension
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    if (debugInfo) {
+      const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+      const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+      const vendorStr = String(vendor || '').toLowerCase();
+      const rendererStr = String(renderer || '').toLowerCase();
+
+      // Software fallback indicators
+      if (vendorStr.includes('software') || rendererStr.includes('software')) return false;
+      if (vendorStr.includes('google') && rendererStr.includes('swiftshader')) return false;
+      if (vendorStr.includes('llvmpipe')) return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readNiftiTypedArray(header: any, raw: ArrayBuffer): NiftiVoxelArray {
@@ -978,6 +1116,11 @@ async function retryLatestCase(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  attachDebugConsoleHelpers();
+  if (isDebugMprRoute()) {
+    await bootstrapDebugMpr();
+    return;
+  }
   renderShell();
   void refreshGpuStatusIndicator();
   window.setInterval(() => {
@@ -993,6 +1136,92 @@ async function bootstrap(): Promise<void> {
   await initializeCornerstoneOnce();
   await preloadDefaultPanelArtifacts();
   await loadInitialCase();
+}
+
+async function bootstrapDebugMpr(): Promise<void> {
+  const viewportElement = renderDebugMprShell();
+  const statusEl = document.getElementById('debug-mpr-status');
+  const setDebugStatus = (text: string): void => {
+    if (statusEl) statusEl.textContent = text;
+  };
+
+  const renderingEngineId = `debug-mpr-engine-${Date.now()}`;
+  const viewportId = 'debug-mpr-axial';
+  const source: VolumeSource = {
+    source_kind: 'nifti',
+    loader_kind: 'cornerstone-nifti',
+    signed_url: '/default-case/imaging_hidden/ct_showcase_root_roi.nii.gz',
+  };
+
+  let renderingEngine: RenderingEngine | null = null;
+  let debugImageIds: string[] = [];
+
+  try {
+    setDebugStatus('Initializing Cornerstone runtime…');
+    await initializeCornerstoneOnce();
+
+    renderingEngine = new RenderingEngine(renderingEngineId);
+    setDebugStatus('Creating single viewport…');
+    renderingEngine.setViewports([
+      {
+        viewportId,
+        type: CoreEnums.ViewportType.STACK,
+        element: viewportElement,
+        defaultOptions: {
+          background: [0, 0, 0] as [number, number, number],
+        },
+      },
+    ]);
+    await nextAnimationFrame();
+    safeResizeRenderingEngine(renderingEngine);
+    window.addEventListener('resize', () => {
+      if (!renderingEngine) return;
+      safeResizeRenderingEngine(renderingEngine);
+    });
+
+    setDebugStatus('Loading direct NIfTI source…');
+    const loaded = await loadVolumeFromSource(source, 'debug-mpr');
+    debugImageIds = loaded.imageIds;
+    const probeImageIds = await (window as DebugWindow).__AORTIC_DEBUG__!.runNiftiLoaderProbe();
+    const stackViewport = renderingEngine.getViewport(viewportId) as any;
+    const middleIndex = Math.max(0, Math.floor(loaded.imageIds.length / 2));
+    try {
+      stackViewport.setProperties?.({
+        voiRange: {
+          lower: WINDOW_PRESETS.softTissue.lower,
+          upper: WINDOW_PRESETS.softTissue.upper,
+        },
+      });
+    } catch (error) {
+      logStepError('bootstrapDebugMpr', 'preset_stack_voi', error);
+    }
+
+    setDebugStatus('Binding NIfTI slices to stack viewport…');
+    await stackViewport.setStack(loaded.imageIds, middleIndex);
+    stackViewport.render?.();
+    logViewportImageDataState(renderingEngine, [viewportId], 'debug-mpr:setStack');
+
+    safeResizeRenderingEngine(renderingEngine);
+    logViewportImageDataState(renderingEngine, [viewportId], 'debug-mpr:final_render');
+
+    const imageDataResult = stackViewport?.getImageData?.();
+    const imageData = imageDataResult?.imageData || imageDataResult || null;
+    setDebugStatus(
+      [
+        'Debug MPR ready',
+        `imageIds: ${loaded.imageIds.length}`,
+        `probeImageIds: ${probeImageIds.length}`,
+        `middleSlice: ${middleIndex}`,
+        `imageData: ${imageData ? 'OK' : 'NULL'}`,
+        'Console helper:',
+        'window.__AORTIC_DEBUG__.runNiftiLoaderProbe()',
+      ].join('\n')
+    );
+  } catch (error) {
+    logStepError('bootstrapDebugMpr', 'failed', error, { renderingEngineId, imageIdCount: debugImageIds.length });
+    setDebugStatus(`Debug MPR failed\n${errorStack(error)}`);
+    throw error;
+  }
 }
 
 async function preloadDefaultPanelArtifacts(): Promise<void> {
@@ -2171,6 +2400,20 @@ async function loadCase(jobId: string): Promise<void> {
 
 async function initializeViewerSession(casePayload: WorkstationCasePayload): Promise<unknown | null> {
   try {
+    // GPU acceleration check - skip MPR if no GPU available
+    const gpuAvailable = hasGPUAcceleration();
+    console.log('[initializeViewerSession] GPU acceleration:', gpuAvailable ? 'YES' : 'NO (using CPU fallback)');
+
+    if (!gpuAvailable) {
+      // Skip Cornerstone MPR initialization, go directly to software fallback
+      console.log('[initializeViewerSession] No GPU detected, skipping MPR and using software fallback');
+      session = null;
+      const error = new Error('No GPU acceleration available. Using software MPR fallback.');
+      showMprFailure(error);
+      await renderFallbackVolumePreview(casePayload);
+      return error;
+    }
+
     setBootStage('initializing_volume', `Preparing ${casePayload.volume_source.loader_kind}`);
     armMprWatchdog();
     session = await withTimeout(
@@ -2216,34 +2459,117 @@ async function createViewerSession(casePayload: WorkstationCasePayload): Promise
   let dicomImageIds: string[] = [];
   let toolGroupCreated = false;
   try {
-    renderingEngine.setViewports([
-      createViewportInput('axial', CoreEnums.OrientationAxis.AXIAL),
-      createViewportInput('sagittal', CoreEnums.OrientationAxis.SAGITTAL),
-      createViewportInput('coronal', CoreEnums.OrientationAxis.CORONAL),
-      createViewportInput('aux', CoreEnums.OrientationAxis.AXIAL),
-    ]);
+    logStepStart('createViewerSession', 'step_1_create_viewports', {
+      renderingEngineId,
+      toolGroupId,
+      caseId: String(casePayload.job.id || 'case'),
+      axial: !!DOM.viewportElements.axial,
+      sagittal: !!DOM.viewportElements.sagittal,
+      coronal: !!DOM.viewportElements.coronal,
+      aux: !!DOM.viewportElements.aux,
+    });
+    try {
+      renderingEngine.setViewports([
+        createViewportInput('axial', CoreEnums.OrientationAxis.AXIAL),
+        createViewportInput('sagittal', CoreEnums.OrientationAxis.SAGITTAL),
+        createViewportInput('coronal', CoreEnums.OrientationAxis.CORONAL),
+        createViewportInput('aux', CoreEnums.OrientationAxis.AXIAL),
+      ]);
+    } catch (error) {
+      logStepError('createViewerSession', 'setViewports', error, { renderingEngineId });
+      throw error;
+    }
+
+    logStepStart('createViewerSession', 'step_2_resize_after_setViewports');
     await nextAnimationFrame();
     safeResizeRenderingEngine(renderingEngine);
 
+    logStepStart('createViewerSession', 'step_3_load_volume_source', {
+      loaderKind: casePayload.volume_source.loader_kind,
+      sourceKind: casePayload.volume_source.source_kind,
+      signedUrl: casePayload.volume_source.signed_url,
+    });
     const source = await loadVolumeFromSource(casePayload.volume_source, String(casePayload.job.id || 'case'));
+    logStepStart('createViewerSession', 'volume_source_loaded', {
+      volumeId: source.volumeId,
+      imageIdCount: source.imageIds.length,
+      dicomImageIdCount: source.dicomImageIds.length,
+    });
     volumeId = source.volumeId;
     imageIds = source.imageIds;
     dicomImageIds = source.dicomImageIds;
-    const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
-    if (typeof (volume as { load?: () => Promise<unknown> | void }).load === 'function') {
-      const maybePromise = (volume as { load: () => Promise<unknown> | void }).load();
-      if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-        await maybePromise;
-      }
+
+    let volume: Awaited<ReturnType<typeof volumeLoader.createAndCacheVolume>>;
+    try {
+      volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
+    } catch (error) {
+      logStepError('createViewerSession', 'createAndCacheVolume', error, {
+        volumeId,
+        imageIdCount: imageIds.length,
+      });
+      throw error;
     }
 
-    await setVolumesForViewports(
-      renderingEngine,
-      [{ volumeId }],
-      Object.values(VIEWPORT_IDS)
-    );
+    logStepStart('createViewerSession', 'volume_cached', { volumeId });
+    try {
+      if (typeof (volume as { load?: () => Promise<unknown> | void }).load === 'function') {
+        const maybePromise = (volume as { load: () => Promise<unknown> | void }).load();
+        if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
+          await maybePromise;
+        }
+      }
+      logStepStart('createViewerSession', 'volume_load_complete', { volumeId });
+    } catch (error) {
+      logStepError('createViewerSession', 'volume.load', error, { volumeId });
+      throw error;
+    }
+
+    logStepStart('createViewerSession', 'step_4_setVolumesForViewports', {
+      viewportIds: Object.values(VIEWPORT_IDS),
+      volumeId,
+    });
+    try {
+      await setVolumesForViewports(
+        renderingEngine,
+        [{ volumeId }],
+        Object.values(VIEWPORT_IDS)
+      );
+    } catch (error) {
+      logStepError('createViewerSession', 'setVolumesForViewports', error, {
+        volumeId,
+        viewportIds: Object.values(VIEWPORT_IDS),
+      });
+      throw error;
+    }
+    logViewportImageDataState(renderingEngine, Object.values(VIEWPORT_IDS), 'createViewerSession:setVolumesForViewports');
+
+    logStepStart('createViewerSession', 'step_5_resize_after_setVolumes');
     await nextAnimationFrame();
     safeResizeRenderingEngine(renderingEngine);
+    logStepStart('createViewerSession', 'step_6_check_viewport_dimensions');
+    (Object.keys(VIEWPORT_IDS) as ViewportKey[]).forEach((key) => {
+      const el = DOM.viewportElements[key];
+      const rect = el?.getBoundingClientRect();
+      console.log(`[createViewerSession] viewport:${key}`, {
+        element: !!el,
+        width: rect?.width,
+        height: rect?.height,
+      });
+    });
+
+    // Debug overlay - show viewport status on screen
+    const debugDiv = document.createElement('div');
+    debugDiv.id = 'viewport-debug';
+    debugDiv.style.cssText = 'position:fixed;top:0;left:0;background:rgba(0,0,0,0.9);color:#0f0;font:11px monospace;padding:8px;z-index:99999;max-height:100vh;overflow:auto;';
+    debugDiv.innerHTML = `<strong>Viewport Debug</strong><br/>Build: ${BUILD_VERSION}<br/>`;
+    (Object.keys(VIEWPORT_IDS) as ViewportKey[]).forEach((key) => {
+      const el = DOM.viewportElements[key];
+      const rect = el?.getBoundingClientRect();
+      debugDiv.innerHTML += `${key}: ${el ? 'OK' : 'MISSING'} (${rect?.width || 0}x${rect?.height || 0})<br/>`;
+    });
+    debugDiv.innerHTML += `<br/>Volume: ${volumeId ? 'LOADED' : 'FAILED'}<br/>`;
+    debugDiv.innerHTML += `ImageIds: ${imageIds.length}<br/>`;
+    document.body.appendChild(debugDiv);
 
     const cprUrl = typeof casePayload.cpr_sources?.straightened_nifti === 'string'
       ? casePayload.cpr_sources.straightened_nifti
@@ -2259,12 +2585,24 @@ async function createViewerSession(casePayload: WorkstationCasePayload): Promise
       );
       cprVolumeId = cprSource.volumeId;
       cprImageIds = cprSource.imageIds;
-      const cprVolume = await volumeLoader.createAndCacheVolume(cprVolumeId, { imageIds: cprImageIds });
-      if (typeof (cprVolume as { load?: () => Promise<unknown> | void }).load === 'function') {
-        const maybePromise = (cprVolume as { load: () => Promise<unknown> | void }).load();
-        if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-          await maybePromise;
+      try {
+        const cprVolume = await volumeLoader.createAndCacheVolume(cprVolumeId, { imageIds: cprImageIds });
+        if (typeof (cprVolume as { load?: () => Promise<unknown> | void }).load === 'function') {
+          const maybePromise = (cprVolume as { load: () => Promise<unknown> | void }).load();
+          if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
+            await maybePromise;
+          }
         }
+        logStepStart('createViewerSession', 'cpr_volume_ready', {
+          cprVolumeId,
+          imageIdCount: cprImageIds.length,
+        });
+      } catch (error) {
+        logStepError('createViewerSession', 'cpr_volume_load', error, {
+          cprVolumeId,
+          imageIdCount: cprImageIds.length,
+        });
+        throw error;
       }
     }
 
@@ -2326,6 +2664,7 @@ async function createViewerSession(casePayload: WorkstationCasePayload): Promise
       }
       viewport.render();
     });
+    logViewportImageDataState(renderingEngine, Object.values(VIEWPORT_IDS), 'createViewerSession:post_orientation_render');
 
     applyPrimaryToolBindings(toolGroup);
     await applyWindowPresetToRenderingEngine(renderingEngine, volumeId, currentWindowPreset, cprVolumeId);
@@ -2389,25 +2728,56 @@ function defaultOrientationForKey(key: ViewportKey): any {
 
 async function loadVolumeFromSource(source: VolumeSource, caseId: string): Promise<{ volumeId: string; imageIds: string[]; dicomImageIds: string[] }> {
   const resolvedSourceUrl = resolveAbsoluteUrl(source.signed_url);
-  if (source.loader_kind === 'cornerstone-nifti') {
-    const imageIds = await createNiftiImageIdsAndCacheMetadata({ url: resolvedSourceUrl });
-    const volumeId = `cornerstoneStreamingImageVolume:${caseId}:nifti`;
-    return { volumeId, imageIds, dicomImageIds: [] };
-  }
+  logStepStart('loadVolumeFromSource', 'begin', {
+    caseId,
+    loaderKind: source.loader_kind,
+    sourceKind: source.source_kind,
+    resolvedSourceUrl,
+  });
+  try {
+    if (source.loader_kind === 'cornerstone-nifti') {
+      logStepStart('loadVolumeFromSource', 'nifti_header_probe_start', { resolvedSourceUrl });
+      const niftiDiagnostics = await inspectNiftiSource(resolvedSourceUrl);
+      console.log(`[loadVolumeFromSource] NIfTI diagnostics ${JSON.stringify(niftiDiagnostics)}`);
 
-  const zipBuffer = await fetchArrayBuffer(resolvedSourceUrl);
-  const entries = await unzipDicomZip(zipBuffer);
-  if (!entries.entries.length) {
-    throw new Error('dicom_zip_empty_after_unpack');
+      logStepStart('loadVolumeFromSource', 'nifti_image_ids_start', { resolvedSourceUrl });
+      const imageIds = await createNiftiImageIdsAndCacheMetadata({ url: resolvedSourceUrl });
+      const volumeId = `cornerstoneStreamingImageVolume:${caseId}:nifti`;
+      console.log(`[loadVolumeFromSource] NIfTI image IDs ready ${JSON.stringify({
+        volumeId,
+        imageIdCount: imageIds.length,
+        firstImageId: imageIds[0] || null,
+        lastImageId: imageIds[imageIds.length - 1] || null,
+      })}`);
+      return { volumeId, imageIds, dicomImageIds: [] };
+    }
+
+    const zipBuffer = await fetchArrayBuffer(resolvedSourceUrl);
+    const entries = await unzipDicomZip(zipBuffer);
+    if (!entries.entries.length) {
+      throw new Error('dicom_zip_empty_after_unpack');
+    }
+    const imageIds: string[] = [];
+    for (const entry of entries.entries) {
+      const file = new File([entry.buffer], entry.name, { type: 'application/dicom' });
+      const imageId = cornerstoneDICOMImageLoader.wadouri.fileManager.add(file);
+      imageIds.push(imageId);
+    }
+    const volumeId = `cornerstoneStreamingImageVolume:${caseId}:dicom`;
+    console.log(`[loadVolumeFromSource] DICOM zip unpacked ${JSON.stringify({
+      volumeId,
+      entryCount: entries.entries.length,
+      warning: entries.warning || null,
+    })}`);
+    return { volumeId, imageIds, dicomImageIds: imageIds.slice() };
+  } catch (error) {
+    logStepError('loadVolumeFromSource', 'failed', error, {
+      caseId,
+      loaderKind: source.loader_kind,
+      resolvedSourceUrl,
+    });
+    throw error;
   }
-  const imageIds: string[] = [];
-  for (const entry of entries.entries) {
-    const file = new File([entry.buffer], entry.name, { type: 'application/dicom' });
-    const imageId = cornerstoneDICOMImageLoader.wadouri.fileManager.add(file);
-    imageIds.push(imageId);
-  }
-  const volumeId = `cornerstoneStreamingImageVolume:${caseId}:dicom`;
-  return { volumeId, imageIds, dicomImageIds: imageIds.slice() };
 }
 
 async function unzipDicomZip(buffer: ArrayBuffer): Promise<{ entries: Array<{ name: string; buffer: ArrayBuffer }>; warning?: string | null }> {
@@ -2596,6 +2966,7 @@ async function applyAuxViewportMode(): Promise<void> {
     return;
   }
   await setVolumesForViewports(session.renderingEngine, [{ volumeId: session.volumeId }], [VIEWPORT_IDS.aux]);
+  logViewportImageDataState(session.renderingEngine, [VIEWPORT_IDS.aux], 'applyAuxViewportMode:setVolumesForViewports');
   const plane = planeForMode(activeCase, currentAuxMode, currentCenterlineIndex);
   if (!plane || !auxViewport) return;
   const orientation = planeToOrientation(plane);
@@ -2661,6 +3032,7 @@ async function applyCprViewportMode(auxViewport: any): Promise<void> {
     return;
   }
   await setVolumesForViewports(session.renderingEngine, [{ volumeId: session.cprVolumeId }], [VIEWPORT_IDS.aux]);
+  logViewportImageDataState(session.renderingEngine, [VIEWPORT_IDS.aux], 'applyCprViewportMode:setVolumesForViewports');
   auxViewport.setOrientation(CoreEnums.OrientationAxis.AXIAL, true);
   try {
     auxViewport.resetCamera?.({
@@ -6235,6 +6607,16 @@ function formatConfidence(value: unknown): string {
 }
 
 bootstrap().catch((error) => {
+  if (isDebugMprRoute()) {
+    try {
+      renderDebugMprShell();
+      const statusEl = document.getElementById('debug-mpr-status');
+      if (statusEl) statusEl.textContent = `Debug MPR failed\n${errorStack(error)}`;
+    } catch {
+      APP_ROOT.textContent = errorStack(error);
+    }
+    return;
+  }
   if (!DOM.bootOverlay) {
     renderShell();
   }

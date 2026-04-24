@@ -1251,6 +1251,10 @@ export default {
         return respond(html(renderDemoHtml(getBuildVersion())));
       }
 
+      if ((request.method === "GET" || request.method === "HEAD") && path === "/debug-mpr") {
+        return respond(html(renderDemoHtml(getBuildVersion())));
+      }
+
       if ((request.method === "GET" || request.method === "HEAD") && path === "/demo") {
         return respond(html(renderDemoHtml(getBuildVersion())));
       }
