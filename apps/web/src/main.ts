@@ -4018,13 +4018,25 @@ function applySizingLock(locked: boolean): void {
 function renderDataQualityGate(casePayload: WorkstationCasePayload | null): void {
   if (!DOM.dataQualityGateBanner) return;
   const snap = resolveDataQualityGate(casePayload);
+
+  // Hide banner in showcase mode (URL param ?showcase=1) but keep sizing lock
+  const current = new URL(window.location.href);
+  const showcaseMode = current.searchParams.get('showcase') === '1';
+
   if (!snap || snap.passes) {
     DOM.dataQualityGateBanner.classList.add('hidden');
     if (DOM.dataQualityGateReasons) DOM.dataQualityGateReasons.innerHTML = '';
     applySizingLock(false);
     return;
   }
-  DOM.dataQualityGateBanner.classList.remove('hidden');
+
+  // In showcase mode, hide the banner but still show sizing is locked
+  if (showcaseMode) {
+    DOM.dataQualityGateBanner.classList.add('hidden');
+  } else {
+    DOM.dataQualityGateBanner.classList.remove('hidden');
+  }
+
   if (DOM.dataQualityGateReasons) {
     const items = snap.failureReasons.length
       ? snap.failureReasons
