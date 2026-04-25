@@ -56,16 +56,18 @@ def main():
     
     print(f"Downloaded: {NIFTI_DEST.stat().st_size / (1024*1024):.1f} MB")
 
-    # Run processing using pipeline_runner
+    # Run processing using pipeline_runner.main()
     gpu_provider_dir = REPO_ROOT / "gpu_provider"
-    os.chdir(gpu_provider_dir)
-    # Add repo root to sys.path so gpu_provider.pipeline_runner can be imported
-    sys.path.insert(0, str(REPO_ROOT))
 
     # Use pipeline_runner.py which has proper __main__ entry point
+    # Set PYTHONPATH and run from repo root
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT)
+
     print("\nRunning geometry extraction pipeline...")
     result = subprocess.run([
-        sys.executable, "-m", "gpu_provider.pipeline_runner",
+        sys.executable, "-u",
+        str(gpu_provider_dir / "pipeline_runner.py"),
         "--input", str(NIFTI_DEST),
         "--output-mask", str(CASE_DIR / "meshes" / "segmentation.nii.gz"),
         "--output-json", str(CASE_DIR / "artifacts" / "pipeline_output.json"),
@@ -73,7 +75,8 @@ def main():
         "--quality", "high",
         "--job-id", CASE_ID,
         "--study-id", CASE_ID,
-    ])
+    ], cwd=str(gpu_provider_dir), env=env)
+
     if result.returncode != 0:
         print("Pipeline failed!")
         print(f"stdout: {result.stdout[-500:] if result.stdout else 'N/A'}")
