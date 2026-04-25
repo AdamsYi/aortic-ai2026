@@ -5,7 +5,8 @@ $ErrorActionPreference = "Stop"
 
 # Configuration
 $CaseId = "mao_mianqiang_preop"
-$MacUrl = "http://38.59.229.45:8888/ct_preop.nii.gz"
+# Download from R2 (production bucket)
+$R2Url = "https://pub-aortic-ct-raw.r2.cloudflarestorage.com/mao_mianqiang_preop/ct_preop.nii.gz"
 $CasesDir = "C:\aortic-ai\cases"
 $CaseDir = Join-Path $CasesDir $CaseId
 $NiftiDest = Join-Path $CaseDir "imaging_hidden\ct_preop.nii.gz"
@@ -22,16 +23,16 @@ $null = New-Item -Path (Join-Path $CaseDir "meshes") -ItemType Directory -Force
 $null = New-Item -Path (Join-Path $CaseDir "artifacts") -ItemType Directory -Force
 $null = New-Item -Path (Join-Path $CaseDir "qa") -ItemType Directory -Force
 
-# Download NIfTI
-Write-Host "Downloading NIfTI from Mac..."
+# Download NIfTI from R2
+Write-Host "Downloading NIfTI from R2..."
+Write-Host "URL: $R2Url"
 $ProgressPreference = "SilentlyContinue"
 try {
-    Invoke-WebRequest -Uri $MacUrl -OutFile $NiftiDest -UseBasicParsing
+    Invoke-WebRequest -Uri $R2Url -OutFile $NiftiDest -UseBasicParsing
     $size = (Get-Item $NiftiDest).Length / 1MB
     Write-Host "Downloaded: $([math]::Round($size, 1)) MB"
 } catch {
-    Write-Host "ERROR: Failed to download from $MacUrl"
-    Write-Host "Make sure Mac HTTP server is running on port 8888"
+    Write-Host "ERROR: Failed to download from R2"
     Write-Host "Error: $_"
     exit 1
 }
