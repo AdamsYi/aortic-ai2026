@@ -5,8 +5,12 @@ Run this directly on Windows GPU node.
 """
 import os
 import sys
+import ssl
 import requests
 from pathlib import Path
+
+# Disable SSL verification for R2 (public bucket, Windows SSL compatibility)
+ssl._create_default_https_context = ssl._create_unverified_context
 
 CASE_ID = "mao_mianqiang_preop"
 R2_URL = "https://pub-aortic-ct-raw.r2.cloudflarestorage.com/mao_mianqiang_preop/ct_preop.nii.gz"
