@@ -56,53 +56,26 @@ def main():
     
     print(f"Downloaded: {NIFTI_DEST.stat().st_size / (1024*1024):.1f} MB")
 
-    # Run processing using process_local_nifti (but skip file copy)
+    # Run processing using pipeline_runner
     gpu_provider_dir = REPO_ROOT / "gpu_provider"
     os.chdir(gpu_provider_dir)
 
-    # Run geometry extraction using subprocess (same as process_local_nifti)
+    # Use pipeline_runner.py which has proper __main__ entry point
     print("\nRunning geometry extraction pipeline...")
-
-    # Step 1: Root model
-    print("Step 1: Extracting aortic root...")
     result = subprocess.run([
-        sys.executable, "-m", "geometry.root_model",
-        "--case-id", CASE_ID,
-        "--nifti", str(NIFTI_DEST)
+        sys.executable, "-m", "gpu_provider.pipeline_runner",
+        "--input", str(NIFTI_DEST),
+        "--output-mask", str(CASE_DIR / "meshes" / "segmentation.nii.gz"),
+        "--output-json", str(CASE_DIR / "artifacts" / "pipeline_output.json"),
+        "--device", "gpu",
+        "--quality", "high",
+        "--job-id", CASE_ID,
+        "--study-id", CASE_ID,
     ])
     if result.returncode != 0:
-        print("Root extraction failed!")
-        sys.exit(1)
-
-    # Step 2: Leaflet model
-    print("Step 2: Extracting leaflets...")
-    result = subprocess.run([
-        sys.executable, "-m", "geometry.leaflet_model",
-        "--case-id", CASE_ID
-    ])
-    if result.returncode != 0:
-        print("Leaflet extraction failed!")
-        sys.exit(1)
-
-    # Step 3: Lumen mesh
-    print("Step 3: Generating lumen mesh...")
-    result = subprocess.run([
-        sys.executable, "-m", "geometry.lumen_mesh",
-        "--case-id", CASE_ID
-    ])
-    if result.returncode != 0:
-        print("Lumen mesh generation failed!")
-        sys.exit(1)
-
-    # Step 4: Landmarks
-    print("Step 4: Detecting landmarks...")
-    result = subprocess.run([
-        sys.executable, "-m", "geometry.landmarks",
-        "--case-id", CASE_ID,
-        "--nifti", str(NIFTI_DEST)
-    ])
-    if result.returncode != 0:
-        print("Landmark detection failed!")
+        print("Pipeline failed!")
+        print(f"stdout: {result.stdout[-500:] if result.stdout else 'N/A'}")
+        print(f"stderr: {result.stderr[-500:] if result.stderr else 'N/A'}")
         sys.exit(1)
 
     print("\n=== Processing complete! ===")
