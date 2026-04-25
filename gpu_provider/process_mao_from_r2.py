@@ -6,11 +6,15 @@ Run this directly on Windows GPU node.
 import os
 import sys
 import ssl
+import warnings
 import requests
 from pathlib import Path
+from urllib3.exceptions import InsecureRequestWarning
 
-# Disable SSL verification for R2 (public bucket, Windows SSL compatibility)
+# Disable SSL verification and warnings for R2 (public bucket, Windows SSL compatibility)
 ssl._create_default_https_context = ssl._create_unverified_context
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+warnings.filterwarnings("ignore", category=RequestsDependencyWarning)
 
 CASE_ID = "mao_mianqiang_preop"
 R2_URL = "https://pub-aortic-ct-raw.r2.cloudflarestorage.com/mao_mianqiang_preop/ct_preop.nii.gz"
@@ -29,9 +33,9 @@ def main():
     (CASE_DIR / "artifacts").mkdir(parents=True, exist_ok=True)
     (CASE_DIR / "qa").mkdir(parents=True, exist_ok=True)
     
-    # Download from R2
+    # Download from R2 (verify=False for Windows SSL compatibility)
     print("Downloading NIfTI file...")
-    resp = requests.get(R2_URL, stream=True)
+    resp = requests.get(R2_URL, stream=True, verify=False)
     if resp.status_code != 200:
         print(f"ERROR: R2 download failed: HTTP {resp.status_code}")
         print(f"Response: {resp.text[:500]}")
