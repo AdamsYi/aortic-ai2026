@@ -18,32 +18,35 @@ def download_with_powershell(url: str, dest: Path) -> None:
     """Use curl.exe or PowerShell for downloading."""
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Try curl.exe first (better SSL support)
+    # Try curl.exe with insecure flag (R2 is public-read, SSL not required for download)
     import shutil
     curl_exe = shutil.which("curl.exe") or shutil.which("curl")
     if curl_exe:
         print(f"Using curl: {curl_exe}")
-        curl_cmd = [curl_exe, "-L", "-o", str(dest), url, "--ssl-no-revoke", "-v"]
+        # --insecure: skip cert verification (R2 public bucket)
+        # --retry 3: retry on transient failures
+        curl_cmd = [curl_exe, "-L", "-o", str(dest), url, "--insecure", "--retry", "3", "-v"]
         result = subprocess.run(curl_cmd, capture_output=True, text=True)
-        print(f"curl stdout: {result.stdout[:500] if result.stdout else '(empty)'}")
-        print(f"curl stderr: {result.stderr[:500] if result.stderr else '(empty)'}")
         if result.returncode == 0 and dest.exists():
             print(f"curl download succeeded: {dest.stat().st_size / (1024*1024):.1f} MB")
             return
-        print(f"curl failed with code {result.returncode}, trying PowerShell...")
+        print(f"curl failed with code {result.returncode}")
+        print(f"curl stderr tail: {result.stderr[-500:] if result.stderr else '(empty)'}")
 
-    # Fallback to PowerShell with TLS 1.2
+    # Fallback to PowerShell with TLS 1.2 and cert bypass
     ps_cmd = (
+        "[Net.ServicePointManager]::ServerCertificateValidationPolicy = {$true}; "
         "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
         "$ProgressPreference='SilentlyContinue'; "
         f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}' -UseBasicParsing"
     )
-    print(f"Using PowerShell: {ps_cmd[:100]}...")
+    print(f"Using PowerShell with cert bypass...")
     result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"PowerShell stdout: {result.stdout[:500] if result.stdout else '(empty)'}")
-        print(f"PowerShell stderr: {result.stderr[:500] if result.stderr else '(empty)'}")
-        raise RuntimeError(f"Download failed - PowerShell: {result.stderr[:200]}")
+        print(f"PowerShell failed: {result.stderr[:300]}")
+        raise RuntimeError(f"Download failed - both curl and PowerShell failed")
+    if not dest.exists():
+        raise RuntimeError(f"Download failed - file not created")
 
 def main():
     print(f"=== Processing {CASE_ID} ===")
