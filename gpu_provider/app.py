@@ -1271,7 +1271,7 @@ async def admin_run(
 
 def _cmd_download_nifti(args: List[str]) -> tuple[List[str], Optional[Path]]:
     """Download NIfTI from URL and process it.
-    
+
     Usage: download_nifti --case-id <case> --url <url>
     """
     case_id = None
@@ -1286,10 +1286,10 @@ def _cmd_download_nifti(args: List[str]) -> tuple[List[str], Optional[Path]]:
             i += 2
         else:
             i += 1
-    
+
     if not case_id or not url:
         raise HTTPException(status_code=400, detail="download_nifti_requires_--case-id_and_--url")
-    
+
     snippet = f'''
 import os
 import sys
@@ -1329,9 +1329,26 @@ os.chdir(REPO_ROOT / "gpu_provider")
 sys.argv = ["process_local_nifti", "--case-id", CASE_ID, "--nifti", str(dest)]
 exec(open(REPO_ROOT / "gpu_provider" / "process_local_nifti.py").read())
 '''
-    
+
     return [sys.executable, "-u", "-c", snippet], _REPO_ROOT
 
 
-# Add to whitelist
+def _cmd_run_module(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Run a Python module by name.
+
+    Usage: run_module <module_name>
+    Example: run_module gpu_provider.process_mao_from_r2
+    """
+    if len(args) != 1:
+        raise HTTPException(status_code=400, detail="run_module_requires_exactly_one_module_name")
+
+    module_name = args[0]
+    if not all(c.isalnum() or c == '.' or c == '_' for c in module_name):
+        raise HTTPException(status_code=400, detail="run_module_invalid_module_name")
+
+    argv = [sys.executable, "-u", "-m", module_name]
+    return argv, _REPO_ROOT
+
+
 _ADMIN_WHITELIST["download_nifti"] = _cmd_download_nifti
+_ADMIN_WHITELIST["run_module"] = _cmd_run_module
