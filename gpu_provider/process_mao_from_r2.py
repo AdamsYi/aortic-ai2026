@@ -25,23 +25,28 @@ def download_with_powershell(url: str, dest: Path) -> None:
         print(f"Using curl: {curl_exe}")
         # --insecure: skip cert verification (R2 public bucket)
         # --retry 3: retry on transient failures
-        curl_cmd = [curl_exe, "-L", "-o", str(dest), url, "--insecure", "--retry", "3", "-v"]
+        curl_cmd = [curl_exe, "-L", "-o", str(dest), url, "--insecure", "--retry", "3"]
         result = subprocess.run(curl_cmd, capture_output=True, text=True)
         if result.returncode == 0 and dest.exists():
             print(f"curl download succeeded: {dest.stat().st_size / (1024*1024):.1f} MB")
             return
         print(f"curl failed with code {result.returncode}")
-        print(f"curl stderr tail: {result.stderr[-500:] if result.stderr else '(empty)'}")
+        print(f"curl stderr: {result.stderr[-300:] if result.stderr else '(empty)'}")
 
-    # Fallback to PowerShell with TLS 1.2 and cert bypass
-    ps_cmd = (
-        "[Net.ServicePointManager]::ServerCertificateValidationPolicy = {$true}; "
-        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
-        "$ProgressPreference='SilentlyContinue'; "
-        f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}' -UseBasicParsing"
-    )
-    print(f"Using PowerShell with cert bypass...")
-    result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
+    # Fallback: PowerShell with custom HTTPS handler that bypasses cert validation
+    ps_script = f'''
+$oldPolicy = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+try {{
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri '{url}' -OutFile '{dest}' -UseBasicParsing
+}} finally {{
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $oldPolicy
+}}
+'''
+    print("Using PowerShell with cert bypass callback...")
+    result = subprocess.run(["powershell", "-Command", ps_script], capture_output=True, text=True)
     if result.returncode != 0:
         print(f"PowerShell failed: {result.stderr[:300]}")
         raise RuntimeError(f"Download failed - both curl and PowerShell failed")
