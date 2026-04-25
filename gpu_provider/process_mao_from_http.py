@@ -56,17 +56,33 @@ def main():
     
     print(f"Downloaded: {NIFTI_DEST.stat().st_size / (1024*1024):.1f} MB")
 
-    # Run processing
+    # Run processing directly (file already in correct location)
     gpu_provider_dir = REPO_ROOT / "gpu_provider"
     os.chdir(gpu_provider_dir)
     # Add gpu_provider to sys.path for imports
     if str(gpu_provider_dir) not in sys.path:
         sys.path.insert(0, str(gpu_provider_dir))
-    sys.argv = ["process_mao_from_http", "--case-id", CASE_ID, "--nifti", str(NIFTI_DEST)]
 
-    # Import and run process_local_nifti.main()
-    from process_local_nifti import main as process_main
-    process_main()
+    # Run the geometry pipeline
+    print("Running geometry extraction pipeline...")
+    from geometry.root_model import extract_root_and_ascending
+    from geometry.leaflet_model import extract_leaflets
+    from geometry.lumen_mesh import extract_lumen_surface
+    from geometry.landmarks import detect_landmarks
+
+    print("Extracting aortic root and ascending aorta...")
+    extract_root_and_ascending(str(NIFTI_DEST), str(CASE_DIR / "meshes"))
+
+    print("Extracting leaflets...")
+    extract_leaflets(str(NIFTI_DEST), str(CASE_DIR / "meshes"))
+
+    print("Extracting lumen surface...")
+    extract_lumen_surface(str(NIFTI_DEST), str(CASE_DIR / "meshes"))
+
+    print("Detecting landmarks...")
+    detect_landmarks(str(NIFTI_DEST), str(CASE_DIR / "artifacts"))
+
+    print("=== Processing complete! ===")
 
 if __name__ == "__main__":
     main()
