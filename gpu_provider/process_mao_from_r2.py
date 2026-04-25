@@ -17,8 +17,10 @@ NIFTI_DEST = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
 def download_with_powershell(url: str, dest: Path) -> None:
     """Use PowerShell Invoke-WebRequest for better Windows TLS compatibility."""
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Force TLS 1.2 for Windows compatibility
     cmd = [
         "powershell", "-Command",
+        f"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
         f"$ProgressPreference='SilentlyContinue'; "
         f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}' -UseBasicParsing"
     ]
