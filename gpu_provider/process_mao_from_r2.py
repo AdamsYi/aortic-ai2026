@@ -14,7 +14,7 @@ from urllib3.exceptions import InsecureRequestWarning
 # Disable SSL verification and warnings for R2 (public bucket, Windows SSL compatibility)
 ssl._create_default_https_context = ssl._create_unverified_context
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-warnings.filterwarnings("ignore", category=RequestsDependencyWarning)
+warnings.filterwarnings("ignore", message=".*urllib3.*doesn't match a supported version.*")
 
 CASE_ID = "mao_mianqiang_preop"
 R2_URL = "https://pub-aortic-ct-raw.r2.cloudflarestorage.com/mao_mianqiang_preop/ct_preop.nii.gz"
