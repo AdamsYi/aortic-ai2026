@@ -15,43 +15,50 @@ CASE_DIR = REPO_ROOT / "cases" / CASE_ID
 NIFTI_DEST = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
 
 def download_with_powershell(url: str, dest: Path) -> None:
-    """Use curl.exe or PowerShell for downloading."""
+    """Use PowerShell with multiple SSL bypass strategies."""
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Try curl.exe with insecure flag (R2 is public-read, SSL not required for download)
-    import shutil
-    curl_exe = shutil.which("curl.exe") or shutil.which("curl")
-    if curl_exe:
-        print(f"Using curl: {curl_exe}")
-        # --insecure: skip cert verification (R2 public bucket)
-        # --retry 3: retry on transient failures
-        curl_cmd = [curl_exe, "-L", "-o", str(dest), url, "--insecure", "--retry", "3"]
-        result = subprocess.run(curl_cmd, capture_output=True, text=True)
-        if result.returncode == 0 and dest.exists():
-            print(f"curl download succeeded: {dest.stat().st_size / (1024*1024):.1f} MB")
-            return
-        print(f"curl failed with code {result.returncode}")
-        print(f"curl stderr: {result.stderr[-300:] if result.stderr else '(empty)'}")
-
-    # Fallback: PowerShell with custom HTTPS handler that bypasses cert validation
+    # Strategy 1: PowerShell with System.Net.WebClient
     ps_script = f'''
-$oldPolicy = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+$url = "{url}"
+$dest = "{dest}"
 try {{
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri '{url}' -OutFile '{dest}' -UseBasicParsing
-}} finally {{
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $oldPolicy
+    $client = New-Object System.Net.WebClient
+    $client.Headers.Add("User-Agent", "PowerShell")
+    $client.DownloadFile($url, $dest)
+    Write-Host "WebClient download succeeded: $($dest.Length / 1MB) MB"
+}} catch {{
+    Write-Host "WebClient failed: $_"
+    throw
 }}
 '''
-    print("Using PowerShell with cert bypass callback...")
+    print("Using PowerShell WebClient...")
     result = subprocess.run(["powershell", "-Command", ps_script], capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"PowerShell failed: {result.stderr[:300]}")
-        raise RuntimeError(f"Download failed - both curl and PowerShell failed")
-    if not dest.exists():
-        raise RuntimeError(f"Download failed - file not created")
+    if result.returncode == 0 and dest.exists():
+        print(f"WebClient download succeeded: {dest.stat().st_size / (1024*1024):.1f} MB")
+        return
+
+    print(f"WebClient failed: {result.stderr[:200] if result.stderr else result.stdout[:200]}")
+
+    # Strategy 2: BITS (Background Intelligent Transfer Service)
+    print("Trying BITS transfer...")
+    bits_cmd = f'''
+$job = Start-BitsTransfer -Source "{url}" -Destination "{dest}" -Description "Downloading NIfTI" -DisplayName "AorticAI Download"
+if ($job.JobState -eq 'Transferred') {{
+    Complete-BitsTransfer -BitsJob $job
+    Write-Host "BITS download succeeded"
+}} else {{
+    Write-Host "BITS download failed with state: $($job.JobState)"
+    throw "BITS transfer failed"
+}}
+'''
+    result = subprocess.run(["powershell", "-Command", bits_cmd], capture_output=True, text=True)
+    if result.returncode == 0 and dest.exists():
+        print(f"BITS download succeeded: {dest.stat().st_size / (1024*1024):.1f} MB")
+        return
+
+    print(f"BITS failed: {result.stderr[:200] if result.stderr else result.stdout[:200]}")
+    raise RuntimeError(f"Download failed - all methods (curl/WebClient/BITS) failed")
 
 def main():
     print(f"=== Processing {CASE_ID} ===")
