@@ -55,11 +55,15 @@ def main():
         sys.exit(1)
     
     print(f"Downloaded: {NIFTI_DEST.stat().st_size / (1024*1024):.1f} MB")
-    
+
     # Run processing
-    os.chdir(REPO_ROOT / "gpu_provider")
-    sys.argv = ["process_local_nifti", "--case-id", CASE_ID, "--nifti", str(NIFTI_DEST)]
-    
+    gpu_provider_dir = REPO_ROOT / "gpu_provider"
+    os.chdir(gpu_provider_dir)
+    # Add gpu_provider to sys.path for imports
+    if str(gpu_provider_dir) not in sys.path:
+        sys.path.insert(0, str(gpu_provider_dir))
+    sys.argv = ["process_mao_from_http", "--case-id", CASE_ID, "--nifti", str(NIFTI_DEST)]
+
     # Import and run process_local_nifti.main()
     from process_local_nifti import main as process_main
     process_main()
