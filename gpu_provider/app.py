@@ -1267,3 +1267,71 @@ async def admin_run(
         _stream_process(argv, cwd, _ADMIN_LOCK),
         media_type="text/plain; charset=utf-8",
     )
+
+
+def _cmd_download_nifti(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Download NIfTI from URL and process it.
+    
+    Usage: download_nifti --case-id <case> --url <url>
+    """
+    case_id = None
+    url = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--case-id" and i + 1 < len(args):
+            case_id = args[i + 1]
+            i += 2
+        elif args[i] == "--url" and i + 1 < len(args):
+            url = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    
+    if not case_id or not url:
+        raise HTTPException(status_code=400, detail="download_nifti_requires_--case-id_and_--url")
+    
+    snippet = f'''
+import os
+import sys
+import requests
+from pathlib import Path
+
+CASE_ID = "{case_id}"
+URL = "{url}"
+REPO_ROOT = Path(r"C:\\aortic-ai")
+CASE_DIR = REPO_ROOT / "cases" / CASE_ID
+
+print(f"Downloading NIfTI for {{CASE_ID}} from {{URL}}")
+
+# Create directories
+(CASE_DIR / "imaging_hidden").mkdir(parents=True, exist_ok=True)
+(CASE_DIR / "meshes").mkdir(parents=True, exist_ok=True)
+(CASE_DIR / "artifacts").mkdir(parents=True, exist_ok=True)
+
+# Download file
+dest = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
+resp = requests.get(URL, stream=True)
+resp.raise_for_status()
+
+total = int(resp.headers.get('content-length', 0))
+downloaded = 0
+with open(dest, 'wb') as f:
+    for chunk in resp.iter_content(chunk_size=8192):
+        f.write(chunk)
+        downloaded += len(chunk)
+        if total > 0:
+            print(f"\\rDownloading: {{downloaded / 1024 / 1024:.1f}}/{{total / 1024 / 1024:.1f}} MB", end='', flush=True)
+
+print(f"\\nDownloaded: {{dest.stat().st_size / (1024*1024):.1f}} MB")
+
+# Now run the processing
+os.chdir(REPO_ROOT / "gpu_provider")
+sys.argv = ["process_local_nifti", "--case-id", CASE_ID, "--nifti", str(dest)]
+exec(open(REPO_ROOT / "gpu_provider" / "process_local_nifti.py").read())
+'''
+    
+    return [sys.executable, "-u", "-c", snippet], _REPO_ROOT
+
+
+# Add to whitelist
+_ADMIN_WHITELIST["download_nifti"] = _cmd_download_nifti
