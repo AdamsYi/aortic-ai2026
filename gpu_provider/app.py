@@ -1352,3 +1352,47 @@ def _cmd_run_module(args: List[str]) -> tuple[List[str], Optional[Path]]:
 
 _ADMIN_WHITELIST["download_nifti"] = _cmd_download_nifti
 _ADMIN_WHITELIST["run_module"] = _cmd_run_module
+
+
+def _cmd_list_case_files(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """List files in a case directory.
+
+    Usage: list_case_files --case-id <case>
+    """
+    if len(args) != 2 or args[0] != "--case-id":
+        raise HTTPException(status_code=400, detail="list_case_files_requires_--case-id")
+
+    case_id = args[1]
+    # Map numeric ID to case slug
+    case_slug = f"mao_mianqiang_preop" if case_id == "999" else f"case_{case_id}"
+
+    snippet = f'''
+import os
+from pathlib import Path
+
+case_slug = "{case_slug}"
+for candidate in [r"C:\AorticAI", r"C:\aortic-ai"]:
+    if Path(candidate).exists():
+        repo_root = Path(candidate)
+        break
+else:
+    repo_root = Path(r"C:\AorticAI")
+
+case_dir = repo_root / "cases" / case_slug
+print(f"case_dir | {{case_dir}}")
+print(f"case_dir_exists | {{case_dir.exists()}}")
+
+for subdir in ["meshes", "artifacts", "imaging_hidden", "qa"]:
+    subdir_path = case_dir / subdir
+    if subdir_path.exists():
+        files = list(subdir_path.iterdir())
+        print(f"{{subdir}}_count | {{len(files)}}")
+        for f in files[:20]:
+            print(f"{{subdir}}_file | {{f.name}} | {{f.stat().st_size}}")
+    else:
+        print(f"{{subdir}}_exists | False")
+'''
+    return [sys.executable, "-u", "-c", snippet], _REPO_ROOT
+
+
+_ADMIN_WHITELIST["list_case_files"] = _cmd_list_case_files
