@@ -11,7 +11,13 @@ from pathlib import Path
 CASE_ID = "mao_mianqiang_preop"
 # Mac HTTP server URL (local network)
 HTTP_URL = "http://192.168.11.42:8888/cases/mao_mianqiang_preop/imaging_hidden/ct_preop.nii.gz"
-REPO_ROOT = Path(r"C:\aortic-ai")
+# Detect actual repo path (Windows uses C:\AorticAI, not C:\aortic-ai)
+for candidate in [r"C:\AorticAI", r"C:\aortic-ai", r"C:\aortic_ai"]:
+    if Path(candidate).exists():
+        REPO_ROOT = Path(candidate)
+        break
+else:
+    REPO_ROOT = Path(r"C:\AorticAI")  # Default fallback
 CASE_DIR = REPO_ROOT / "cases" / CASE_ID
 NIFTI_DEST = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
 
