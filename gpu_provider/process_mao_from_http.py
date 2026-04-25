@@ -59,6 +59,8 @@ def main():
     # Run processing using pipeline_runner
     gpu_provider_dir = REPO_ROOT / "gpu_provider"
     os.chdir(gpu_provider_dir)
+    # Add repo root to sys.path so gpu_provider.pipeline_runner can be imported
+    sys.path.insert(0, str(REPO_ROOT))
 
     # Use pipeline_runner.py which has proper __main__ entry point
     print("\nRunning geometry extraction pipeline...")
