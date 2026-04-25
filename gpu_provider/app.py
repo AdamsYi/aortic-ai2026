@@ -1396,3 +1396,40 @@ for subdir in ["meshes", "artifacts", "imaging_hidden", "qa"]:
 
 
 _ADMIN_WHITELIST["list_case_files"] = _cmd_list_case_files
+
+
+def _cmd_diagnose_segmentation(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Diagnose segmentation mask for mao_mianqiang_preop case."""
+    snippet = '''
+import nibabel as nib
+import numpy as np
+from pathlib import Path
+
+case_dir = Path(r"C:\\AorticAI\\cases\\mao_mianqiang_preop")
+seg_path = case_dir / "meshes" / "segmentation.nii.gz"
+lumen_path = case_dir / "artifacts" / "lumen_mask.nii.gz"
+
+print("=== Segmentation Diagnosis ===")
+
+if seg_path.exists():
+    seg = nib.load(str(seg_path)).get_fdata()
+    print(f"segmentation.nii.gz: {seg.shape}, dtype={seg.dtype}")
+    unique, counts = np.unique(seg, return_counts=True)
+    for v, c in zip(unique, counts):
+        if c > 0:
+            print(f"  Label {int(v)}: {int(c)} voxels")
+    print(f"  Label 1 exists: {bool(np.any(seg == 1))}")
+    print(f"  Label 3 exists: {bool(np.any(seg == 3))}")
+else:
+    print("segmentation.nii.gz: NOT FOUND")
+
+if lumen_path.exists():
+    lumen = nib.load(str(lumen_path)).get_fdata()
+    print(f"lumen_mask.nii.gz: {lumen.shape}, nonzero={np.count_nonzero(lumen)}")
+else:
+    print("lumen_mask.nii.gz: NOT FOUND")
+'''
+    return [sys.executable, "-u", "-c", snippet], _REPO_ROOT
+
+
+_ADMIN_WHITELIST["diagnose_segmentation"] = _cmd_diagnose_segmentation
