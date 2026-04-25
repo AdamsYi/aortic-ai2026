@@ -17,16 +17,22 @@ NIFTI_DEST = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
 def download_with_powershell(url: str, dest: Path) -> None:
     """Use PowerShell Invoke-WebRequest for better Windows TLS compatibility."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Force TLS 1.2 for Windows compatibility
-    cmd = [
-        "powershell", "-Command",
-        f"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
-        f"$ProgressPreference='SilentlyContinue'; "
+
+    # Try curl.exe first (better SSL support)
+    curl_cmd = ["curl.exe", "-L", "-o", str(dest), url, "--ssl-no-revoke"]
+    result = subprocess.run(curl_cmd, capture_output=True, text=True)
+    if result.returncode == 0 and dest.exists():
+        return
+
+    # Fallback to PowerShell with TLS 1.2
+    ps_cmd = (
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
+        "$ProgressPreference='SilentlyContinue'; "
         f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}' -UseBasicParsing"
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    )
+    result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"PowerShell download failed: {result.stderr}")
+        raise RuntimeError(f"Download failed - PowerShell: {result.stderr}")
 
 def main():
     print(f"=== Processing {CASE_ID} ===")
