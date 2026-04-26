@@ -1841,3 +1841,59 @@ print("\\n=== ALL VERIFICATIONS PASSED ===")
 
 
 _ADMIN_WHITELIST["run_mao_pipeline"] = _cmd_run_mao_pipeline
+
+
+def _cmd_git_reset(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Reset local git changes and pull latest on Windows.
+
+    Usage: Call this when git pull fails due to local modifications.
+    Discards local changes in gpu_provider/ directory and pulls upstream.
+    """
+    if args:
+        raise HTTPException(status_code=400, detail="git_reset_takes_no_args")
+
+    snippet = '''
+import subprocess
+import sys
+from pathlib import Path
+
+repo_root = Path(r"C:\\AorticAI")
+print(f"Working directory: {repo_root}")
+
+# Check current status
+print("\\n=== Git Status ===")
+subprocess.run(["git", "status", "--short"], cwd=repo_root)
+
+# Discard local changes in gpu_provider/
+print("\\n=== Discarding local changes in gpu_provider/ ===")
+files_to_reset = [
+    "gpu_provider/app.py",
+    "gpu_provider/pipeline_runner.py",
+]
+for f in files_to_reset:
+    full_path = repo_root / f
+    if full_path.exists():
+        result = subprocess.run(["git", "checkout", "--", f], cwd=repo_root, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"Reset: {f}")
+        else:
+            print(f"Failed to reset {f}: {result.stderr}")
+
+# Pull latest
+print("\\n=== Git Pull ===")
+result = subprocess.run(["git", "pull", "--ff-only"], cwd=repo_root, capture_output=True, text=True)
+print(result.stdout)
+if result.stderr:
+    print(result.stderr)
+
+if result.returncode != 0:
+    raise SystemExit(result.returncode)
+
+# Verify new commit
+print("\\n=== Git Log ===")
+subprocess.run(["git", "log", "-1", "--oneline"], cwd=repo_root)
+'''
+    return [sys.executable, "-u", "-c", snippet], Path(r"C:\AorticAI")
+
+
+_ADMIN_WHITELIST["git_reset"] = _cmd_git_reset
