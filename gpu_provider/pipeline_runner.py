@@ -27,6 +27,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+# Force UTF-8 encoding for Windows console
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 import nibabel as nib
 import numpy as np
 
@@ -871,6 +876,7 @@ def main() -> None:
     ap.add_argument("--input", required=True)
     ap.add_argument("--output-mask", required=True)
     ap.add_argument("--output-json", required=True)
+    ap.add_argument("--output-dir", default=None, help="Override output directory for STL and lumen_mask (default: parent of --output-json)")
     ap.add_argument("--device", default="gpu", choices=["cpu", "gpu", "mps"])
     ap.add_argument("--quality", default="high", choices=["high", "fast"])
     ap.add_argument("--job-id", default="")
@@ -882,9 +888,10 @@ def main() -> None:
     in_path = Path(args.input).resolve()
     out_mask = Path(args.output_mask).resolve()
     out_json = Path(args.output_json).resolve()
-    output_dir = out_json.parent
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else out_json.parent
     out_mask.parent.mkdir(parents=True, exist_ok=True)
     out_json.parent.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="aortic-pipeline-") as td:

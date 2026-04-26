@@ -21,6 +21,7 @@
 #   ./scripts/remote_win.sh scan_imagecas_meshqa --case-ids 1,23,47
 #   ./scripts/remote_win.sh diagnose_segmentation
 #   ./scripts/remote_win.sh diagnose_lumen
+#   ./scripts/remote_win.sh run_mao_pipeline
 #
 # Env overrides:
 #   AORTICAI_WIN_BASE   default https://api.heartvalvepro.edu.kg
@@ -129,6 +130,13 @@ case "$SUB" in
       exit 2
     fi
     BODY='{"command":"diagnose_lumen","args":[]}'
+    ;;
+  run_mao_pipeline)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 run_mao_pipeline" >&2
+      exit 2
+    fi
+    BODY='{"command":"run_mao_pipeline","args":[]}'
     ;;
   *)
     echo "unknown subcommand: $SUB" >&2

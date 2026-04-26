@@ -1526,3 +1526,163 @@ else:
 
 
 _ADMIN_WHITELIST["diagnose_segmentation"] = _cmd_diagnose_segmentation
+
+
+def _cmd_run_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Run mao_mianqiang_preop pipeline with fixed parameters.
+
+    This is a narrow, single-case pipeline runner:
+    - Input: C:\\AorticAI\\cases\\mao_mianqiang_preop\\imaging_hidden\\ct_preop.nii.gz
+    - Output: meshes/ and artifacts/ in the same case directory
+    - Fixed: --device cpu --quality high
+    - No arguments accepted
+    """
+    if args:
+        raise HTTPException(status_code=400, detail="run_mao_pipeline_takes_no_args")
+
+    snippet = '''
+import sys
+import time
+import json
+import shutil
+from pathlib import Path
+
+# Fixed paths for mao_mianqiang_preop
+CASE_DIR = Path(r"C:\\AorticAI\\cases\\mao_mianqiang_preop")
+INPUT_CT = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
+OUTPUT_MASK = CASE_DIR / "meshes" / "segmentation.nii.gz"
+OUTPUT_JSON = CASE_DIR / "artifacts" / "pipeline_result.json"
+OUTPUT_DIR = CASE_DIR / "meshes"
+LOG_FILE = CASE_DIR / "pipeline.log"
+
+# Backup existing outputs
+BACKUP_DIR = CASE_DIR / "meshes" / "_backup_" + time.strftime("%Y%m%d_%H%M%S")
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+backup_files = [
+    CASE_DIR / "meshes" / "lumen_mask.nii.gz",
+    CASE_DIR / "meshes" / "aortic_root.stl",
+    CASE_DIR / "meshes" / "ascending_aorta.stl",
+    CASE_DIR / "meshes" / "leaflet_L.stl",
+    CASE_DIR / "meshes" / "leaflet_N.stl",
+    CASE_DIR / "meshes" / "leaflet_R.stl",
+    CASE_DIR / "meshes" / "annulus_ring.stl",
+    CASE_DIR / "artifacts" / "pipeline_result.json",
+    CASE_DIR / "pipeline.log",
+]
+
+for src in backup_files:
+    if src.exists():
+        dst = BACKUP_DIR / src.name
+        shutil.copy2(src, dst)
+        print(f"Backed up: {src.name} -> {dst}")
+
+# Verify input exists
+if not INPUT_CT.exists():
+    raise FileNotFoundError(f"Input CT not found: {INPUT_CT}")
+
+print(f"Input CT: {INPUT_CT} ({INPUT_CT.stat().st_size / (1024*1024):.1f} MB)")
+print(f"Output dir: {OUTPUT_DIR}")
+print(f"Log file: {LOG_FILE}")
+print()
+
+# Build pipeline command
+pipeline_py = Path(r"C:\\AorticAI\\gpu_provider\\pipeline_runner.py")
+cmd = [
+    sys.executable,
+    str(pipeline_py),
+    "--input", str(INPUT_CT),
+    "--output-mask", str(OUTPUT_MASK),
+    "--output-json", str(OUTPUT_JSON),
+    "--output-dir", str(OUTPUT_DIR),
+    "--device", "cpu",
+    "--quality", "high",
+    "--job-id", "mao_mianqiang_preop",
+    "--study-id", "mao_mianqiang_preop",
+]
+
+print("Running pipeline:")
+print(" ".join(cmd))
+print()
+
+# Run with output to log file
+import subprocess
+with open(LOG_FILE, "w", encoding="utf-8", errors="replace") as log_f:
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+        errors="replace",
+    )
+    for line in proc.stdout:
+        print(line.rstrip())
+        log_f.write(line)
+        log_f.flush()
+    code = proc.wait()
+    log_f.write(f"\\n[PIPELINE EXIT CODE: {code}]\\n")
+
+if code != 0:
+    print(f"\\nPipeline failed with exit code {code}")
+    print(f"Log written to: {LOG_FILE}")
+    raise SystemExit(code)
+
+print(f"\\nPipeline completed successfully")
+print(f"Result JSON: {OUTPUT_JSON}")
+print(f"Log file: {LOG_FILE}")
+
+# Verify outputs
+print("\\n=== OUTPUT VERIFICATION ===")
+required_files = [
+    OUTPUT_MASK,
+    OUTPUT_DIR / "lumen_mask.nii.gz",
+    OUTPUT_DIR / "aortic_root.stl",
+    OUTPUT_DIR / "ascending_aorta.stl",
+    OUTPUT_DIR / "leaflet_L.stl",
+    OUTPUT_DIR / "leaflet_N.stl",
+    OUTPUT_DIR / "leaflet_R.stl",
+]
+
+all_ok = True
+for f in required_files:
+    if f.exists():
+        size_kb = f.stat().st_size / 1024
+        print(f"OK: {f.name} ({size_kb:.1f} KB)")
+    else:
+        print(f"MISSING: {f.name}")
+        all_ok = False
+
+if not all_ok:
+    raise SystemExit("Required output files missing")
+
+# Verify lumen mask not empty
+import nibabel as nib
+import numpy as np
+
+lumen_path = OUTPUT_DIR / "lumen_mask.nii.gz"
+lumen = nib.load(str(lumen_path)).get_fdata()
+lumen_voxels = int(np.count_nonzero(lumen))
+print(f"\\nLumen mask voxels: {lumen_voxels:,}")
+
+if lumen_voxels == 0:
+    raise SystemExit("FAIL: Lumen mask is empty")
+
+# Verify segmentation labels
+seg = nib.load(str(OUTPUT_MASK)).get_fdata()
+print(f"Label 1 (root): {int((seg==1).sum()):,} voxels")
+print(f"Label 3 (ascending): {int((seg==3).sum()):,} voxels")
+print(f"Lumen (1+3): {int(np.isin(seg, [1,3]).sum()):,} voxels")
+
+# Check for centerline failure in log
+log_content = LOG_FILE.read_text(encoding="utf-8", errors="replace")
+if "geometry_centerline_failed" in log_content:
+    raise SystemExit("FAIL: Centerline computation failed")
+
+print("\\n=== ALL VERIFICATIONS PASSED ===")
+'''
+    return [sys.executable, "-u", "-c", snippet], Path(r"C:\AorticAI")
+
+
+_ADMIN_WHITELIST["run_mao_pipeline"] = _cmd_run_mao_pipeline
