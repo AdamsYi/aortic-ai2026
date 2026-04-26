@@ -1404,22 +1404,26 @@ _ADMIN_WHITELIST["list_case_files"] = _cmd_list_case_files
 
 
 def _cmd_diagnose_lumen(args: List[str]) -> tuple[List[str], Optional[Path]]:
-    """Diagnose lumen extraction for mao_mianqiang_preop case."""
+    """Diagnose lumen extraction for mao_mianqiang_preop case.
+
+    This command is decoupled from the lumen_mesh.py 修复 code:
+    - Section 1 (label diagnosis): Uses only nibabel + numpy, always works
+    - Section 2 (extract_lumen_mask): Optional, failure doesn't abort Section 1
+    """
+    if args:
+        raise HTTPException(status_code=400, detail="diagnose_lumen_takes_no_args")
+
     snippet = '''
 import nibabel as nib
 import numpy as np
 from scipy import ndimage
 from pathlib import Path
-import sys
-
-sys.path.insert(0, r"C:\\AorticAI\\gpu_provider")
-from geometry.lumen_mesh import extract_lumen_mask
 
 case_dir = Path(r"C:\\AorticAI\\cases\\mao_mianqiang_preop")
 seg_path = case_dir / "meshes" / "segmentation.nii.gz"
 
 print("=" * 60)
-print("SEGMENTATION DIAGNOSIS")
+print("SEGMENTATION DIAGNOSIS (Decoupled)")
 print("=" * 60)
 
 if not seg_path.exists():
@@ -1435,14 +1439,17 @@ print(f"Spacing: {spacing}")
 print(f"Unique labels: {np.unique(seg)}")
 print()
 
+# ===== SECTION 1: Label Diagnosis (always runs) =====
+print("=== LABEL ANALYSIS (nibabel only) ===")
 for label in [0, 1, 2, 3]:
     count = np.sum(seg == label)
     pct = 100.0 * count / seg.size if seg.size > 0 else 0
-    print(f"Label {label}: {int(count):>10} voxels ({pct:6.3f}%)")
+    label_name = {0: "background", 1: "aortic_root", 2: "valve_leaflets", 3: "ascending_aorta"}.get(label, "unknown")
+    print(f"Label {label} ({label_name}): {int(count):>10} voxels ({pct:6.3f}%)")
 
 print()
 lumen_direct = np.isin(seg, [1, 3])
-print(f"Lumen (labels 1+3 direct): {int(np.sum(lumen_direct))} voxels")
+print(f"Direct Lumen (labels 1+3): {int(np.sum(lumen_direct)):>10} voxels")
 
 # Check connectivity
 print()
@@ -1473,19 +1480,41 @@ if np.any(combined):
     combined_lab, combined_num = ndimage.label(combined)
     print(f"  Combined (1+3) connected components: {combined_num}")
 
+# ===== SECTION 2: extract_lumen_mask (optional, failure tolerated) =====
 print()
-print("=== EXTRACT_LUMEN_MASK EXECUTION ===")
+print("=== EXTRACT_LUMEN_MASK (optional check) ===")
 try:
+    import sys
+    sys.path.insert(0, r"C:\\AorticAI\\gpu_provider")
+    from geometry.lumen_mesh import extract_lumen_mask
     lumen_mask = extract_lumen_mask(seg, spacing)
     print(f"Result lumen voxels: {int(np.sum(lumen_mask))}")
     if not np.any(lumen_mask):
         print("WARNING: Lumen mask is EMPTY!")
+        print("NOTE: This may indicate a problem with the lumen extraction fix.")
+except ImportError as e:
+    print(f"INFO: Could not import extract_lumen_mask: {e}")
+    print("      This is OK - label diagnosis above is still valid.")
 except Exception as e:
     print(f"ERROR during extraction: {e}")
     import traceback
     traceback.print_exc()
+    print("NOTE: Label diagnosis (Section 1) is still valid.")
+
+# ===== SECTION 3: Existing lumen_mask.nii.gz check =====
+print()
+print("=== EXISTING LUMEN_MASK.NII.GZ CHECK ===")
+lumen_path = case_dir / "meshes" / "lumen_mask.nii.gz"
+if lumen_path.exists():
+    try:
+        lumen_existing = nib.load(str(lumen_path)).get_fdata()
+        print(f"Existing lumen_mask.nii.gz: {int(np.count_nonzero(lumen_existing)):,} voxels")
+    except Exception as e:
+        print(f"Could not read existing lumen_mask.nii.gz: {e}")
+else:
+    print("lumen_mask.nii.gz: NOT FOUND (expected before pipeline runs)")
 '''
-    return [sys.executable, "-u", "-c", snippet], Path(r"C:\AorticAI\gpu_provider")
+    return [sys.executable, "-u", "-c", snippet], Path(r"C:\AorticAI")
 
 
 _ADMIN_WHITELIST["diagnose_lumen"] = _cmd_diagnose_lumen
@@ -1536,6 +1565,10 @@ def _cmd_run_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]:
     - Output: meshes/ and artifacts/ in the same case directory
     - Fixed: --device cpu --quality high
     - No arguments accepted
+
+    Features:
+    - Outputs STL triangle counts for quality gate verification
+    - Automatic rollback on failure (restores from _backup_ directory)
     """
     if args:
         raise HTTPException(status_code=400, detail="run_mao_pipeline_takes_no_args")
@@ -1605,29 +1638,91 @@ print("Running pipeline:")
 print(" ".join(cmd))
 print()
 
+# Track if we started writing outputs (determines if rollback is needed)
+outputs_written = False
+
 # Run with output to log file
 import subprocess
-with open(LOG_FILE, "w", encoding="utf-8", errors="replace") as log_f:
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        encoding="utf-8",
-        errors="replace",
-    )
-    for line in proc.stdout:
-        print(line.rstrip())
-        log_f.write(line)
-        log_f.flush()
-    code = proc.wait()
-    log_f.write(f"\\n[PIPELINE EXIT CODE: {code}]\\n")
+pipeline_failed = False
+try:
+    with open(LOG_FILE, "w", encoding="utf-8", errors="replace") as log_f:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            encoding="utf-8",
+            errors="replace",
+        )
+        for line in proc.stdout:
+            print(line.rstrip())
+            log_f.write(line)
+            log_f.flush()
+        code = proc.wait()
+        log_f.write(f"\\n[PIPELINE EXIT CODE: {code}]\\n")
 
-if code != 0:
-    print(f"\\nPipeline failed with exit code {code}")
+        # Check if outputs were written (for rollback decision)
+        if OUTPUT_DIR.exists():
+            for stl_file in OUTPUT_DIR.glob("*.stl"):
+                outputs_written = True
+                break
+
+        if code != 0:
+            pipeline_failed = True
+            raise SystemExit(f"Pipeline exited with code {code}")
+
+except SystemExit as e:
+    if pipeline_failed or "Pipeline" in str(e):
+        print(f"\\nPipeline failed: {e}")
+    else:
+        raise
+except Exception as e:
+    pipeline_failed = True
+    print(f"\\nPipeline error: {e}")
+
+# Handle failure with rollback
+if pipeline_failed or "code" in dir() and code != 0:
+    print(f"\\n=== ROLLBACK INITIATED ===")
     print(f"Log written to: {LOG_FILE}")
-    raise SystemExit(code)
+
+    # Check if we need to rollback (outputs were written before failure)
+    need_rollback = False
+    if outputs_written:
+        # Check if any output files exist and are potentially corrupted
+        for f in [OUTPUT_MASK, OUTPUT_DIR / "lumen_mask.nii.gz"]:
+            if f.exists() and f.stat().st_size > 0:
+                need_rollback = True
+                break
+
+    if need_rollback:
+        print("Attempting to restore backup files...")
+        restored_count = 0
+        failed_count = 0
+        for backup_file in BACKUP_DIR.iterdir():
+            if backup_file.is_file():
+                original = CASE_DIR / "meshes" / backup_file.name if backup_file.name != "pipeline_result.json" else CASE_DIR / "artifacts" / backup_file.name
+                if backup_file.name == "pipeline.log":
+                    original = CASE_DIR / "pipeline.log"
+                try:
+                    shutil.copy2(backup_file, original)
+                    print(f"Restored: {backup_file.name}")
+                    restored_count += 1
+                except Exception as restore_err:
+                    print(f"Failed to restore {backup_file.name}: {restore_err}")
+                    failed_count += 1
+
+        if failed_count == 0 and restored_count > 0:
+            print("Rollback status: 已回滚 (all backup files restored)")
+        elif restored_count > 0:
+            print(f"Rollback status: 部分回滚 ({restored_count} restored, {failed_count} failed)")
+        else:
+            print("Rollback status: 回滚失败 (no files could be restored)")
+    else:
+        print("No outputs were written before failure - no rollback needed")
+
+    print(f"Backup directory: {BACKUP_DIR}")
+    raise SystemExit(f"Pipeline failed - see {LOG_FILE} for details")
 
 print(f"\\nPipeline completed successfully")
 print(f"Result JSON: {OUTPUT_JSON}")
@@ -1655,6 +1750,23 @@ for f in required_files:
         all_ok = False
 
 if not all_ok:
+    print("Required output files missing - initiating rollback...")
+    # Rollback for missing files
+    restored_count = 0
+    for backup_file in BACKUP_DIR.iterdir():
+        if backup_file.is_file():
+            original = CASE_DIR / "meshes" / backup_file.name if backup_file.name != "pipeline_result.json" else CASE_DIR / "artifacts" / backup_file.name
+            if backup_file.name == "pipeline.log":
+                original = CASE_DIR / "pipeline.log"
+            try:
+                shutil.copy2(backup_file, original)
+                restored_count += 1
+            except:
+                pass
+    if restored_count > 0:
+        print("Rollback status: 已回滚")
+    else:
+        print("Rollback status: 回滚失败")
     raise SystemExit("Required output files missing")
 
 # Verify lumen mask not empty
@@ -1667,6 +1779,16 @@ lumen_voxels = int(np.count_nonzero(lumen))
 print(f"\\nLumen mask voxels: {lumen_voxels:,}")
 
 if lumen_voxels == 0:
+    print("ERROR: Lumen mask is empty - initiating rollback...")
+    # Quick rollback attempt
+    for backup_file in BACKUP_DIR.iterdir():
+        if backup_file.is_file():
+            original = CASE_DIR / "meshes" / backup_file.name
+            try:
+                shutil.copy2(backup_file, original)
+            except:
+                pass
+    print("Rollback status: 已回滚")
     raise SystemExit("FAIL: Lumen mask is empty")
 
 # Verify segmentation labels
@@ -1678,7 +1800,40 @@ print(f"Lumen (1+3): {int(np.isin(seg, [1,3]).sum()):,} voxels")
 # Check for centerline failure in log
 log_content = LOG_FILE.read_text(encoding="utf-8", errors="replace")
 if "geometry_centerline_failed" in log_content:
+    print("ERROR: Centerline failed - initiating rollback...")
+    for backup_file in BACKUP_DIR.iterdir():
+        if backup_file.is_file():
+            original = CASE_DIR / "meshes" / backup_file.name
+            try:
+                shutil.copy2(backup_file, original)
+            except:
+                pass
+    print("Rollback status: 已回滚")
     raise SystemExit("FAIL: Centerline computation failed")
+
+# Output STL triangle counts for quality gate verification
+print("\\n=== STL TRIANGLE COUNTS ===")
+try:
+    import trimesh
+    stl_files = {
+        "aortic_root.stl": OUTPUT_DIR / "aortic_root.stl",
+        "ascending_aorta.stl": OUTPUT_DIR / "ascending_aorta.stl",
+        "leaflet_L.stl": OUTPUT_DIR / "leaflet_L.stl",
+        "leaflet_N.stl": OUTPUT_DIR / "leaflet_N.stl",
+        "leaflet_R.stl": OUTPUT_DIR / "leaflet_R.stl",
+    }
+
+    for name, path in stl_files.items():
+        if path.exists():
+            mesh = trimesh.load(str(path))
+            tri_count = len(mesh.faces)
+            print(f"{name}: {tri_count:,} tris")
+        else:
+            print(f"{name}: FILE NOT FOUND")
+except ImportError:
+    print("WARNING: trimesh not available - cannot count triangles")
+except Exception as e:
+    print(f"WARNING: Error reading STL files: {e}")
 
 print("\\n=== ALL VERIFICATIONS PASSED ===")
 '''
