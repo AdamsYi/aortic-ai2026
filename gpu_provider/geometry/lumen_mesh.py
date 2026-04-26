@@ -46,12 +46,32 @@ class MeshArtifacts:
 
 
 def extract_lumen_mask(multiclass_mask: np.ndarray, spacing_mm: tuple[float, float, float]) -> np.ndarray:
+    """Extract aortic lumen mask from multiclass segmentation.
+
+    Labels 1 (aortic_root) and 3 (ascending_aorta) form the lumen.
+    These may be disconnected, so we keep both components initially.
+    """
     mask = np.asarray(multiclass_mask)
     lumen = np.isin(mask, [1, 3])
+
+    # Debug: report initial lumen voxels
+    initial_voxels = int(np.sum(lumen))
+
     if not np.any(lumen):
+        # Fallback: use any segmentation
         lumen = mask > 0
 
-    lumen = keep_largest_component(lumen)
+    # Keep largest component, but if it's too small, keep all components
+    lumen_largest = keep_largest_component(lumen)
+    if np.sum(lumen_largest) < max(32, int(np.sum(lumen) * 0.3)):
+        # Largest component is <30% of total - keep all
+        lumen = lumen
+    else:
+        lumen = lumen_largest
+
+    if not np.any(lumen):
+        return np.zeros_like(lumen, dtype=bool)
+
     margin = (
         max(3, mm_to_vox_xy(6.0, spacing_mm)),
         max(3, mm_to_vox_xy(6.0, spacing_mm)),
@@ -66,9 +86,16 @@ def extract_lumen_mask(multiclass_mask: np.ndarray, spacing_mm: tuple[float, flo
         lumen_crop,
         min_voxels=max(32, int(round(200.0 / max(1.0, voxel_volume_mm3(spacing_mm))))),
     )
+
+    # If crop became empty, return original lumen
+    if not np.any(lumen_crop):
+        return np.asarray(lumen, dtype=bool)
+
     lumen_crop = smooth_binary_mask(lumen_crop, spacing_mm, sigma_mm=0.25)
     lumen_crop = ndimage.binary_fill_holes(lumen_crop)
     lumen = paste_bbox(lumen_crop, bbox, lumen.shape, dtype=bool)
+
+    # Keep largest component
     lumen = keep_largest_component(lumen)
     return np.asarray(lumen, dtype=bool)
 

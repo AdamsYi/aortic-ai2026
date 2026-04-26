@@ -19,6 +19,8 @@
 #   ./scripts/remote_win.sh inspect_case 5
 #   ./scripts/remote_win.sh diagnose_nme_seam --case-id 5
 #   ./scripts/remote_win.sh scan_imagecas_meshqa --case-ids 1,23,47
+#   ./scripts/remote_win.sh diagnose_segmentation
+#   ./scripts/remote_win.sh diagnose_lumen
 #
 # Env overrides:
 #   AORTICAI_WIN_BASE   default https://api.heartvalvepro.edu.kg
@@ -113,6 +115,20 @@ case "$SUB" in
       exit 2
     fi
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "diagnose_nme_seam", "args": sys.argv[1:]}))' "$@")
+    ;;
+  diagnose_segmentation)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 diagnose_segmentation" >&2
+      exit 2
+    fi
+    BODY='{"command":"diagnose_segmentation","args":[]}'
+    ;;
+  diagnose_lumen)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 diagnose_lumen" >&2
+      exit 2
+    fi
+    BODY='{"command":"diagnose_lumen","args":[]}'
     ;;
   *)
     echo "unknown subcommand: $SUB" >&2

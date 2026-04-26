@@ -16,6 +16,11 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+# Force UTF-8 encoding for Windows console
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 
 class CallbackSpec(BaseModel):
     url: Optional[str] = None
@@ -1396,6 +1401,94 @@ for subdir in ["meshes", "artifacts", "imaging_hidden", "qa"]:
 
 
 _ADMIN_WHITELIST["list_case_files"] = _cmd_list_case_files
+
+
+def _cmd_diagnose_lumen(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Diagnose lumen extraction for mao_mianqiang_preop case."""
+    snippet = '''
+import nibabel as nib
+import numpy as np
+from scipy import ndimage
+from pathlib import Path
+import sys
+
+sys.path.insert(0, r"C:\\AorticAI\\gpu_provider")
+from geometry.lumen_mesh import extract_lumen_mask
+
+case_dir = Path(r"C:\\AorticAI\\cases\\mao_mianqiang_preop")
+seg_path = case_dir / "meshes" / "segmentation.nii.gz"
+
+print("=" * 60)
+print("SEGMENTATION DIAGNOSIS")
+print("=" * 60)
+
+if not seg_path.exists():
+    print("ERROR: segmentation.nii.gz NOT FOUND")
+    raise SystemExit(1)
+
+nii = nib.load(str(seg_path))
+seg = nii.get_fdata().astype(np.uint8)
+spacing = tuple(float(x) for x in nii.header.get_zooms()[:3])
+
+print(f"Shape: {seg.shape}")
+print(f"Spacing: {spacing}")
+print(f"Unique labels: {np.unique(seg)}")
+print()
+
+for label in [0, 1, 2, 3]:
+    count = np.sum(seg == label)
+    pct = 100.0 * count / seg.size if seg.size > 0 else 0
+    print(f"Label {label}: {int(count):>10} voxels ({pct:6.3f}%)")
+
+print()
+lumen_direct = np.isin(seg, [1, 3])
+print(f"Lumen (labels 1+3 direct): {int(np.sum(lumen_direct))} voxels")
+
+# Check connectivity
+print()
+print("=== CONNECTIVITY ANALYSIS ===")
+root_mask = seg == 1
+asc_mask = seg == 3
+print(f"Root (label 1) raw voxels: {int(np.sum(root_mask))}")
+print(f"Ascending (label 3) raw voxels: {int(np.sum(asc_mask))}")
+
+if np.any(root_mask):
+    root_lab, root_num = ndimage.label(root_mask)
+    print(f"  Root connected components: {root_num}")
+    if root_num > 0:
+        root_counts = np.bincount(root_lab.ravel())
+        root_counts[0] = 0
+        print(f"  Root largest component: {int(np.max(root_counts))} voxels")
+
+if np.any(asc_mask):
+    asc_lab, asc_num = ndimage.label(asc_mask)
+    print(f"  Ascending connected components: {asc_num}")
+    if asc_num > 0:
+        asc_counts = np.bincount(asc_lab.ravel())
+        asc_counts[0] = 0
+        print(f"  Ascending largest component: {int(np.max(asc_counts))} voxels")
+
+combined = root_mask | asc_mask
+if np.any(combined):
+    combined_lab, combined_num = ndimage.label(combined)
+    print(f"  Combined (1+3) connected components: {combined_num}")
+
+print()
+print("=== EXTRACT_LUMEN_MASK EXECUTION ===")
+try:
+    lumen_mask = extract_lumen_mask(seg, spacing)
+    print(f"Result lumen voxels: {int(np.sum(lumen_mask))}")
+    if not np.any(lumen_mask):
+        print("WARNING: Lumen mask is EMPTY!")
+except Exception as e:
+    print(f"ERROR during extraction: {e}")
+    import traceback
+    traceback.print_exc()
+'''
+    return [sys.executable, "-u", "-c", snippet], Path(r"C:\AorticAI\gpu_provider")
+
+
+_ADMIN_WHITELIST["diagnose_lumen"] = _cmd_diagnose_lumen
 
 
 def _cmd_diagnose_segmentation(args: List[str]) -> tuple[List[str], Optional[Path]]:
