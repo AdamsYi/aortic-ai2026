@@ -141,17 +141,18 @@ for spec in "${OPTIONAL_FILES[@]}"; do
 done
 
 MEASUREMENTS_JSON="${MESH_DIR}/measurements.json"
+MEASUREMENTS_JSON_TMP="$(mktemp)"
 PLANNING_JSON_TMP="$(mktemp)"
-node -e 'const fs=require("fs"); const p=process.argv[1]; const out=process.argv[2]; const m=JSON.parse(fs.readFileSync(p,"utf8")); fs.writeFileSync(out, JSON.stringify(m.planning || m.planning_metrics || {}));' "$MEASUREMENTS_JSON" "$PLANNING_JSON_TMP"
+node -e 'const fs=require("fs"); const p=process.argv[1]; const outM=process.argv[2]; const outP=process.argv[3]; const m=JSON.parse(fs.readFileSync(p,"utf8")); const pears=m.pears_geometry && typeof m.pears_geometry==="object" ? m.pears_geometry : null; const measurementSummary={measurements:m.measurements||null,pears_geometry:pears?{intended_use:pears.intended_use||null,manufacturing_ready:Boolean(pears.manufacturing_ready),visual_ready:Boolean(pears.visual_ready),blockers:Array.isArray(pears.blockers)?pears.blockers:[],warnings:Array.isArray(pears.warnings)?pears.warnings:[],support_segment:pears.support_segment||null,diameter_stations:Array.isArray(pears.diameter_stations)?pears.diameter_stations:[],geometry:pears.geometry||null,quality:pears.quality||null,source:pears.source||null}:null,phase_metadata:m.phase_metadata||null,provenance:m.provenance||null,risk_flags:Array.isArray(m.risk_flags)?m.risk_flags:[]}; fs.writeFileSync(outM, JSON.stringify(measurementSummary)); fs.writeFileSync(outP, JSON.stringify(m.planning || m.planning_metrics || {}));' "$MEASUREMENTS_JSON" "$MEASUREMENTS_JSON_TMP" "$PLANNING_JSON_TMP"
 {
   printf "INSERT OR REPLACE INTO case_results (case_id, job_id, measurements_json, planning_json, created_at) VALUES ('%s','%s','%s','%s',%s);\n" \
     "$(sql_escape "$CASE_ID")" \
     "$(sql_escape "$JOB_ID")" \
-    "$(json_sql_literal "$MEASUREMENTS_JSON")" \
+    "$(json_sql_literal "$MEASUREMENTS_JSON_TMP")" \
     "$(json_sql_literal "$PLANNING_JSON_TMP")" \
     "$(python3 -c 'import time; print(int(time.time() * 1000))')"
 } >> "$SQL_FILE"
-rm -f "$PLANNING_JSON_TMP"
+rm -f "$MEASUREMENTS_JSON_TMP" "$PLANNING_JSON_TMP"
 
 echo "[3/4] Updating D1 metadata..."
 npx wrangler d1 execute "$D1_DB" --remote --file "$SQL_FILE" >/dev/null
