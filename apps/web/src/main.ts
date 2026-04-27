@@ -1108,6 +1108,11 @@ async function renderFallbackVolumePreview(casePayload: WorkstationCasePayload |
 
 async function retryLatestCase(): Promise<void> {
   setBootStage('loading_case_index', 'Retrying current case');
+  const explicitCaseId = requestedExplicitCaseId();
+  if (explicitCaseId) {
+    await loadCase(explicitCaseId);
+    return;
+  }
   if (requestedCaseMode() === 'showcase') {
     await loadShowcaseCase({ updateUrl: false });
     return;
@@ -2237,6 +2242,15 @@ function requestedCaseMode(): CaseMode {
   return 'showcase';
 }
 
+function requestedExplicitCaseId(): string | null {
+  const current = new URL(window.location.href);
+  const explicit = (current.searchParams.get('case') || '').trim();
+  const normalized = explicit.toLowerCase();
+  if (!explicit || normalized === 'showcase' || normalized === 'reference' || normalized === 'latest') return null;
+  const safe = explicit.replace(/[^a-zA-Z0-9_-]/g, '');
+  return safe || null;
+}
+
 function updateCaseModeUrl(mode: CaseMode, replace = false): void {
   const current = new URL(window.location.href);
   if (mode === 'showcase') current.searchParams.set('case', 'showcase');
@@ -2275,12 +2289,18 @@ function updateReportLinks(casePayload: WorkstationCasePayload | null): void {
 
 function syncCaseModeButtons(): void {
   const mode = requestedCaseMode();
-  DOM.loadShowcaseButton?.classList.toggle('active', mode === 'showcase');
-  DOM.loadLatestButton?.classList.toggle('active', mode === 'latest');
+  const explicitCaseId = requestedExplicitCaseId();
+  DOM.loadShowcaseButton?.classList.toggle('active', !explicitCaseId && mode === 'showcase');
+  DOM.loadLatestButton?.classList.toggle('active', !explicitCaseId && mode === 'latest');
 }
 
 async function loadInitialCase(): Promise<void> {
   syncCaseModeButtons();
+  const explicitCaseId = requestedExplicitCaseId();
+  if (explicitCaseId) {
+    await loadCase(explicitCaseId);
+    return;
+  }
   if (requestedCaseMode() === 'latest') {
     await loadLatestCase({ updateUrl: false });
     return;
