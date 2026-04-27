@@ -1,30 +1,43 @@
 #!/usr/bin/env python3
-"""
-Download and process mao_mianqiang_preop NIfTI from R2.
-Run this directly on Windows GPU node.
-"""
+"""Download and process mao_mianqiang_preop NIfTI from Cloudflare storage."""
 import os
 import sys
 import subprocess
 from pathlib import Path
 
 CASE_ID = "mao_mianqiang_preop"
-R2_URL = "https://pub-aortic-ct-raw.r2.cloudflarestorage.com/mao_mianqiang_preop/ct_preop.nii.gz"
-REPO_ROOT = Path(r"C:\aortic-ai")
+SOURCE_URL = os.getenv(
+    "AORTICAI_MAO_SOURCE_URL",
+    "https://aortic-ai-api.we085197.workers.dev/studies/mao_mianqiang_preop/raw/ct_preop.nii.gz",
+)
+SOURCE_HEADER = os.getenv("AORTICAI_MAO_SOURCE_HEADER", "").strip()
+SOURCE_HEADER_VALUE = os.getenv("AORTICAI_MAO_SOURCE_HEADER_VALUE", "").strip()
+DEVICE = os.getenv("AORTICAI_MAO_DEVICE", "cpu")
+QUALITY = os.getenv("AORTICAI_MAO_QUALITY", "high")
+
+for candidate in [r"C:\AorticAI", r"C:\aortic-ai", r"C:\aortic_ai"]:
+    if Path(candidate).exists():
+        REPO_ROOT = Path(candidate)
+        break
+else:
+    REPO_ROOT = Path(r"C:\AorticAI")
+
 CASE_DIR = REPO_ROOT / "cases" / CASE_ID
 NIFTI_DEST = CASE_DIR / "imaging_hidden" / "ct_preop.nii.gz"
 
 def download_with_powershell(url: str, dest: Path) -> None:
-    """Use PowerShell with multiple SSL bypass strategies."""
     dest.parent.mkdir(parents=True, exist_ok=True)
+    header_script = ""
+    if SOURCE_HEADER and SOURCE_HEADER_VALUE:
+        header_script = f'$client.Headers.Add("{SOURCE_HEADER}", "{SOURCE_HEADER_VALUE}")'
 
-    # Strategy 1: PowerShell with System.Net.WebClient
     ps_script = f'''
 $url = "{url}"
 $dest = "{dest}"
 try {{
     $client = New-Object System.Net.WebClient
     $client.Headers.Add("User-Agent", "PowerShell")
+    {header_script}
     $client.DownloadFile($url, $dest)
     Write-Host "WebClient download succeeded: $($dest.Length / 1MB) MB"
 }} catch {{
@@ -39,55 +52,97 @@ try {{
         return
 
     print(f"WebClient failed: {result.stderr[:200] if result.stderr else result.stdout[:200]}")
+    raise RuntimeError("Download failed")
 
-    # Strategy 2: BITS (Background Intelligent Transfer Service)
-    print("Trying BITS transfer...")
-    bits_cmd = f'''
-$job = Start-BitsTransfer -Source "{url}" -Destination "{dest}" -Description "Downloading NIfTI" -DisplayName "AorticAI Download"
-if ($job.JobState -eq 'Transferred') {{
-    Complete-BitsTransfer -BitsJob $job
-    Write-Host "BITS download succeeded"
-}} else {{
-    Write-Host "BITS download failed with state: $($job.JobState)"
-    throw "BITS transfer failed"
-}}
-'''
-    result = subprocess.run(["powershell", "-Command", bits_cmd], capture_output=True, text=True)
-    if result.returncode == 0 and dest.exists():
-        print(f"BITS download succeeded: {dest.stat().st_size / (1024*1024):.1f} MB")
+
+def run_pipeline() -> None:
+    gpu_provider_dir = REPO_ROOT / "gpu_provider"
+    output_mask = CASE_DIR / "meshes" / "segmentation.nii.gz"
+    output_json = CASE_DIR / "artifacts" / "pipeline_result.json"
+    output_dir = CASE_DIR / "meshes"
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    cmd = [
+        sys.executable,
+        "-u",
+        str(gpu_provider_dir / "pipeline_runner.py"),
+        "--input",
+        str(NIFTI_DEST),
+        "--output-mask",
+        str(output_mask),
+        "--output-json",
+        str(output_json),
+        "--output-dir",
+        str(output_dir),
+        "--device",
+        DEVICE,
+        "--quality",
+        QUALITY,
+        "--job-id",
+        CASE_ID,
+        "--study-id",
+        CASE_ID,
+    ]
+    print("Running pipeline:")
+    print(" ".join(cmd))
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env)
+    if result.returncode != 0:
+        raise RuntimeError(f"Pipeline failed with code {result.returncode}")
+
+
+def verify_outputs() -> None:
+    required = [
+        CASE_DIR / "meshes" / "segmentation.nii.gz",
+        CASE_DIR / "meshes" / "lumen_mask.nii.gz",
+        CASE_DIR / "meshes" / "aortic_root.stl",
+        CASE_DIR / "meshes" / "ascending_aorta.stl",
+        CASE_DIR / "meshes" / "leaflets.stl",
+        CASE_DIR / "meshes" / "centerline.json",
+        CASE_DIR / "meshes" / "annulus_plane.json",
+        CASE_DIR / "meshes" / "aortic_root_model.json",
+        CASE_DIR / "meshes" / "leaflet_model.json",
+        CASE_DIR / "meshes" / "measurements.json",
+        CASE_DIR / "meshes" / "planning_report.pdf",
+        CASE_DIR / "artifacts" / "pipeline_result.json",
+    ]
+    missing = [str(path) for path in required if not path.exists() or path.stat().st_size <= 0]
+    if missing:
+        raise RuntimeError(f"Missing pipeline outputs: {missing}")
+
+    try:
+        import trimesh
+    except Exception:
+        print("trimesh unavailable; skipping STL triangle count")
         return
 
-    print(f"BITS failed: {result.stderr[:200] if result.stderr else result.stdout[:200]}")
-    raise RuntimeError(f"Download failed - all methods (curl/WebClient/BITS) failed")
+    for name in ["aortic_root.stl", "ascending_aorta.stl", "leaflets.stl"]:
+        path = CASE_DIR / "meshes" / name
+        mesh = trimesh.load(str(path))
+        print(f"{name}: {len(mesh.faces):,} tris")
 
 def main():
     print(f"=== Processing {CASE_ID} ===")
-    print(f"Downloading from R2: {R2_URL}")
+    print(f"Repo root: {REPO_ROOT}")
+    print(f"Downloading from Cloudflare source: {SOURCE_URL}")
 
-    # Create directories
     CASE_DIR.mkdir(parents=True, exist_ok=True)
     (CASE_DIR / "imaging_hidden").mkdir(parents=True, exist_ok=True)
     (CASE_DIR / "meshes").mkdir(parents=True, exist_ok=True)
     (CASE_DIR / "artifacts").mkdir(parents=True, exist_ok=True)
     (CASE_DIR / "qa").mkdir(parents=True, exist_ok=True)
 
-    # Download from R2 using PowerShell
-    print("Downloading NIfTI file (via PowerShell)...")
+    print("Downloading NIfTI file...")
     try:
-        download_with_powershell(R2_URL, NIFTI_DEST)
+        download_with_powershell(SOURCE_URL, NIFTI_DEST)
     except RuntimeError as e:
         print(f"ERROR: Download failed - {e}")
         sys.exit(1)
 
     print(f"Downloaded: {NIFTI_DEST.stat().st_size / (1024*1024):.1f} MB")
-
-    # Run processing
-    os.chdir(REPO_ROOT / "gpu_provider")
-    sys.argv = ["process_local_nifti", "--case-id", CASE_ID, "--nifti", str(NIFTI_DEST)]
-
-    # Import and run process_local_nifti.main()
-    from process_local_nifti import main as process_main
-    process_main()
+    run_pipeline()
+    verify_outputs()
+    print("=== Processing complete ===")
 
 if __name__ == "__main__":
     main()

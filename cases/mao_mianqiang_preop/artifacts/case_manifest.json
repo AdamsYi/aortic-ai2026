@@ -1,0 +1,143 @@
+{
+  "case_id": "mao_mianqiang_preop",
+  "case_role": [
+    "clinical",
+    "first_real_case",
+    "pears_candidate"
+  ],
+  "display_name": {
+    "zh-CN": "毛棉强 根部瘤 术前 CTA",
+    "en": "Mao Mianqiang Aortic Root Aneurysm Pre-op CTA"
+  },
+  "placeholder": false,
+  "not_real_cta": false,
+  "case_type": "real_pipeline_case",
+  "data_source": "cloudflare_r2_raw_cta",
+  "clinical_use": "pears_first_case_candidate",
+  "status": "incomplete",
+  "display_ready": false,
+  "note": "Raw CTA is stored in Cloudflare R2. Clinical-grade derived artifacts are pending Windows provider processing.",
+  "build_version": "mao-r2-source-20260427",
+  "last_modified": "2026-04-27T00:00:00Z",
+  "scan_date": "2018-05-15",
+  "pipeline_version": "pending_windows_provider_run",
+  "study_meta": {
+    "slice_thickness_mm": 0.8,
+    "voxel_spacing_mm": [
+      0.38671875,
+      0.38671875,
+      0.8
+    ],
+    "is_tavi_root_covered": true,
+    "is_vsrr_root_covered": true,
+    "is_pears_covered": true,
+    "is_root_covered": true,
+    "is_iliofemoral_covered": true,
+    "is_cropped": false,
+    "contrast_phase": "arterial",
+    "contrast_bolus": "Iodine",
+    "cardiac_phase": "diastole",
+    "cardiac_phase_percent": 80,
+    "is_ecg_gated": true,
+    "fov_mm": [
+      198,
+      198,
+      528
+    ],
+    "scanner_manufacturer": "Philips",
+    "scanner_model": "Philips Portal",
+    "reconstruction_kernel": "B"
+  },
+  "data_quality": {
+    "passes_sizing_gate": true,
+    "allowed_procedures": [
+      "PEARS"
+    ],
+    "failure_reasons": [],
+    "advisories": [
+      "derived_artifacts_pending_provider_processing",
+      "clinical_review_required_before_sizing"
+    ]
+  },
+  "storage": {
+    "raw_ct": {
+      "bucket": "aortic-ct-raw",
+      "r2_key": "studies/mao_mianqiang_preop/raw/ct_preop.nii.gz",
+      "bytes": 241749236,
+      "sha256": "f44bf94ff96cf412b6f45a176b5d9ff24f723ad4a4e4f7efff9022eab0ca61a5"
+    }
+  },
+  "artifact_index": {
+    "case_manifest": "artifacts/case_manifest.json"
+  },
+  "imaging_index": {
+    "raw_ct": "r2://aortic-ct-raw/studies/mao_mianqiang_preop/raw/ct_preop.nii.gz"
+  },
+  "mesh_index": {},
+  "report_index": {},
+  "qa_index": {},
+  "capabilities": {
+    "cpr": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "provider_artifacts_pending"
+    },
+    "coronary_ostia": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "provider_artifacts_pending"
+    },
+    "leaflet_geometry": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "provider_artifacts_pending"
+    },
+    "pears_geometry": {
+      "available": false,
+      "inferred": false,
+      "legacy": false,
+      "source": "unavailable",
+      "reason": "provider_artifacts_pending"
+    }
+  },
+  "mesh_qa": {
+    "aortic_root": {
+      "tri_count": 0,
+      "passes_gate": false,
+      "failure_reasons": [
+        "provider_artifacts_pending"
+      ]
+    },
+    "ascending_aorta": {
+      "tri_count": 0,
+      "passes_gate": false,
+      "failure_reasons": [
+        "provider_artifacts_pending"
+      ]
+    },
+    "annulus_ring": {
+      "tri_count": 0,
+      "passes_gate": false,
+      "failure_reasons": [
+        "provider_artifacts_pending"
+      ]
+    },
+    "leaflets": {
+      "tri_count": 0,
+      "passes_gate": false,
+      "failure_reasons": [
+        "provider_artifacts_pending"
+      ]
+    }
+  },
+  "uncertainty_summary": {
+    "clinician_review_required": true,
+    "pipeline_risk_flags": 1
+  }
+}

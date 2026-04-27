@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # remote_win.sh — Mac → Win AorticAI remote control over the existing
-# cloudflared tunnel. Streams /admin/run output live to the terminal.
+# cloudflared tunnel. Prints /admin/run output and validates HTTP status.
 #
 # Usage:
 #   ./scripts/remote_win.sh status
 #   ./scripts/remote_win.sh git_pull
+#   ./scripts/remote_win.sh git_reset
 #   ./scripts/remote_win.sh pip_sync
 #   ./scripts/remote_win.sh ingest --dry-run --case-ids 1,2,3
 #   ./scripts/remote_win.sh ingest --case-ids 5
@@ -22,6 +23,9 @@
 #   ./scripts/remote_win.sh diagnose_segmentation
 #   ./scripts/remote_win.sh diagnose_lumen
 #   ./scripts/remote_win.sh run_mao_pipeline
+#   ./scripts/remote_win.sh run_mao_pipeline_http
+#   ./scripts/remote_win.sh run_mao_pipeline_r2
+#   ./scripts/remote_win.sh list_case_files --case-id 999
 #
 # Env overrides:
 #   AORTICAI_WIN_BASE   default https://api.heartvalvepro.edu.kg
@@ -33,7 +37,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|git_reset|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam|run_mao_pipeline|run_mao_pipeline_http|run_mao_pipeline_r2|list_case_files> [args...]" >&2
   exit 2
 fi
 
@@ -41,7 +45,7 @@ SUB="$1"
 shift
 
 case "$SUB" in
-  status|git_pull)
+  status|git_pull|git_reset)
     COMMAND="$SUB"
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1], "args": []}))' "$COMMAND")
     ;;
@@ -138,20 +142,45 @@ case "$SUB" in
     fi
     BODY='{"command":"run_mao_pipeline","args":[]}'
     ;;
+  run_mao_pipeline_http)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 run_mao_pipeline_http" >&2
+      exit 2
+    fi
+    BODY='{"command":"run_module","args":["gpu_provider.process_mao_from_http"]}'
+    ;;
+  run_mao_pipeline_r2)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 run_mao_pipeline_r2" >&2
+      exit 2
+    fi
+    BODY='{"command":"run_module","args":["gpu_provider.process_mao_from_r2"]}'
+    ;;
+  list_case_files)
+    if [[ $# -ne 2 || "$1" != "--case-id" ]]; then
+      echo "Usage: $0 list_case_files --case-id <id>" >&2
+      exit 2
+    fi
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "list_case_files", "args": sys.argv[1:]}))' "$@")
+    ;;
   *)
     echo "unknown subcommand: $SUB" >&2
     exit 2
     ;;
 esac
 
+RESPONSE_BODY=$(mktemp)
+trap 'rm -f "$RESPONSE_BODY"' EXIT
+
 HTTP_CODE=$(curl --http1.1 --no-buffer -sS \
   -X POST "${BASE}/admin/run" \
   -H "content-type: application/json" \
   -H "x-provider-secret: ${SECRET}" \
   --data "$BODY" \
-  -o >(cat) \
+  -o "$RESPONSE_BODY" \
   -w '%{http_code}')
 
+cat "$RESPONSE_BODY"
 echo
 if [[ "$HTTP_CODE" != "200" ]]; then
   echo "[remote_win] HTTP ${HTTP_CODE}" >&2

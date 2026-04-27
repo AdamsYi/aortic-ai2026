@@ -547,6 +547,18 @@ def main() -> None:
         out[(out == 1) & (~aorta)] = 0
         out[(out == 3) & (~aorta)] = 0
 
+        label_counts = {
+            "root": int((out == 1).sum()),
+            "leaflets": int((out == 2).sum()),
+            "ascending": int((out == 3).sum()),
+        }
+        if label_counts["root"] <= 0 or label_counts["ascending"] <= 0:
+            raise RuntimeError(
+                "aortic_multiclass_required_labels_empty: "
+                f"root={label_counts['root']} ascending={label_counts['ascending']} "
+                f"leaflets={label_counts['leaflets']}"
+            )
+
         out_nii = nib.Nifti1Image(out.astype(np.uint8), aorta_nii.affine, aorta_nii.header)
         out_nii.header.set_data_dtype(np.uint8)
         nib.save(out_nii, str(output_path))
@@ -562,11 +574,7 @@ def main() -> None:
                 "stj_z": int(z_stj),
                 "asc_end_z": int(z_end),
                 "direction": int(direction),
-                "voxels": {
-                    "root": int((out == 1).sum()),
-                    "leaflets": int((out == 2).sum()),
-                    "ascending": int((out == 3).sum()),
-                },
+                "voxels": label_counts,
                 "model_stack": [
                     "TotalSegmentator task=total (open) with ROI subset [aorta, heart, arch branches]",
                     "Centerline-tracked proximal aorta split for root/STJ/ascending separation",

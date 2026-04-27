@@ -26,6 +26,7 @@ Organized by function. All scripts are run from the repo root.
 | `deploy/promote_default_case_direct.sh` | Promotes default case to production |
 | `deploy/publish_default_case.sh` | Publishes default case bundle |
 | `deploy/publish_digital_twin_default_case.sh` | Publishes digital twin variant |
+| `deploy/publish_case_result.sh` | Publishes a completed non-default case result to R2/D1 |
 
 ## Diagnostic Scripts
 
