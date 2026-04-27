@@ -39,7 +39,7 @@ def _progress(step: str, detail: str = "") -> None:
 
 def run_cmd(cmd: list[str]) -> tuple[str, str]:
     print("[cmd]", " ".join(cmd), flush=True)
-    proc = subprocess.run(cmd, text=True, capture_output=True)
+    proc = subprocess.run(cmd, text=True, capture_output=True, encoding="utf-8", errors="replace")
     if proc.stdout:
         print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n", flush=True)
     if proc.stderr:
@@ -301,6 +301,43 @@ def radial_gate(mask: np.ndarray, z_indices: np.ndarray, r_min: float, r_max: fl
     return out
 
 
+def fallback_split_aorta_by_axis(
+    aorta: np.ndarray,
+    seed_z: int,
+    direction: int,
+    spacing: tuple[float, float, float],
+) -> tuple[np.ndarray, np.ndarray]:
+    tube = keep_top_components(aorta, top_k=1)
+    root = np.zeros_like(aorta, dtype=bool)
+    ascending = np.zeros_like(aorta, dtype=bool)
+    z_values = np.where(tube.any(axis=(0, 1)))[0]
+    if z_values.size == 0:
+        return root, ascending
+
+    z_min = int(z_values.min())
+    z_max = int(z_values.max())
+    anchor = int(np.clip(seed_z, z_min, z_max))
+    root_span = mm_to_vox_z(45.0, spacing)
+    asc_span = mm_to_vox_z(120.0, spacing)
+
+    if direction >= 0:
+        root_start = max(z_min, anchor - mm_to_vox_z(8.0, spacing))
+        root_end = min(z_max, root_start + root_span)
+        asc_start = min(z_max, root_end + 1)
+        asc_end = min(z_max, asc_start + asc_span)
+    else:
+        root_end = min(z_max, anchor + mm_to_vox_z(8.0, spacing))
+        root_start = max(z_min, root_end - root_span)
+        asc_end = max(z_min, root_start - 1)
+        asc_start = max(z_min, asc_end - asc_span)
+
+    lo, hi = sorted((root_start, root_end))
+    root[:, :, lo : hi + 1] = tube[:, :, lo : hi + 1]
+    lo, hi = sorted((asc_start, asc_end))
+    ascending[:, :, lo : hi + 1] = tube[:, :, lo : hi + 1]
+    return root & aorta, ascending & aorta
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, help="Input CTA NIfTI (.nii/.nii.gz)")
@@ -469,6 +506,11 @@ def main() -> None:
                     ascending[:, :, z] = asc_tube[:, :, z]
             ascending &= aorta
 
+        split_fallback_used = False
+        if not root.any() or not ascending.any():
+            root, ascending = fallback_split_aorta_by_axis(aorta, seed_z, direction, spacing)
+            split_fallback_used = True
+
         # CTA-derived leaflet proxy in annulus/root band.
         leaflets = np.zeros_like(aorta, dtype=bool)
         if root.any():
@@ -574,6 +616,7 @@ def main() -> None:
                 "stj_z": int(z_stj),
                 "asc_end_z": int(z_end),
                 "direction": int(direction),
+                "split_fallback_used": bool(split_fallback_used),
                 "voxels": label_counts,
                 "model_stack": [
                     "TotalSegmentator task=total (open) with ROI subset [aorta, heart, arch branches]",
