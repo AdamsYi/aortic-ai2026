@@ -18,7 +18,7 @@ INFERENCE_SKIP_SEGMENTATION = "true"
 API_BASE_URL = "https://aortic-ai-api.we085197.workers.dev"
 PROVIDER_URL = "https://api.heartvalvepro.edu.kg/infer"
 PROVIDER_HEALTH_URL = "https://api.heartvalvepro.edu.kg/health"
-BUILD_VERSION = "33672124222d"
+BUILD_VERSION = "d42fcb37d6ec"
 # Annotation token TTL (seconds). Default 3600. Password itself must be set via
 # `wrangler secret put ANNOTATION_PASSWORD`; leaving it unset disables the
 # auth gate (dev/local convenience) — the Worker returns 503 on /auth so the

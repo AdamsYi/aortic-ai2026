@@ -2065,7 +2065,9 @@ async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Resp
         planning: caseResult?.planning_json ?? null,
         artifactTypes,
       });
-      if (!readiness.display_ready) continue;
+      const measurementsObject = parseJsonColumn(caseResult?.measurements_json);
+      const gate = derivePublishedCaseGate(readiness, measurementsObject?.pears_geometry);
+      if (!gate.display_ready) continue;
       const workstationResponse = await getWorkstationCase(String(candidate.id || "").trim(), env, request);
       if (!workstationResponse.ok) continue;
       const workstationPayload = await workstationResponse.clone().json() as Record<string, unknown>;
@@ -2284,6 +2286,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     planning: caseResultRow?.planning_json ?? caseResultPlanning ?? null,
     artifactTypes,
   });
+  const caseGate = derivePublishedCaseGate(caseReadiness, pearsGeometryArtifact || pearsGeometryFallback);
   const acceptanceReview = buildAcceptanceReview({
     pipeline_run: pipelineRun,
     viewer_bootstrap: {
@@ -2309,9 +2312,12 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
   const payload = {
     build_version: getBuildVersion(),
     case_id: resolvedCaseId,
-    display_ready: caseReadiness.display_ready,
-    completion_state: caseReadiness.completion_state,
+    display_ready: caseGate.display_ready,
+    completion_state: caseGate.completion_state,
     missing_requirements: caseReadiness.missing_requirements,
+    status: caseGate.status,
+    review_status: caseGate.review_status,
+    pears_visual_ready: caseGate.pears_visual_ready,
     display_name: {
       "zh-CN": "最新真实病例",
       en: "Latest Real Case",
@@ -2682,6 +2688,18 @@ type CaseDisplayReadiness = {
   has_report_pdf: boolean;
 };
 
+type PublishedCaseGate = {
+  display_ready: boolean;
+  completion_state: "display_ready" | "incomplete_case_result";
+  status: "completed" | "incomplete";
+  review_status: "ready" | "review_required";
+  pears_visual_ready: boolean;
+  manufacturing_ready: boolean | null;
+  intended_use: string | null;
+  blockers: string[];
+  warnings: string[];
+};
+
 function parseCaseResultObject(value: unknown): Record<string, unknown> | null {
   if (typeof value === "string") return parseJsonColumn(value);
   return pickObject(value);
@@ -2726,6 +2744,44 @@ function evaluateCaseDisplayReadiness(input: {
     has_root_stl: hasRootStl,
     has_report_pdf: hasReportPdf,
   };
+}
+
+function derivePublishedCaseGate(
+  readiness: CaseDisplayReadiness,
+  pearsGeometry: unknown
+): PublishedCaseGate {
+  const pears = pickObject(pearsGeometry);
+  const blockers = stringList(pears?.blockers);
+  const warnings = stringList(pears?.warnings);
+  const intendedUse = nullableString(pears?.intended_use);
+  const manufacturingReady = typeof pears?.manufacturing_ready === "boolean" ? pears.manufacturing_ready : null;
+  const visualReady = Boolean(pears?.visual_ready);
+  const quality = pickObject(pears?.quality);
+  const sourceCta = pickObject(quality?.source_cta);
+  const dataQuality = pickObject(pears?.data_quality);
+  const visualOnly =
+    intendedUse === "visual_planning_only"
+    || manufacturingReady === false
+    || Boolean(dataQuality && dataQuality.passes_sizing_gate === false)
+    || Boolean(sourceCta && sourceCta.passes_pears_sizing_gate === false);
+  const reviewRequired = !readiness.display_ready || (visualOnly && (blockers.length > 0 || manufacturingReady === false));
+  const displayReady = readiness.display_ready && !reviewRequired;
+  return {
+    display_ready: displayReady,
+    completion_state: displayReady ? "display_ready" : "incomplete_case_result",
+    status: displayReady ? "completed" : "incomplete",
+    review_status: displayReady ? "ready" : "review_required",
+    pears_visual_ready: visualReady,
+    manufacturing_ready: manufacturingReady,
+    intended_use: intendedUse,
+    blockers,
+    warnings,
+  };
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => nullableString(entry)).filter((entry): entry is string => Boolean(entry));
 }
 
 function stringifyJsonColumn(value: unknown): string | null {
@@ -3227,11 +3283,13 @@ function buildCaseResultLinks(caseId: string): Record<string, string> {
 async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersion: string): Promise<Record<string, unknown>> {
   const hydratedRow = await hydrateCaseResultRow(env, row.case_id, row.job_id, row) || row;
   const artifactTypes = await getJobArtifactTypeSet(env, hydratedRow.job_id);
+  const measurementsObject = parseJsonColumn(hydratedRow.measurements_json);
   const readiness = evaluateCaseDisplayReadiness({
     measurements: hydratedRow.measurements_json,
     planning: hydratedRow.planning_json,
     artifactTypes,
   });
+  const gate = derivePublishedCaseGate(readiness, measurementsObject?.pears_geometry);
   return {
     id: hydratedRow.case_id,
     job_id: hydratedRow.job_id,
@@ -3243,19 +3301,35 @@ async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersi
     case_role: ["latest", "derived_result"],
     placeholder: false,
     not_real_cta: false,
-    status: readiness.display_ready ? "completed" : "incomplete",
+    status: gate.status,
+    review_status: gate.review_status,
     scan_date: null,
     pipeline_version: null,
     build_version: buildVersion,
     has_planning: readiness.has_planning,
     has_measurements: readiness.has_measurements,
     has_meshes: readiness.has_root_stl,
-    display_ready: readiness.display_ready,
-    completion_state: readiness.completion_state,
+    display_ready: gate.display_ready,
+    completion_state: gate.completion_state,
     missing_requirements: readiness.missing_requirements,
-    capabilities: {},
+    pears_visual_ready: gate.pears_visual_ready,
+    manufacturing_ready: gate.manufacturing_ready,
+    capabilities: {
+      pears_geometry: {
+        available: gate.pears_visual_ready,
+        inferred: false,
+        legacy: false,
+        source: gate.pears_visual_ready ? "measurements_artifact" : "unavailable",
+        reason: gate.pears_visual_ready ? null : "pears_geometry_missing",
+      },
+    },
     planning_summary: {},
-    quality_gates_summary: {},
+    quality_gates_summary: {
+      intended_use: gate.intended_use,
+      manufacturing_ready: gate.manufacturing_ready,
+      blockers: gate.blockers,
+      warnings: gate.warnings,
+    },
     links: buildCaseResultLinks(hydratedRow.case_id),
   };
 }
