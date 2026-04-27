@@ -30,6 +30,9 @@ import nibabel as nib
 import numpy as np
 from scipy import ndimage
 
+MIN_AORTA_VOXELS = 1000
+MIN_REQUIRED_LABEL_VOXELS = 500
+
 
 def _progress(step: str, detail: str = "") -> None:
     ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -91,6 +94,24 @@ def load_mask_optional(path: Path, shape: tuple[int, int, int]) -> np.ndarray:
         return np.zeros(shape, dtype=bool)
     arr = nib.load(str(path)).get_fdata()
     return arr > 0.5
+
+
+def load_open_totalseg_masks(
+    seg_dir: Path,
+) -> tuple[nib.Nifti1Image, np.ndarray, tuple[float, float, float], np.ndarray, np.ndarray]:
+    aorta_nii = nib.load(str(seg_dir / "aorta.nii.gz"))
+    aorta = aorta_nii.get_fdata() > 0.5
+    spacing = tuple(float(x) for x in aorta_nii.header.get_zooms()[:3])
+    shape = tuple(int(v) for v in aorta.shape)
+    heart = load_mask_optional(seg_dir / "heart.nii.gz", shape)
+    branch = (
+        load_mask_optional(seg_dir / "brachiocephalic_trunk.nii.gz", shape)
+        | load_mask_optional(seg_dir / "common_carotid_artery_right.nii.gz", shape)
+        | load_mask_optional(seg_dir / "common_carotid_artery_left.nii.gz", shape)
+        | load_mask_optional(seg_dir / "subclavian_artery_right.nii.gz", shape)
+        | load_mask_optional(seg_dir / "subclavian_artery_left.nii.gz", shape)
+    )
+    return aorta_nii, aorta, spacing, heart, branch
 
 
 def keep_top_components(mask: np.ndarray, top_k: int = 1) -> np.ndarray:
@@ -456,23 +477,58 @@ def main() -> None:
             _progress("totalsegmentator", f"cmd={' '.join(str(part) for part in totalseg_cmd)}")
             run_cmd(totalseg_cmd)
 
-        aorta_nii = nib.load(str(seg_dir / "aorta.nii.gz"))
-        aorta = aorta_nii.get_fdata() > 0.5
-        spacing = tuple(float(x) for x in aorta_nii.header.get_zooms()[:3])
-        shape = tuple(int(v) for v in aorta.shape)
-
-        heart = load_mask_optional(seg_dir / "heart.nii.gz", shape)
-        branch = (
-            load_mask_optional(seg_dir / "brachiocephalic_trunk.nii.gz", shape)
-            | load_mask_optional(seg_dir / "common_carotid_artery_right.nii.gz", shape)
-            | load_mask_optional(seg_dir / "common_carotid_artery_left.nii.gz", shape)
-            | load_mask_optional(seg_dir / "subclavian_artery_right.nii.gz", shape)
-            | load_mask_optional(seg_dir / "subclavian_artery_left.nii.gz", shape)
-        )
-
+        aorta_nii, aorta, spacing, heart, branch = load_open_totalseg_masks(seg_dir)
         aorta = keep_top_components(aorta, top_k=1)
+        aorta_voxels = int(aorta.sum())
+        if aorta_voxels < MIN_AORTA_VOXELS and args.quality == "high":
+            _progress(
+                "totalsegmentator",
+                f"aorta mask too small ({aorta_voxels} voxels), retrying fast open model",
+            )
+            retry_dir = td_path / "ts_total_open_fast_retry"
+            retry_dir.mkdir(parents=True, exist_ok=True)
+            retry_cmd_base = [
+                totalseg_bin,
+                "-i",
+                str(input_path),
+                "-o",
+                str(retry_dir),
+                "--task",
+                "total",
+                "--roi_subset",
+                "aorta",
+                "heart",
+                "brachiocephalic_trunk",
+                "common_carotid_artery_right",
+                "common_carotid_artery_left",
+                "subclavian_artery_right",
+                "subclavian_artery_left",
+                "--fast",
+            ]
+            if args.device == "gpu":
+                retry_gpu = [*retry_cmd_base, "--device", "gpu"]
+                retry_cpu = [*retry_cmd_base, "--device", "cpu"]
+                _run_totalsegmentator(retry_gpu, retry_cpu)
+            else:
+                retry_cmd = [*retry_cmd_base, "--device", args.device]
+                _progress("totalsegmentator", f"retry cmd={' '.join(str(part) for part in retry_cmd)}")
+                run_cmd(retry_cmd)
+            retry_aorta_nii, retry_aorta, retry_spacing, retry_heart, retry_branch = load_open_totalseg_masks(retry_dir)
+            retry_aorta = keep_top_components(retry_aorta, top_k=1)
+            retry_voxels = int(retry_aorta.sum())
+            _progress("totalsegmentator", f"fast retry aorta voxels={retry_voxels}")
+            if retry_voxels > aorta_voxels:
+                aorta_nii = retry_aorta_nii
+                aorta = retry_aorta
+                spacing = retry_spacing
+                heart = retry_heart
+                branch = retry_branch
+                aorta_voxels = retry_voxels
+
         if not aorta.any():
             raise RuntimeError("aorta segmentation is empty")
+        if aorta_voxels < MIN_AORTA_VOXELS:
+            raise RuntimeError(f"aorta_segmentation_too_small: voxels={aorta_voxels}")
 
         seed_z, seed_xy = pick_seed(aorta, heart, spacing)
         seed_z = int(np.clip(seed_z, 0, aorta.shape[2] - 1))
@@ -649,7 +705,10 @@ def main() -> None:
             "leaflets": int((out == 2).sum()),
             "ascending": int((out == 3).sum()),
         }
-        if label_counts["root"] <= 0 or label_counts["ascending"] <= 0:
+        if (
+            label_counts["root"] < MIN_REQUIRED_LABEL_VOXELS
+            or label_counts["ascending"] < MIN_REQUIRED_LABEL_VOXELS
+        ):
             root, ascending, split_fallback_meta = best_fallback_split(aorta, seed_z, -direction, spacing)
             split_fallback_used = True
             leaflets = leaflets & root
@@ -662,7 +721,10 @@ def main() -> None:
                 "leaflets": int((out == 2).sum()),
                 "ascending": int((out == 3).sum()),
             }
-        if label_counts["root"] <= 0 or label_counts["ascending"] <= 0:
+        if (
+            label_counts["root"] < MIN_REQUIRED_LABEL_VOXELS
+            or label_counts["ascending"] < MIN_REQUIRED_LABEL_VOXELS
+        ):
             if args.meta:
                 failure_meta = {
                     "input": str(input_path),
@@ -674,15 +736,17 @@ def main() -> None:
                     "split_fallback_used": bool(split_fallback_used),
                     "split_fallback_meta": split_fallback_meta,
                     "aorta_voxels": int(aorta.sum()),
+                    "minimum_aorta_voxels": int(MIN_AORTA_VOXELS),
+                    "minimum_required_label_voxels": int(MIN_REQUIRED_LABEL_VOXELS),
                     "root_raw_voxels": int(root_raw.sum()),
                     "ascending_raw_voxels": int(ascending_raw.sum()),
                     "leaflets_raw_voxels": int(leaflets_raw.sum()),
                     "voxels": label_counts,
-                    "error": "aortic_multiclass_required_labels_empty",
+                    "error": "aortic_multiclass_required_labels_too_small",
                 }
                 Path(args.meta).write_text(json.dumps(failure_meta, indent=2), encoding="utf-8")
             raise RuntimeError(
-                "aortic_multiclass_required_labels_empty: "
+                "aortic_multiclass_required_labels_too_small: "
                 f"root={label_counts['root']} ascending={label_counts['ascending']} "
                 f"leaflets={label_counts['leaflets']}"
             )
@@ -704,6 +768,9 @@ def main() -> None:
                 "direction": int(direction),
                 "split_fallback_used": bool(split_fallback_used),
                 "split_fallback_meta": split_fallback_meta,
+                "aorta_voxels": int(aorta.sum()),
+                "minimum_aorta_voxels": int(MIN_AORTA_VOXELS),
+                "minimum_required_label_voxels": int(MIN_REQUIRED_LABEL_VOXELS),
                 "voxels": label_counts,
                 "model_stack": [
                     "TotalSegmentator task=total (open) with ROI subset [aorta, heart, arch branches]",
