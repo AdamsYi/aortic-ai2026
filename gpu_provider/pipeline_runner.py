@@ -108,6 +108,8 @@ def run_cmd(cmd: list[str]) -> tuple[str, str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
 

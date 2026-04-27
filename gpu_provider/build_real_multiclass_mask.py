@@ -338,6 +338,51 @@ def fallback_split_aorta_by_axis(
     return root & aorta, ascending & aorta
 
 
+def best_fallback_split(
+    aorta: np.ndarray,
+    seed_z: int,
+    direction: int,
+    spacing: tuple[float, float, float],
+) -> tuple[np.ndarray, np.ndarray, dict[str, int]]:
+    z_values = np.where(aorta.any(axis=(0, 1)))[0]
+    empty = np.zeros_like(aorta, dtype=bool)
+    if z_values.size == 0:
+        return empty, empty, {"seed_z": int(seed_z), "direction": int(direction), "root": 0, "ascending": 0}
+
+    median_z = int(np.median(z_values))
+    candidates: list[tuple[int, int]] = [
+        (int(seed_z), int(direction)),
+        (int(seed_z), int(-direction if direction else 1)),
+        (median_z, 1),
+        (median_z, -1),
+    ]
+    best_root = empty
+    best_ascending = empty
+    best_meta = {"seed_z": int(seed_z), "direction": int(direction), "root": 0, "ascending": 0}
+    best_score = (-1, -1)
+    seen: set[tuple[int, int]] = set()
+    for candidate_seed, candidate_direction in candidates:
+        key = (candidate_seed, candidate_direction)
+        if key in seen:
+            continue
+        seen.add(key)
+        root, ascending = fallback_split_aorta_by_axis(aorta, candidate_seed, candidate_direction, spacing)
+        root_count = int(root.sum())
+        ascending_count = int(ascending.sum())
+        score = (min(root_count, ascending_count), root_count + ascending_count)
+        if score > best_score:
+            best_root = root
+            best_ascending = ascending
+            best_score = score
+            best_meta = {
+                "seed_z": int(candidate_seed),
+                "direction": int(candidate_direction),
+                "root": root_count,
+                "ascending": ascending_count,
+            }
+    return best_root, best_ascending, best_meta
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, help="Input CTA NIfTI (.nii/.nii.gz)")
@@ -507,8 +552,9 @@ def main() -> None:
             ascending &= aorta
 
         split_fallback_used = False
+        split_fallback_meta: dict[str, int] = {}
         if not root.any() or not ascending.any():
-            root, ascending = fallback_split_aorta_by_axis(aorta, seed_z, direction, spacing)
+            root, ascending, split_fallback_meta = best_fallback_split(aorta, seed_z, direction, spacing)
             split_fallback_used = True
 
         # CTA-derived leaflet proxy in annulus/root band.
@@ -573,9 +619,17 @@ def main() -> None:
             leaflets = band & root & (dist_in >= 0.8) & (dist_in <= 3.6)
             leaflets = keep_top_components(leaflets, top_k=3)
 
-        root = smooth_binary(root, spacing, sigma_mm=0.55) & aorta
-        ascending = smooth_binary(ascending, spacing, sigma_mm=0.55) & aorta
-        leaflets = smooth_binary(leaflets, spacing, sigma_mm=0.35) & root
+        root_raw = root.copy()
+        ascending_raw = ascending.copy()
+        leaflets_raw = leaflets.copy()
+
+        root_smooth = smooth_binary(root, spacing, sigma_mm=0.55) & aorta
+        ascending_smooth = smooth_binary(ascending, spacing, sigma_mm=0.55) & aorta
+        leaflets_smooth = smooth_binary(leaflets, spacing, sigma_mm=0.35) & root_smooth
+
+        root = root_smooth if root_smooth.any() else root_raw
+        ascending = ascending_smooth if ascending_smooth.any() else ascending_raw
+        leaflets = leaflets_smooth if leaflets_smooth.any() else leaflets_raw
 
         root = keep_top_components(root, top_k=1)
         ascending = keep_top_components(ascending, top_k=1)
@@ -595,6 +649,37 @@ def main() -> None:
             "ascending": int((out == 3).sum()),
         }
         if label_counts["root"] <= 0 or label_counts["ascending"] <= 0:
+            root, ascending, split_fallback_meta = best_fallback_split(aorta, seed_z, -direction, spacing)
+            split_fallback_used = True
+            leaflets = leaflets & root
+            out = np.zeros(aorta.shape, dtype=np.uint8)
+            out[root] = 1
+            out[ascending] = 3
+            out[leaflets] = 2
+            label_counts = {
+                "root": int((out == 1).sum()),
+                "leaflets": int((out == 2).sum()),
+                "ascending": int((out == 3).sum()),
+            }
+        if label_counts["root"] <= 0 or label_counts["ascending"] <= 0:
+            if args.meta:
+                failure_meta = {
+                    "input": str(input_path),
+                    "output": str(output_path),
+                    "spacing_mm": spacing,
+                    "quality": args.quality,
+                    "seed_z": int(seed_z),
+                    "direction": int(direction),
+                    "split_fallback_used": bool(split_fallback_used),
+                    "split_fallback_meta": split_fallback_meta,
+                    "aorta_voxels": int(aorta.sum()),
+                    "root_raw_voxels": int(root_raw.sum()),
+                    "ascending_raw_voxels": int(ascending_raw.sum()),
+                    "leaflets_raw_voxels": int(leaflets_raw.sum()),
+                    "voxels": label_counts,
+                    "error": "aortic_multiclass_required_labels_empty",
+                }
+                Path(args.meta).write_text(json.dumps(failure_meta, indent=2), encoding="utf-8")
             raise RuntimeError(
                 "aortic_multiclass_required_labels_empty: "
                 f"root={label_counts['root']} ascending={label_counts['ascending']} "
@@ -617,6 +702,7 @@ def main() -> None:
                 "asc_end_z": int(z_end),
                 "direction": int(direction),
                 "split_fallback_used": bool(split_fallback_used),
+                "split_fallback_meta": split_fallback_meta,
                 "voxels": label_counts,
                 "model_stack": [
                     "TotalSegmentator task=total (open) with ROI subset [aorta, heart, arch branches]",
