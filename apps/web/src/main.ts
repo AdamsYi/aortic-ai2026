@@ -52,7 +52,7 @@ import type {
   ThreeRuntime, FallbackPreviewVolume, FallbackMprState,
 } from './types';
 import {
-  BUILD_VERSION, API_BASE, DEFAULT_CASE_API_PREFIX, SHOWCASE_CASE_ID,
+  BUILD_VERSION, API_BASE, DEFAULT_CASE_API_PREFIX, SHOWCASE_CASE_ID, PRIMARY_REAL_CASE_ID,
   DEFAULT_PRIMARY_TOOL, DEFAULT_WINDOW_PRESET, DEFAULT_CINE_FPS,
   MPR_INIT_TIMEOUT_MS, THREE_INIT_TIMEOUT_MS, MANUAL_REVIEW_THRESHOLD_MM,
   VIEWPORT_IDS, RENDERING_ENGINE_ID_PREFIX, TOOL_GROUP_ID_PREFIX,
@@ -158,7 +158,7 @@ let defaultPlanningArtifact: Record<string, unknown> | null = null;
 let defaultCaseManifestArtifact: Record<string, unknown> | null = null;
 let defaultAnnulusPlaneArtifact: Record<string, unknown> | null = null;
 let coronaryReviewBannerAcknowledged = false;
-let currentPlanningTab: 'TAVI' | 'VSRR' | 'PEARS' = 'TAVI';
+let currentPlanningTab: 'TAVI' | 'VSRR' | 'PEARS' = 'PEARS';
 let planningPanelCollapsed = false;
 let measurementsPanelCollapsed = true;
 let submitJobPollHandle: number | null = null;
@@ -327,6 +327,7 @@ function renderShell(): void {
   DOM.layoutGridButton = document.getElementById('layout-grid') as HTMLButtonElement;
   DOM.layoutSingleButton = document.getElementById('layout-single') as HTMLButtonElement;
   DOM.toolButtons = Array.from(document.querySelectorAll('[data-tool-mode]')) as HTMLButtonElement[];
+  DOM.loadFullCtButton = document.getElementById('load-full-ct') as HTMLButtonElement;
   DOM.windowPreset = document.getElementById('window-preset') as HTMLSelectElement;
   DOM.cineToggle = document.getElementById('cine-toggle') as HTMLButtonElement;
   DOM.cineSpeed = document.getElementById('cine-speed') as HTMLSelectElement;
@@ -458,6 +459,7 @@ function renderShell(): void {
   });
   DOM.layoutGridButton?.addEventListener('click', () => setLayoutMode('grid-2x2'));
   DOM.layoutSingleButton?.addEventListener('click', () => setLayoutMode('single'));
+  DOM.loadFullCtButton?.addEventListener('click', () => void loadFullCtForActiveCase());
   DOM.retryLatestButton?.addEventListener('click', () => void retryLatestCase());
   DOM.reportOpenButton?.addEventListener('click', () => setReportDrawerOpen(true));
   DOM.reportCloseButton?.addEventListener('click', () => setReportDrawerOpen(false));
@@ -695,16 +697,89 @@ function viewportFallbackTags(key: ViewportKey): string[] {
   return tags;
 }
 
+function ctPreviewUrlForKey(key: ViewportKey): string | null {
+  if (!activeCase?.links) return null;
+  const linkKey: Record<ViewportKey, string> = {
+    axial: 'ct_preview_axial_png',
+    sagittal: 'ct_preview_sagittal_png',
+    coronal: 'ct_preview_coronal_png',
+    aux: 'ct_preview_axial_png',
+  };
+  const url = activeCase.links[linkKey[key]];
+  return typeof url === 'string' && url ? url : null;
+}
+
+function caseHasCtPreview(casePayload: WorkstationCasePayload | null | undefined): boolean {
+  return Boolean(
+    casePayload?.links?.ct_preview_axial_png
+    && casePayload.links.ct_preview_sagittal_png
+    && casePayload.links.ct_preview_coronal_png
+  );
+}
+
+function showInitialCtPreview(casePayload: WorkstationCasePayload): void {
+  if (!caseHasCtPreview(casePayload)) return;
+  setViewportPlaceholderState(true, 'Real Mao CTA preview is ready. Full CT volume can be loaded on demand.');
+}
+
+function isPrimaryRealCase(casePayload: WorkstationCasePayload | null | undefined): boolean {
+  return String(casePayload?.case_id || casePayload?.job?.id || '') === PRIMARY_REAL_CASE_ID;
+}
+
+function fullCtRequested(): boolean {
+  return new URL(window.location.href).searchParams.get('fullCt') === '1';
+}
+
+function shouldUseCtPreviewOnly(casePayload: WorkstationCasePayload): boolean {
+  return isPrimaryRealCase(casePayload) && caseHasCtPreview(casePayload) && !fullCtRequested();
+}
+
+function activateCtPreviewOnly(casePayload: WorkstationCasePayload): void {
+  session = null;
+  lastMprError = null;
+  stopCine();
+  const reason = 'Real Mao CTA preview is ready. Use Full CT only when the full 231 MB volume is needed.';
+  setViewportPlaceholderState(true, reason);
+  (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
+    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'planning plane' : 'CTA preview';
+    if (DOM.viewportFooters[key]) {
+      DOM.viewportFooters[key].innerHTML = `<span>CTA preview</span><span>${escapeHtml(casePayload.study_meta?.slice_thickness_mm ? `slice ${casePayload.study_meta.slice_thickness_mm} mm` : 'real Mao CTA')}</span>`;
+    }
+  });
+  if (DOM.mprStatus) DOM.mprStatus.textContent = reason;
+  if (DOM.loadFullCtButton) {
+    DOM.loadFullCtButton.disabled = false;
+    DOM.loadFullCtButton.textContent = 'Full CT';
+  }
+  refreshViewportPresentation();
+}
+
+async function loadFullCtForActiveCase(): Promise<void> {
+  if (!activeCase) return;
+  const current = new URL(window.location.href);
+  current.searchParams.set('case', String(activeCase.case_id || PRIMARY_REAL_CASE_ID));
+  current.searchParams.set('fullCt', '1');
+  window.history.replaceState({ caseMode: requestedCaseMode() }, '', `${current.pathname}${current.search}${current.hash}`);
+  if (DOM.loadFullCtButton) {
+    DOM.loadFullCtButton.disabled = true;
+    DOM.loadFullCtButton.textContent = 'Loading CT';
+  }
+  await loadCase(String(activeCase.case_id || PRIMARY_REAL_CASE_ID));
+}
+
 function renderViewportFallback(key: ViewportKey, reason: string): string {
   const tags = viewportFallbackTags(key);
+  const previewUrl = ctPreviewUrlForKey(key);
   return `
     <div class="viewport-placeholder-backdrop viewport-placeholder-${key}">
-      <canvas class="viewport-fallback-canvas" data-fallback-canvas="${key}" width="360" height="360"></canvas>
+      ${previewUrl
+        ? `<img class="ct-preview-image" src="${escapeHtml(previewUrl)}" alt="${escapeHtml(viewportFallbackTitle(key))} CT preview" />`
+        : `<canvas class="viewport-fallback-canvas" data-fallback-canvas="${key}" width="360" height="360"></canvas>`}
       <div class="viewport-crosshair viewport-crosshair-v"></div>
       <div class="viewport-crosshair viewport-crosshair-h"></div>
-      <div class="viewport-placeholder-card">
+      <div class="viewport-placeholder-card ${previewUrl ? 'ct-preview-card' : ''}">
         <div class="viewport-placeholder-kicker">${escapeHtml(viewportFallbackTitle(key))}</div>
-        <div class="viewport-placeholder-text">Software MPR active</div>
+        <div class="viewport-placeholder-text">${previewUrl ? 'Real CTA preview' : 'Software MPR active'}</div>
         <div class="viewport-placeholder-tags">
           ${tags.map((tag) => `<span class="viewport-placeholder-tag">${escapeHtml(tag)}</span>`).join('')}
         </div>
@@ -836,12 +911,12 @@ function showMprFailure(error: unknown): void {
   stopCine();
   const text = humanizeViewerError(error);
   lastMprError = text;
-  console.error(`[showMprFailure] MPR initialization failed: ${errorStack(error)}`);
+  console.warn(`[showMprFailure] CT viewer fallback active: ${errorSummary(error)}`);
   if (DOM.mprStatus) DOM.mprStatus.textContent = text;
   (Object.keys(DOM.viewportBadges) as ViewportKey[]).forEach((key) => {
-    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'double-oblique mpr' : 'software mpr';
+    if (DOM.viewportBadges[key]) DOM.viewportBadges[key].textContent = key === 'aux' ? 'planning plane' : 'CT fallback';
     if (DOM.viewportFooters[key]) {
-      DOM.viewportFooters[key].innerHTML = `<span>Software MPR</span><span>${escapeHtml(text)}</span>`;
+      DOM.viewportFooters[key].innerHTML = `<span>CT fallback</span><span>${escapeHtml(text)}</span>`;
     }
   });
   setViewportPlaceholderState(true, text);
@@ -867,13 +942,18 @@ function showThreeFailure(error: unknown): void {
 function humanizeViewerError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || '');
   const detail = errorSummary(error);
+  if (message.toLowerCase().includes('gpu') || message.toLowerCase().includes('cpu fallback')) {
+    return 'CT is opening in the compatible viewer. 3D reconstruction and PEARS planning are already available.';
+  }
   if (message.includes('VolumeViewports cannot be used whilst CPU Fallback Rendering is enabled')) {
-    return `Interactive volume rendering is unavailable in this browser. Showing software MPR instead. Cause: ${detail}`;
+    return 'CT is opening in the compatible viewer. 3D reconstruction and PEARS planning are already available.';
   }
   if (message.includes('timeout')) {
-    return `Interactive volume rendering timed out. Showing software MPR instead. Cause: ${detail}`;
+    return 'CT loading is taking longer than expected. The case remains usable while CT retries or falls back.';
   }
-  return `Interactive volume rendering failed. Showing software MPR instead. Cause: ${detail}`;
+  return detail && detail !== message
+    ? `CT viewer needs attention: ${detail}`
+    : 'CT viewer needs attention. The 3D reconstruction and PEARS planning remain available.';
 }
 
 function humanizeThreeError(error: unknown): string {
@@ -932,9 +1012,22 @@ function readNiftiTypedArray(header: any, raw: ArrayBuffer): NiftiVoxelArray {
 async function loadFallbackPreviewVolume(source: VolumeSource | null | undefined): Promise<FallbackPreviewVolume | null> {
   if (!source || source.loader_kind !== 'cornerstone-nifti' || !source.signed_url) return null;
   const resolvedUrl = resolveAbsoluteUrl(source.signed_url);
+  if (fallbackPreviewCache.has(resolvedUrl) && DOM.mprStatus) {
+    DOM.mprStatus.textContent = 'Opening cached CT preview...';
+  }
   if (!fallbackPreviewCache.has(resolvedUrl)) {
     fallbackPreviewCache.set(resolvedUrl, (async () => {
-      let data = await fetchArrayBuffer(resolvedUrl);
+      if (DOM.mprStatus) DOM.mprStatus.textContent = 'Downloading Mao CTA preview...';
+      let data = await fetchArrayBuffer(resolvedUrl, (loaded, total) => {
+        if (!DOM.mprStatus) return;
+        if (total > 0) {
+          const pct = Math.min(99, Math.max(1, Math.round((loaded / total) * 100)));
+          DOM.mprStatus.textContent = `Downloading Mao CTA preview · ${pct}%`;
+        } else {
+          DOM.mprStatus.textContent = `Downloading Mao CTA preview · ${(loaded / (1024 * 1024)).toFixed(0)} MB`;
+        }
+      });
+      if (DOM.mprStatus) DOM.mprStatus.textContent = 'Preparing CT slices...';
       if (nifti.isCompressed(data)) {
         data = nifti.decompress(data) as ArrayBuffer;
       }
@@ -957,6 +1050,7 @@ async function loadFallbackPreviewVolume(source: VolumeSource | null | undefined
         min = -1000;
         max = 1000;
       }
+      if (DOM.mprStatus) DOM.mprStatus.textContent = 'CT preview ready.';
       return {
         dims: [Number(header.dims[1] || 1), Number(header.dims[2] || 1), Number(header.dims[3] || 1)],
         data: values,
@@ -1139,7 +1233,6 @@ async function bootstrap(): Promise<void> {
   await enforceVersionFreshness();
   setBootStage('loading_runtime', 'Initializing workstation...');
   await initializeCornerstoneOnce();
-  await preloadDefaultPanelArtifacts();
   await loadInitialCase();
 }
 
@@ -1256,6 +1349,13 @@ async function preloadDefaultPanelArtifacts(): Promise<void> {
   setBootStage('loading_runtime', 'Initializing workstation...');
 }
 
+function clearDefaultPanelArtifacts(): void {
+  defaultCaseManifestArtifact = null;
+  defaultMeasurementsArtifact = null;
+  defaultPlanningArtifact = null;
+  defaultAnnulusPlaneArtifact = null;
+}
+
 async function enforceVersionFreshness(): Promise<void> {
   try {
     const resp = await fetch('/version', { cache: 'no-store' });
@@ -1293,8 +1393,8 @@ async function initializeCornerstoneOnce(): Promise<void> {
   }
   initializeAnnotationBridge();
   cornerstoneReady = true;
-  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Cornerstone3D runtime ready. Opening showcase case...';
-  setStatus('Cornerstone3D initialized. Opening showcase case...');
+  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Cornerstone3D runtime ready. Opening Mao case...';
+  setStatus('Cornerstone3D initialized. Opening Mao case...');
 }
 
 function primaryToolName(mode: PrimaryToolMode): string | null {
@@ -2253,8 +2353,7 @@ function requestedExplicitCaseId(): string | null {
 
 function updateCaseModeUrl(mode: CaseMode, replace = false): void {
   const current = new URL(window.location.href);
-  if (mode === 'showcase') current.searchParams.set('case', 'showcase');
-  else current.searchParams.delete('case');
+  current.searchParams.set('case', PRIMARY_REAL_CASE_ID);
   const next = `${current.pathname}${current.search}${current.hash}`;
   if (replace) window.history.replaceState({ caseMode: mode }, '', next);
   else window.history.pushState({ caseMode: mode }, '', next);
@@ -2290,8 +2389,9 @@ function updateReportLinks(casePayload: WorkstationCasePayload | null): void {
 function syncCaseModeButtons(): void {
   const mode = requestedCaseMode();
   const explicitCaseId = requestedExplicitCaseId();
-  DOM.loadShowcaseButton?.classList.toggle('active', !explicitCaseId && mode === 'showcase');
-  DOM.loadLatestButton?.classList.toggle('active', !explicitCaseId && mode === 'latest');
+  const primaryActive = !explicitCaseId || explicitCaseId === PRIMARY_REAL_CASE_ID;
+  DOM.loadShowcaseButton?.classList.toggle('active', primaryActive);
+  DOM.loadLatestButton?.classList.toggle('active', !primaryActive && mode === 'latest');
 }
 
 async function loadInitialCase(): Promise<void> {
@@ -2305,26 +2405,26 @@ async function loadInitialCase(): Promise<void> {
     await loadLatestCase({ updateUrl: false });
     return;
   }
-  await loadShowcaseCase({ updateUrl: false });
+  await loadCase(PRIMARY_REAL_CASE_ID);
 }
 
 async function loadShowcaseCase(options: { updateUrl?: boolean; replaceUrl?: boolean } = {}): Promise<void> {
   if (options.updateUrl) updateCaseModeUrl('showcase', Boolean(options.replaceUrl));
   syncCaseModeButtons();
-  setBootStage('loading_case_index', 'Loading showcase reference case');
-  setStatus('Loading showcase reference case...');
-  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Opening showcase reference case...';
-  await loadCase(SHOWCASE_CASE_ID);
+  setBootStage('loading_case_index', 'Loading Mao real CTA case');
+  setStatus('Loading Mao real CTA case...');
+  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Opening Mao real CTA...';
+  await loadCase(PRIMARY_REAL_CASE_ID);
 }
 
 async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boolean; allowFallback?: boolean } = {}): Promise<void> {
   if (options.updateUrl) updateCaseModeUrl('latest', Boolean(options.replaceUrl));
   syncCaseModeButtons();
-  setBootStage('loading_case_index', 'Resolving latest processed CTA case');
-  setStatus('Resolving latest processed CTA case...');
-  if (DOM.caseMeta) DOM.caseMeta.textContent = 'Latest Case Auto Annotation · loading...';
-  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Looking up the latest processed CTA case...';
-  if (DOM.annotationStatus) DOM.annotationStatus.textContent = 'Loading latest real case...';
+  setBootStage('loading_case_index', 'Loading Mao real CTA case');
+  setStatus('Loading Mao real CTA case...');
+  if (DOM.caseMeta) DOM.caseMeta.textContent = 'Mao real CTA · loading...';
+  if (DOM.mprStatus) DOM.mprStatus.textContent = 'Opening Mao real CTA...';
+  if (DOM.annotationStatus) DOM.annotationStatus.textContent = 'Loading Mao real case...';
   if (DOM.annotationDetail) {
     DOM.annotationDetail.textContent = 'Resolving case context before checking the current auto annotation state.';
   }
@@ -2332,24 +2432,7 @@ async function loadLatestCase(options: { updateUrl?: boolean; replaceUrl?: boole
     DOM.annotationButton.disabled = true;
     DOM.annotationButton.textContent = t('action.run_annotation');
   }
-  try {
-    const latest = await fetchJson<Record<string, unknown>>('/demo/latest-case');
-    const resolvedJobId = String(latest.id || latest.job_id || '').trim();
-    const jobId = resolvedJobId && resolvedJobId !== SHOWCASE_CASE_ID ? resolvedJobId : 'latest_case_fixture';
-    await loadCase(jobId);
-    if (!activeCase?.links?.raw_ct) {
-      throw new Error('latest_case_missing_raw_ct');
-    }
-  } catch (error) {
-    if (options.allowFallback === false) throw error;
-    try {
-      await loadCase('latest_case_fixture');
-      return;
-    } catch {
-      // continue to showcase fallback
-    }
-    await loadShowcaseCase({ updateUrl: true, replaceUrl: true });
-  }
+  await loadCase(PRIMARY_REAL_CASE_ID);
 }
 
 async function loadCase(jobId: string): Promise<void> {
@@ -2361,6 +2444,13 @@ async function loadCase(jobId: string): Promise<void> {
   const loadedCase = await fetchJson<WorkstationCasePayload>(`/workstation/cases/${encodeURIComponent(jobId)}`);
   if (loadSerial !== caseLoadSerial) return;
   activeCase = loadedCase;
+  const resolvedCaseId = String(activeCase.case_id || activeCase.job?.id || jobId);
+  if (resolvedCaseId === SHOWCASE_CASE_ID) {
+    await preloadDefaultPanelArtifacts();
+  } else {
+    clearDefaultPanelArtifacts();
+  }
+  if (loadSerial !== caseLoadSerial) return;
   updateReportLinks(activeCase);
   await destroySession();
   if (loadSerial !== caseLoadSerial) return;
@@ -2369,9 +2459,13 @@ async function loadCase(jobId: string): Promise<void> {
   applyCapabilityControls(activeCase);
   renderSidePanels(activeCase);
   await hydrateManualReview(activeCase);
+  showInitialCtPreview(activeCase);
   setBootStage('ready', `Case ${jobId} shell ready`);
   maybeAutoRunAnnotation(activeCase);
-  const volumeFailure = await initializeViewerSession(activeCase);
+  const threePromise = initializeThreePanel(activeCase);
+  const previewOnly = shouldUseCtPreviewOnly(activeCase);
+  const volumeFailure = previewOnly ? null : await initializeViewerSession(activeCase);
+  if (previewOnly) activateCtPreviewOnly(activeCase);
   if (loadSerial !== caseLoadSerial) return;
   if (session) {
     await nextAnimationFrame();
@@ -2397,29 +2491,39 @@ async function loadCase(jobId: string): Promise<void> {
       DOM.headerStatus.textContent = `Case ${jobId} loaded with MPR unavailable`;
     }
   }
-  const threeFailure = await initializeThreePanel(activeCase);
+  const threeFailure = await threePromise;
   if (loadSerial !== caseLoadSerial) return;
-  if (!session && volumeFailure && threeFailure) {
-    setBootStage('ready', 'Planning outputs loaded while both MPR and 3D viewers are unavailable');
+  if (previewOnly && threeFailure) {
+    setBootStage('ready', 'Mao CTA preview and PEARS planning are ready while 3D viewer needs attention');
+  } else if (previewOnly) {
+    setBootStage('ready', 'Mao CTA preview, 3D reconstruction, and PEARS planning are ready');
+  } else if (!session && volumeFailure && threeFailure) {
+    setBootStage('ready', 'PEARS planning loaded while CT and 3D viewers need attention');
   } else if (!session && volumeFailure) {
-    setBootStage('ready', 'Planning and 3D remain available while CT volume failed to initialize');
+    setBootStage('ready', '3D reconstruction and PEARS planning are ready while CT uses fallback');
   } else if (threeFailure) {
-    setBootStage('ready', 'CT workstation is available while 3D viewer failed to initialize');
+    setBootStage('ready', 'CT workstation is available while 3D viewer needs attention');
   } else {
     setBootStage('ready', `Case ${jobId} ready`);
   }
   if (DOM.headerStatus) {
-    DOM.headerStatus.textContent = !session && volumeFailure
-      ? `Case ${jobId} loaded with MPR unavailable`
+    DOM.headerStatus.textContent = previewOnly
+      ? `Mao loaded · CT preview ready`
+      : !session && volumeFailure
+      ? `Mao loaded · CT fallback active`
       : threeFailure
-        ? `Case ${jobId} loaded with 3D viewer unavailable`
-        : `Case ready: ${jobId}`;
+        ? `Mao loaded · 3D needs attention`
+        : `Mao case ready`;
   }
   maybeAutoRunAnnotation(activeCase);
 }
 
 async function initializeViewerSession(casePayload: WorkstationCasePayload): Promise<unknown | null> {
   try {
+    if (DOM.loadFullCtButton) {
+      DOM.loadFullCtButton.disabled = true;
+      DOM.loadFullCtButton.textContent = 'Loading CT';
+    }
     // GPU acceleration check - skip MPR if no GPU available
     const gpuAvailable = hasGPUAcceleration();
     console.log('[initializeViewerSession] GPU acceleration:', gpuAvailable ? 'YES' : 'NO (using CPU fallback)');
@@ -2431,6 +2535,10 @@ async function initializeViewerSession(casePayload: WorkstationCasePayload): Pro
       const error = new Error('No GPU acceleration available. Using software MPR fallback.');
       showMprFailure(error);
       await renderFallbackVolumePreview(casePayload);
+      if (DOM.loadFullCtButton) {
+        DOM.loadFullCtButton.disabled = false;
+        DOM.loadFullCtButton.textContent = 'Retry CT';
+      }
       return error;
     }
 
@@ -2443,10 +2551,18 @@ async function initializeViewerSession(casePayload: WorkstationCasePayload): Pro
     );
     setBootStage('initializing_viewports', 'Synchronizing axial, sagittal, coronal, and auxiliary MPR');
     clearMprFailure();
+    if (DOM.loadFullCtButton) {
+      DOM.loadFullCtButton.disabled = true;
+      DOM.loadFullCtButton.textContent = 'Full CT active';
+    }
     return null;
   } catch (error) {
     session = null;
     showMprFailure(error);
+    if (DOM.loadFullCtButton) {
+      DOM.loadFullCtButton.disabled = false;
+      DOM.loadFullCtButton.textContent = 'Retry CT';
+    }
     return error;
   }
 }
@@ -3363,17 +3479,20 @@ function preferredDisplayName(casePayload: WorkstationCasePayload): string {
 
 function updateHeaderMeta(casePayload: WorkstationCasePayload): void {
   const dataSource = resolveCaseDataSource(casePayload).toLowerCase();
-  const pipelineLabel = dataSource === 'real_ct_pipeline_output' ? 'Live Pipeline' : 'Demo';
-  const shortCaseLabel = String(casePayload.study_meta?.source_dataset || 'AVT D1').replace('AVT-Dongyang-D1', 'AVT D1');
-  const displayName = preferredDisplayName(casePayload) || shortCaseLabel;
+  const isPrimaryMao = String(casePayload.case_id || casePayload.job?.id || '') === PRIMARY_REAL_CASE_ID;
+  const pipelineLabel = isPrimaryMao || dataSource === 'real_ct_pipeline_output' ? 'Real CT' : 'Internal';
+  const shortCaseLabel = isPrimaryMao
+    ? 'Mao real CTA'
+    : String(casePayload.study_meta?.source_dataset || 'AorticAI').replace('AVT-Dongyang-D1', 'AVT D1');
+  const displayName = isPrimaryMao ? shortCaseLabel : (preferredDisplayName(casePayload) || shortCaseLabel);
   if (DOM.headerCaseInfo) {
-    DOM.headerCaseInfo.textContent = `${shortCaseLabel} · ${pipelineLabel}`;
+    DOM.headerCaseInfo.textContent = `${displayName} · ${pipelineLabel}`;
   }
   if (DOM.caseMeta) {
     const acceptanceStatus = acceptanceStatusLabel(casePayload.acceptance_review?.overall_status) || 'Review';
     DOM.caseMeta.textContent = [
       shortCaseLabel,
-      pipelineLabel,
+      pipelineLabel === 'Real CT' ? 'PEARS planning' : pipelineLabel,
       acceptanceStatus,
     ].filter(Boolean).join(' · ');
   }
@@ -3423,8 +3542,8 @@ function maybeAutoRunAnnotation(casePayload: WorkstationCasePayload | null): voi
   if (!casePayload || (casePayload.case_role || []).includes('showcase')) return;
   const studyId = currentStudyId(casePayload);
   if (!studyId) return;
-  if (DOM.caseMeta && !DOM.caseMeta.textContent?.includes('Latest Case Auto Annotation')) {
-    DOM.caseMeta.textContent = `${DOM.caseMeta.textContent || 'Latest Real Case'} · Latest Case Auto Annotation`;
+  if (DOM.caseMeta && !DOM.caseMeta.textContent?.includes('Reconstruction workflow')) {
+    DOM.caseMeta.textContent = `${DOM.caseMeta.textContent || 'Mao real CTA'} · Reconstruction workflow`;
   }
   if (autoAnnotationRequestedForStudy === studyId) return;
   const alreadyDisplayReady = casePayload.display_ready === true
@@ -3433,6 +3552,11 @@ function maybeAutoRunAnnotation(casePayload: WorkstationCasePayload | null): voi
   const alreadyAnnotated = (casePayload.case_role || []).includes('annotated')
     || (pipeline?.inferred === false && String(pipeline?.inference_mode || '').toLowerCase().includes('segmentation'));
   if (alreadyDisplayReady || alreadyAnnotated) {
+    autoAnnotationRequestedForStudy = studyId;
+    return;
+  }
+  const autoAnnotateRequested = new URL(window.location.href).searchParams.get('autoAnnotate') === '1';
+  if (!autoAnnotateRequested) {
     autoAnnotationRequestedForStudy = studyId;
     return;
   }
@@ -3482,296 +3606,202 @@ function renderPearsPanel(casePayload: WorkstationCasePayload): void {
   const contentEl = DOM.pearsPanel.querySelector('.pears-content') as HTMLDivElement | null;
   if (!contentEl) return;
 
-  // ── New data structure: pears_geometry from pears_planner_v3 ──────────────
-  // Shape: { geometry, eligibility, surgical_planning, data_quality, module_version, ... }
   const pg = casePayload.pears_geometry as Record<string, unknown> | null | undefined;
   const pearsCapability = casePayload.capabilities?.pears_geometry || null;
 
   if (!pg || pg['error']) {
     const errMsg = pg ? String(pg['error'] || 'Unknown error') : 'PEARS geometry not yet computed.';
-    contentEl.innerHTML = `<div class="pears-unavailable muted">${escapeHtml(errMsg)}</div>`;
+    contentEl.innerHTML = `
+      <div class="pears-planning-empty">
+        <strong>PEARS planning is not ready.</strong>
+        <span>${escapeHtml(errMsg)}</span>
+      </div>
+    `;
     return;
   }
 
-  // ── Extract top-level sections ────────────────────────────────────────────
   const geo       = pickObject(pg['geometry']);
   const elig      = pickObject(pg['eligibility']);
   const surgical  = pickObject(pg['surgical_planning']);
-  const dq        = pickObject(pg['data_quality']);
-
-  // ── Geometry sub-objects ──────────────────────────────────────────────────
+  const artifactQuality = pickObject(pg['quality']);
+  const dataQuality = pickObject(pg['data_quality']);
+  const dq        = dataQuality || artifactQuality;
   const ann       = pickObject(geo?.['annulus']);
   const stj       = pickObject(geo?.['stj']);
   const sov       = pickObject(geo?.['sinus']);
-  const sinH      = pickObject(geo?.['sinus_height']);
   const cor       = pickObject(geo?.['coronary_heights']);
   const lcaObj    = pickObject(cor?.['left']);
   const rcaObj    = pickObject(cor?.['right']);
-
-  // ── Surgical planning sub-objects ─────────────────────────────────────────
   const meshSz    = pickObject(surgical?.['mesh_sizing']);
   const suppSeg   = pickObject(surgical?.['support_segment']);
   const corWin    = pickObject(surgical?.['coronary_windows']);
-
-  // ── Eligibility ───────────────────────────────────────────────────────────
   const status: string    = String(elig?.['status'] || 'unknown');
   const verdict: string   = String(elig?.['verdict'] || status.replace(/_/g, ' ').toUpperCase());
   const eligible: boolean = elig?.['eligible'] === true;
-  const riskLevel: string = String(elig?.['risk_level'] || 'unknown');
   const summary: string   = String(elig?.['summary'] || '');
-  const criteriaArr       = Array.isArray(elig?.['criteria']) ? (elig!['criteria'] as Record<string, unknown>[]) : [];
-  const riskFlags         = Array.isArray(elig?.['risk_flags']) ? (elig!['risk_flags'] as string[]) : [];
   const blockers          = Array.isArray(pg['blockers']) ? (pg['blockers'] as string[]) : [];
   const warnings          = Array.isArray(pg['warnings']) ? (pg['warnings'] as string[]) : [];
   const intendedUse       = String(pg['intended_use'] || '');
   const manufacturingReady = pg['manufacturing_ready'] === true;
-
-  // ── Verdict CSS class ─────────────────────────────────────────────────────
-  const verdictClass = eligible
-    ? (riskLevel === 'high' ? 'pears-eligible-high-risk'
-      : riskLevel === 'moderate' ? 'pears-eligible-caution'
-      : 'pears-eligible')
-    : status.startsWith('not_indicated') ? 'pears-not-indicated'
-    : 'pears-consider';
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
   const fmm = (v: unknown, dec = 1): string =>
     (typeof v === 'number' && isFinite(v)) ? `${v.toFixed(dec)} mm` : '—';
-
-  const fcrit = (id: string): string => {
-    const c = criteriaArr.find((x) => x['id'] === id);
-    if (!c) return '<span class="badge-muted">—</span>';
-    const sev = String(c['severity'] || '');
-    const met = c['met'];
-    const icon = String(c['icon'] || (met === true ? '✓' : met === false ? '✗' : '?'));
-    if (met === true && sev === 'ok')      return `<span class="badge-ok">${icon} pass</span>`;
-    if (met === true && sev === 'caution') return `<span class="badge-caution">${icon} caution</span>`;
-    if (met === false && sev === 'high_risk') return `<span class="badge-danger">${icon} high risk</span>`;
-    if (met === false)                     return `<span class="badge-warn">${icon} fail</span>`;
-    if (sev === 'info')                    return `<span class="badge-info">${icon}</span>`;
-    if (sev === 'data_missing')            return `<span class="badge-warn">? missing</span>`;
-    return `<span class="badge-muted">—</span>`;
+  const fnum = (v: unknown, dec = 0): string =>
+    (typeof v === 'number' && isFinite(v)) ? v.toFixed(dec) : '—';
+  const flagText = (value: string): string => {
+    const normalized = value.toLowerCase();
+    const labels: Record<string, string> = {
+      coronary_ostia_manual_required: 'coronary windows need manual review',
+      distal_brachiocephalic_not_localized: 'distal support end needs review',
+      outer_wall_not_segmented: 'outer wall segmentation not confirmed',
+      pears_slice_thickness_above_0_75mm: 'slice thickness gate review required',
+      surface_source_is_lumen_outer_proxy: 'outer wall proxy surface',
+      visual_preview_not_for_manufacturing: 'manufacturing sign-off not recorded',
+    };
+    return labels[normalized] || value.replace(/_/g, ' ');
   };
-
-  const confBadge = (conf: unknown): string => {
-    const c = typeof conf === 'number' ? conf : 0;
-    if (c >= 0.8) return `<span class="pears-conf pears-conf-high">${(c * 100).toFixed(0)}%</span>`;
-    if (c >= 0.5) return `<span class="pears-conf pears-conf-mid">${(c * 100).toFixed(0)}%</span>`;
-    return `<span class="pears-conf pears-conf-low">${(c * 100).toFixed(0)}%</span>`;
-  };
-
-  // ── Coronary status badges ────────────────────────────────────────────────
   const coronaryStatusBadge = (obj: Record<string, unknown> | null | undefined): string => {
-    if (!obj) return '<span class="badge-muted">—</span>';
+    if (!obj) return '<span class="pears-pill muted">Not found</span>';
     const st = String(obj['status'] || '');
-    if (st === 'measured')              return '<span class="badge-ok">detected</span>';
-    if (st === 'detected')              return '<span class="badge-ok">detected</span>';
-    if (st === 'manual_required')       return '<span class="badge-warn">manual review</span>';
-    if (st === 'estimated_statistical') return '<span class="badge-warn">estimated</span>';
-    return '<span class="badge-muted">—</span>';
+    if (st === 'measured' || st === 'detected') return '<span class="pears-pill ok">Detected</span>';
+    if (st === 'manual_required') return '<span class="pears-pill warn">Manual review</span>';
+    if (st === 'estimated_statistical') return '<span class="pears-pill warn">Estimated</span>';
+    return '<span class="pears-pill muted">Not found</span>';
   };
-
-  // ── Geometry table rows ───────────────────────────────────────────────────
-  const geoRows: string[] = [
-    `<tr>
-      <td>Sinus max diameter</td>
-      <td class="val">${fmm(sov?.['max_diameter_mm'])}</td>
-      <td>${fcrit('sinus_diameter')}</td>
-      <td>${confBadge(sov?.['confidence'])}</td>
-    </tr>`,
-    `<tr>
-      <td>STJ diameter</td>
-      <td class="val">${fmm(stj?.['max_diameter_mm'] ?? stj?.['diameter_mm'])}</td>
-      <td>${fcrit('stj_reference')}</td>
-      <td>${confBadge(stj?.['confidence'])}</td>
-    </tr>`,
-    `<tr>
-      <td>Sinus height</td>
-      <td class="val">${fmm(sinH?.['height_mm'])}</td>
-      <td><span class="badge-info">ℹ ref</span></td>
-      <td>—</td>
-    </tr>`,
-    `<tr>
-      <td>Annulus max (hinge PCA)</td>
-      <td class="val">${fmm(ann?.['max_diameter_mm'])}</td>
-      <td>${fcrit('annulus_reference')}</td>
-      <td>${confBadge(ann?.['confidence'])}</td>
-    </tr>`,
-    `<tr>
-      <td>Annulus equiv. diameter</td>
-      <td class="val">${fmm(ann?.['equivalent_diameter_mm'])}</td>
-      <td><span class="badge-info">ℹ ref</span></td>
-      <td>—</td>
-    </tr>`,
-    `<tr>
-      <td>LCA height</td>
-      <td class="val">${fmm(lcaObj?.['height_mm'])}</td>
-      <td>${fcrit('coronary_lca')}</td>
-      <td>${coronaryStatusBadge(lcaObj)}</td>
-    </tr>`,
-    `<tr>
-      <td>RCA height</td>
-      <td class="val">${fmm(rcaObj?.['height_mm'])}</td>
-      <td>${fcrit('coronary_rca')}</td>
-      <td>${coronaryStatusBadge(rcaObj)}</td>
-    </tr>`,
-    `<tr>
-      <td>Ascending aorta</td>
-      <td class="val">${fmm(geo?.['ascending_max_diameter_mm'])}</td>
-      <td>${fcrit('ascending_diameter')}</td>
-      <td>—</td>
-    </tr>`,
-  ];
-
-  // ── Mesh sizing rows ──────────────────────────────────────────────────────
-  const meshRows: string[] = meshSz ? [
-    `<tr><td>Sinus mesh diameter</td><td class="val">${fmm(meshSz['sinus_mesh_diameter_mm'])}</td><td class="pears-note-cell">95% of ${fmm(meshSz['sinus_reference_mm'])}</td></tr>`,
-    `<tr><td>STJ mesh diameter</td><td class="val">${fmm(meshSz['stj_mesh_diameter_mm'])}</td><td class="pears-note-cell">95% of ${fmm(meshSz['stj_reference_mm'])}</td></tr>`,
-    meshSz['ascending_mesh_diameter_mm'] ? `<tr><td>Ascending mesh diameter</td><td class="val">${fmm(meshSz['ascending_mesh_diameter_mm'])}</td><td class="pears-note-cell">95% of ${fmm(meshSz['ascending_reference_mm'])}</td></tr>` : '',
-  ].filter(Boolean) : [];
-
-  // ── Support segment rows ──────────────────────────────────────────────────
-  const suppRows: string[] = suppSeg ? [
-    `<tr><td>Root segment</td><td class="val">${fmm(suppSeg['root_segment_mm'])}</td><td class="pears-note-cell">Annulus → STJ</td></tr>`,
-    `<tr><td>Ascending segment</td><td class="val">${fmm(suppSeg['ascending_segment_mm'])}</td><td class="pears-note-cell">STJ → innominate</td></tr>`,
-    `<tr><td><strong>Total support length</strong></td><td class="val"><strong>${fmm(suppSeg['total_mm'])}</strong></td><td class="pears-note-cell">Verify intraop (paper ruler)</td></tr>`,
-  ] : [];
-
-  // ── Coronary window planning ──────────────────────────────────────────────
+  const metricCard = (label: string, value: string, note = ''): string => `
+    <div class="pears-metric-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ''}
+    </div>
+  `;
+  const statusItem = (label: string, ready: boolean, note: string): string => `
+    <div class="pears-status-item ${ready ? 'ready' : 'review'}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${ready ? 'Ready' : 'Review'}</strong>
+      <small>${escapeHtml(note)}</small>
+    </div>
+  `;
+  const sourceQuality = pickObject(pg['source_quality'])
+    || pickObject(artifactQuality?.['source_cta'])
+    || pickObject(dataQuality?.['source_cta'])
+    || pickObject(casePayload.quality_gates_summary);
+  const sourceLabel = String(casePayload.volume_source?.filename || pg['source'] || 'Mao CTA from R2');
+  const displaySourceLabel = sourceLabel.includes('ct_preop') || sourceLabel.toLowerCase().includes('mao')
+    ? 'Mao CTA'
+    : sourceLabel.includes('/') || sourceLabel.includes('gpu_provider')
+      ? 'R2 CTA'
+      : sourceLabel;
+  const sliceThickness = sourceQuality?.['slice_thickness_mm']
+    ?? dq?.['slice_thickness_mm']
+    ?? casePayload.study_meta?.slice_thickness_mm
+    ?? casePayload.study_meta?.slice_thickness;
+  const meshQa = pickObject(artifactQuality?.['mesh'])
+    || pickObject(dataQuality?.['mesh_qa'])
+    || pickObject(dataQuality?.['mesh'])
+    || pickObject(pg['mesh_quality']);
+  const rootQa = pickObject(meshQa?.['aortic_root']) || pickObject(meshQa?.['root']) || pickObject(pg['root_mesh_qa']);
+  const annulusQa = pickObject(meshQa?.['annulus_ring']) || pickObject(pg['annulus_ring_mesh_qa']);
+  const outerQa = pickObject(meshQa?.['pears_outer_aorta']) || pickObject(meshQa?.['outer_aorta']) || pickObject(pg['outer_aorta_mesh_qa']);
+  const sleeveQa = pickObject(meshQa?.['pears_support_sleeve']) || pickObject(meshQa?.['sleeve']) || pickObject(pg['sleeve_mesh_qa']);
   const lcaWin = pickObject(corWin?.['lca']);
   const rcaWin = pickObject(corWin?.['rca']);
-  const coronaryWindowsHtml = (lcaWin || rcaWin) ? `
-    <div class="pears-subsection">
-      <div class="pears-subsection-title">Coronary Window Planning</div>
-      <div class="pears-coronary-grid">
-        <div class="pears-coronary-item ${lcaObj?.['height_mm'] !== undefined && Number(lcaObj['height_mm']) < 10 ? 'pears-coronary-risk' : ''}">
-          <span class="pears-coronary-label">LCA</span>
-          <span class="pears-coronary-val">${fmm(lcaObj?.['height_mm'])}</span>
-          <span class="pears-coronary-status">${coronaryStatusBadge(lcaObj)}</span>
-        </div>
-        <div class="pears-coronary-item ${rcaObj?.['height_mm'] !== undefined && Number(rcaObj['height_mm']) < 10 ? 'pears-coronary-risk' : ''}">
-          <span class="pears-coronary-label">RCA</span>
-          <span class="pears-coronary-val">${fmm(rcaObj?.['height_mm'])}</span>
-          <span class="pears-coronary-status">${coronaryStatusBadge(rcaObj)}</span>
-        </div>
+  const rootReady = Boolean(casePayload.links?.aortic_root_stl);
+  const ascendingReady = Boolean(casePayload.links?.ascending_aorta_stl);
+  const annulusReady = Boolean(casePayload.links?.annulus_ring_stl);
+  const sleeveReady = Boolean(casePayload.links?.pears_support_sleeve_stl);
+  const outerAortaReady = Boolean(casePayload.links?.pears_outer_aorta_stl);
+  const visualReady = pg['visual_ready'] === true || Boolean(pearsCapability?.available);
+  const statusLabel = manufacturingReady
+    ? 'Production-ready'
+    : visualReady
+      ? 'Planning view ready'
+      : 'Review required';
+  const useLabel = intendedUse === 'visual_planning_only'
+    ? 'Planning visualization'
+    : manufacturingReady
+      ? 'Production planning'
+      : 'Review workflow';
+  const blockerHtml = blockers.length
+    ? blockers.map((item) => `<span class="pears-pill danger">${escapeHtml(flagText(item))}</span>`).join('')
+    : '<span class="pears-pill ok">No blockers recorded</span>';
+  const warningHtml = warnings.length
+    ? warnings.map((item) => `<span class="pears-pill warn">${escapeHtml(flagText(item))}</span>`).join('')
+    : '<span class="pears-pill ok">No warnings recorded</span>';
+  const reconstructionHtml = [
+    statusItem('Aortic root', rootReady, rootQa ? `tri ${fnum(rootQa?.['tri_count'] ?? rootQa?.['triangles'])}` : 'surface model'),
+    statusItem('Ascending aorta', ascendingReady, 'surface model'),
+    statusItem('Annulus ring', annulusReady, `tri ${fnum(annulusQa?.['tri_count'] ?? annulusQa?.['triangles'])}`),
+    statusItem('Outer aorta', outerAortaReady, `tri ${fnum(outerQa?.['tri_count'] ?? outerQa?.['triangles'])}`),
+    statusItem('PEARS sleeve', sleeveReady, `tri ${fnum(sleeveQa?.['tri_count'] ?? sleeveQa?.['triangles'])}`),
+  ].join('');
+  const coronaryHtml = `
+    <div class="pears-coronary-grid">
+      <div class="pears-coronary-card">
+        <span>Left coronary</span>
+        <strong>${fmm(lcaObj?.['height_mm'])}</strong>
+        ${coronaryStatusBadge(lcaObj)}
+        <small>${escapeHtml(String(lcaWin?.['status'] || 'window review required').replace(/_/g, ' '))}</small>
       </div>
-      <div class="pears-coronary-note muted">Windows cut from ostial holes to longitudinal end (Conci 2025)</div>
+      <div class="pears-coronary-card">
+        <span>Right coronary</span>
+        <strong>${fmm(rcaObj?.['height_mm'])}</strong>
+        ${coronaryStatusBadge(rcaObj)}
+        <small>${escapeHtml(String(rcaWin?.['status'] || 'window review required').replace(/_/g, ' '))}</small>
+      </div>
     </div>
-  ` : '';
-
-  // ── Criteria detail list ──────────────────────────────────────────────────
-  const criteriaHtml = criteriaArr.length ? `
-    <div class="pears-subsection">
-      <div class="pears-subsection-title">Criteria Detail</div>
-      <ul class="pears-criteria-list">
-        ${criteriaArr.map((c) => {
-          const sev = String(c['severity'] || 'info');
-          const sevClass = sev === 'ok' ? 'pears-crit-ok'
-            : sev === 'high_risk' ? 'pears-crit-danger'
-            : sev === 'caution' ? 'pears-crit-caution'
-            : sev === 'not_indicated' || sev === 'consider_alternative' ? 'pears-crit-warn'
-            : 'pears-crit-info';
-          const icon = String(c['icon'] || 'ℹ');
-          const label = String(c['label'] || c['id'] || '');
-          const msg = String(c['message'] || '');
-          const val = typeof c['value_mm'] === 'number' ? ` (${(c['value_mm'] as number).toFixed(1)} mm)` : '';
-          return `<li class="pears-crit-item ${sevClass}">
-            <span class="pears-crit-icon">${icon}</span>
-            <span class="pears-crit-body">
-              <span class="pears-crit-label">${escapeHtml(label)}${escapeHtml(val)}</span>
-              <span class="pears-crit-msg">${escapeHtml(msg)}</span>
-            </span>
-          </li>`;
-        }).join('')}
-      </ul>
-    </div>
-  ` : '';
-
-  // ── Risk flags ────────────────────────────────────────────────────────────
-  const flagsHtml = riskFlags.length ? `
-    <div class="pears-flags">
-      ${riskFlags.map((f) => `<span class="pears-flag">${escapeHtml(f.replace(/_/g, ' '))}</span>`).join('')}
-    </div>
-  ` : '';
-
-  // ── Data quality bar ─────────────────────────────────────────────────────
-  const dqHtml = dq ? `
-    <div class="pears-dq">
-      <span class="pears-dq-label">Data quality</span>
-      <span class="pears-dq-item">Annulus ${confBadge(dq['annulus_confidence'])}</span>
-      <span class="pears-dq-item">STJ ${confBadge(dq['stj_confidence'])}</span>
-      <span class="pears-dq-item">Sinus ${confBadge(dq['sinus_confidence'])}</span>
-      <span class="pears-dq-item">LCA ${confBadge(dq['lca_confidence'])}</span>
-      <span class="pears-dq-item">RCA ${confBadge(dq['rca_confidence'])}</span>
-    </div>
-  ` : '';
-
-  // ── Module version & references ───────────────────────────────────────────
-  const modVer = String(pg['module_version'] || 'pears_planner_v3');
-  const refs = Array.isArray(pg['references']) ? (pg['references'] as string[]) : [];
-  const refsHtml = refs.length ? `
-    <div class="pears-refs">
-      ${refs.map((r) => `<div class="pears-ref">${escapeHtml(r)}</div>`).join('')}
-    </div>
-  ` : '';
-  const sourceBanner = pearsCapability?.inferred
-    ? `<div class="pears-unavailable muted">Historical inferred preview. This PEARS panel is derived from stored model landmarks, not a dedicated provider artifact.</div>`
-    : pearsCapability?.available === false
-      ? `<div class="pears-unavailable muted">Dedicated PEARS artifact is not available for this case.</div>`
-      : '';
-  const visualOnlyBanner = intendedUse === 'visual_planning_only' || !manufacturingReady
-    ? `<div class="pears-unavailable muted">PEARS planning visualization only. Not manufacturing-ready.</div>`
-    : '';
-  const blockerHtml = blockers.length || warnings.length ? `
-    <div class="pears-flags">
-      ${blockers.map((f) => `<span class="pears-flag">${escapeHtml(f.replace(/_/g, ' '))}</span>`).join('')}
-      ${warnings.map((f) => `<span class="pears-flag">${escapeHtml(f.replace(/_/g, ' '))}</span>`).join('')}
-    </div>
-  ` : '';
-
-  // ── Assemble final HTML ───────────────────────────────────────────────────
+  `;
   contentEl.innerHTML = `
-    ${sourceBanner}
-    ${visualOnlyBanner}
-    <div class="pears-verdict ${verdictClass}">${escapeHtml(verdict)}</div>
-    ${blockerHtml}
-    ${flagsHtml}
-    ${summary ? `<p class="pears-summary">${escapeHtml(summary)}</p>` : ''}
+    <section class="pears-hero-panel ${manufacturingReady ? 'ready' : 'review'}">
+      <div>
+        <span class="pears-eyebrow">PEARS planning</span>
+        <h3>${escapeHtml(statusLabel)}</h3>
+        <p>${escapeHtml(summary || 'Root, ascending aorta, annulus and PEARS sleeve preview are shown together for surgical planning.')}</p>
+      </div>
+      <div class="pears-use-badge">${escapeHtml(useLabel)}</div>
+    </section>
 
-    <div class="pears-subsection">
-      <div class="pears-subsection-title">Anatomical Measurements</div>
-      <table class="pears-table">
-        <thead><tr><th>Parameter</th><th>Value</th><th>Criterion</th><th>Conf.</th></tr></thead>
-        <tbody>${geoRows.join('')}</tbody>
-      </table>
+    <div class="pears-metric-grid">
+      ${metricCard('CTA source', displaySourceLabel, sliceThickness ? `slice ${fmm(sliceThickness)}` : 'slice thickness not recorded')}
+      ${metricCard('Annulus', fmm(ann?.['equivalent_diameter_mm']), 'equivalent diameter')}
+      ${metricCard('Sinus', fmm(sov?.['max_diameter_mm']), 'max diameter')}
+      ${metricCard('STJ', fmm(stj?.['max_diameter_mm'] ?? stj?.['diameter_mm']), 'reference ring')}
+      ${metricCard('Support length', fmm(suppSeg?.['total_mm']), 'annulus to distal support')}
+      ${metricCard('Sleeve sizing', fmm(meshSz?.['sinus_mesh_diameter_mm']), '95% sinus preview')}
     </div>
 
-    ${meshRows.length ? `
-    <div class="pears-subsection">
-      <div class="pears-subsection-title">Mesh Sizing <span class="pears-subsection-note">(Conci 2025: 95% inner diam.)</span></div>
-      <table class="pears-table">
-        <thead><tr><th>Parameter</th><th>Value</th><th>Basis</th></tr></thead>
-        <tbody>${meshRows.join('')}</tbody>
-      </table>
-    </div>` : ''}
+    <section class="pears-section-block">
+      <div class="pears-section-title">Reconstruction Results</div>
+      <div class="pears-status-grid">${reconstructionHtml}</div>
+    </section>
 
-    ${suppRows.length ? `
-    <div class="pears-subsection">
-      <div class="pears-subsection-title">Support Segment <span class="pears-subsection-note">(annulus → innominate)</span></div>
-      <table class="pears-table">
-        <thead><tr><th>Segment</th><th>Length</th><th>Note</th></tr></thead>
-        <tbody>${suppRows.join('')}</tbody>
-      </table>
-    </div>` : ''}
+    <section class="pears-section-block">
+      <div class="pears-section-title">PEARS Sleeve Preview</div>
+      <div class="pears-metric-grid compact">
+        ${metricCard('Sinus sleeve', fmm(meshSz?.['sinus_mesh_diameter_mm']), `95% of ${fmm(meshSz?.['sinus_reference_mm'])}`)}
+        ${metricCard('STJ sleeve', fmm(meshSz?.['stj_mesh_diameter_mm']), `95% of ${fmm(meshSz?.['stj_reference_mm'])}`)}
+        ${metricCard('Ascending sleeve', fmm(meshSz?.['ascending_mesh_diameter_mm']), `95% of ${fmm(meshSz?.['ascending_reference_mm'])}`)}
+        ${metricCard('Root segment', fmm(suppSeg?.['root_segment_mm']), 'annulus to STJ')}
+      </div>
+    </section>
 
-    ${coronaryWindowsHtml}
-    ${criteriaHtml}
-    ${dqHtml}
+    <section class="pears-section-block">
+      <div class="pears-section-title">Coronary Windows</div>
+      ${coronaryHtml}
+    </section>
 
-    <div class="pears-footer">
-      <div class="pears-method muted">${escapeHtml(modVer)} · root_model_based · Treasure/Pepper + Conci 2025</div>
-      ${refsHtml}
-      <div class="pears-disclaimer muted">Research use only. Not validated for clinical decision-making.</div>
+    <section class="pears-section-block">
+      <div class="pears-section-title">Blockers</div>
+      <div class="pears-pill-row">${blockerHtml}</div>
+    </section>
+
+    <section class="pears-section-block">
+      <div class="pears-section-title">Warnings</div>
+      <div class="pears-pill-row">${warningHtml}</div>
+    </section>
+
+    <div class="pears-footer-note">
+      ${eligible ? escapeHtml(verdict) : escapeHtml(verdict || 'Clinical review remains required')} ·
+      ${manufacturingReady ? 'manufacturing ready' : 'not marked manufacturing-ready by the current manifest'}
     </div>
   `;
 }
@@ -3889,6 +3919,7 @@ function renderSidePanels(casePayload: WorkstationCasePayload): void {
   renderMeasurementsPanel(casePayload);
   renderManualReviewPanel(casePayload);
   renderPlanningPanel(casePayload);
+  renderPearsPanel(casePayload);
 
   renderAcceptancePanel(casePayload);
   if (DOM.qaList) {
@@ -3911,12 +3942,17 @@ function displayNameText(value: unknown): string {
 function renderInvestorCaseInfo(casePayload: WorkstationCasePayload): void {
   if (!DOM.caseInfoCard) return;
   const manifest = defaultCaseManifestArtifact || {};
+  const isPrimary = isPrimaryRealCase(casePayload);
   const displayName = String(casePayload.study_meta?.source_dataset || displayNameText(casePayload.display_name || manifest.display_name)).replace('AVT-Dongyang-D1', 'AVT D1');
   const dataSource = resolveCaseDataSource(casePayload);
-  const acquisition = dataSource === 'real_ct_pipeline_output' ? 'Real CT Pipeline' : 'Reference Pipeline Output';
+  const acquisition = isPrimary
+    ? 'Real Mao CTA'
+    : dataSource === 'real_ct_pipeline_output' ? 'Real CT Pipeline' : 'Reference Pipeline Output';
   const overallStatus = String(casePayload.acceptance_review?.overall_status || casePayload.clinical_review?.overall_status || 'needs_review').toLowerCase();
   const statusText = overallStatus === 'pass' ? 'Complete' : overallStatus === 'blocked' ? 'Blocked' : 'Review Required';
-  const modality = typeof (manifest as Record<string, unknown>).modality === 'string' && String((manifest as Record<string, unknown>).modality).trim()
+  const modality = isPrimary
+    ? 'CTA (PEARS)'
+    : typeof (manifest as Record<string, unknown>).modality === 'string' && String((manifest as Record<string, unknown>).modality).trim()
     ? String((manifest as Record<string, unknown>).modality)
     : 'CTA (Aortic Root)';
   DOM.caseInfoCard.innerHTML = `
@@ -4685,7 +4721,9 @@ function renderCaseOverviewSummary(casePayload: WorkstationCasePayload): void {
   if (!DOM.caseOverviewSummary) return;
   const review = casePayload.clinical_review || casePayload.acceptance_review;
   const overall = acceptanceStatusLabel(review?.overall_status);
-  const sourceLabel = Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase')
+  const sourceLabel = isPrimaryRealCase(casePayload)
+    ? 'Mao PEARS'
+    : Array.isArray(casePayload.case_role) && casePayload.case_role.includes('showcase')
     ? 'Showcase'
     : isHistoricalInferredCase(casePayload)
       ? 'Latest / Legacy'
@@ -6568,10 +6606,33 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await resp.json()) as T;
 }
 
-async function fetchArrayBuffer(url: string): Promise<ArrayBuffer> {
-  const resp = await fetch(url, { cache: 'no-store' });
+async function fetchArrayBuffer(url: string, onProgress?: (loadedBytes: number, totalBytes: number) => void): Promise<ArrayBuffer> {
+  const resp = await fetch(url, { cache: 'force-cache' });
   if (!resp.ok) throw new Error(`binary_request_failed:${url}:${resp.status}`);
-  return resp.arrayBuffer();
+  const total = Number(resp.headers.get('content-length') || 0);
+  if (!resp.body || typeof resp.body.getReader !== 'function') {
+    const buffer = await resp.arrayBuffer();
+    onProgress?.(buffer.byteLength, total || buffer.byteLength);
+    return buffer;
+  }
+  const reader = resp.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress?.(loaded, total);
+  }
+  const out = new Uint8Array(loaded);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  });
+  return out.buffer;
 }
 
 function pickObject(value: unknown): Record<string, unknown> | null {

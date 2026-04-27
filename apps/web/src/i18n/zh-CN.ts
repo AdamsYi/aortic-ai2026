@@ -9,7 +9,7 @@ const zhCN = {
   'action.focus_root': '根部',
   'action.focus_coronary': '冠脉',
   'action.retry': '重试',
-  'action.run_annotation': '运行自动标注',
+  'action.run_annotation': '重建',
   'action.annotate': '人工标注',
   'action.submit_case': '提交病例',
   'action.open_report': '报告',

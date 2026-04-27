@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
@@ -16,6 +16,7 @@ const appEntry = path.join(repoRoot, 'apps/web/src/main.ts');
 const workerEntry = path.join(repoRoot, 'apps/web/src/dicomZip.worker.ts');
 const decodeWorkerEntry = path.join(repoRoot, 'node_modules/@cornerstonejs/dicom-image-loader/dist/esm/decodeImageFrameWorker.js');
 const cssPath = path.join(repoRoot, 'apps/web/src/styles.css');
+const publicRoot = path.join(repoRoot, 'apps/web/public');
 const outputPath = path.join(repoRoot, 'src/generated/workstationAssets.ts');
 const buildVersionInputPaths = [
   'apps/web',
@@ -41,6 +42,27 @@ async function collectFiles(targetPath, acc = []) {
     }
   }
   return acc;
+}
+
+async function copyPublicAssets(sourceRoot, targetRoot, relative = '') {
+  let entries = [];
+  try {
+    entries = await readdir(path.join(sourceRoot, relative), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const nextRelative = path.join(relative, entry.name);
+    const sourcePath = path.join(sourceRoot, nextRelative);
+    const targetPath = path.join(targetRoot, nextRelative);
+    if (entry.isDirectory()) {
+      await mkdir(targetPath, { recursive: true });
+      await copyPublicAssets(sourceRoot, targetRoot, nextRelative);
+    } else if (entry.isFile()) {
+      await mkdir(path.dirname(targetPath), { recursive: true });
+      await copyFile(sourcePath, targetPath);
+    }
+  }
 }
 
 async function listBuildVersionInputs() {
@@ -201,6 +223,7 @@ await writeFile(path.join(distAssetsRoot, styleFileName), css, 'utf8');
 await writeFile(path.join(distAssetsRoot, appFileName), appJs, 'utf8');
 await writeFile(path.join(distAssetsRoot, dicomWorkerFileName), workerJs, 'utf8');
 await writeFile(path.join(distAssetsRoot, decodeWorkerFileName), decodeWorkerJs, 'utf8');
+await copyPublicAssets(publicRoot, distRoot);
 
 await buildDefaultCaseBundle({ buildVersion });
 

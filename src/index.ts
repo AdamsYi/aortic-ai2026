@@ -101,6 +101,7 @@ const jsonHeaders = {
 const FALLBACK_BUILD_VERSION = "dev-unset";
 const DEFAULT_SIGNED_LINK_TTL_SECONDS = 3600;
 const DEFAULT_CASE_ID = "default_clinical_case";
+const PRIMARY_REAL_CASE_ID = "mao_mianqiang_preop";
 
 function getBuildVersion(): string {
   const raw = String(WORKSTATION_BUILD_VERSION || "").trim();
@@ -1298,7 +1299,12 @@ export default {
         const extraCases = await Promise.all(
           caseResultRows.map((row) => buildCaseResultListEntry(env, row, getBuildVersion()))
         );
-        const cases = [...defaultCases, ...extraCases];
+        extraCases.sort((a, b) => {
+          const aPrimary = String(a.id || a.case_id || "") === PRIMARY_REAL_CASE_ID ? 0 : 1;
+          const bPrimary = String(b.id || b.case_id || "") === PRIMARY_REAL_CASE_ID ? 0 : 1;
+          return aPrimary - bPrimary;
+        });
+        const cases = extraCases.length ? extraCases : defaultCases;
         return respond(json({ cases, total: cases.length }));
       }
 
@@ -2022,6 +2028,19 @@ async function getLatestDemoCase(env: Env, request: Request): Promise<Response> 
 }
 
 async function getLatestDemoCaseLegacy(env: Env, request: Request): Promise<Response> {
+  try {
+    const primaryCase = await hydrateCaseResultRow(env, PRIMARY_REAL_CASE_ID, PRIMARY_REAL_CASE_ID);
+    if (primaryCase?.case_id || primaryCase?.job_id) {
+      const workstationResponse = await getWorkstationCase(PRIMARY_REAL_CASE_ID, env, request);
+      if (workstationResponse.ok) {
+        const workstationPayload = await workstationResponse.clone().json() as Record<string, unknown>;
+        return json(buildLatestCaseSummaryFromWorkstationPayload(workstationPayload));
+      }
+    }
+  } catch {
+    // Fall through to historical latest-case lookup.
+  }
+
   const jobRows = await env.DB.prepare(
     `SELECT
        j.id,
@@ -2276,6 +2295,13 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
   };
   const downloads = buildLegacyDownloads(links, artifactTypes);
   const caseLinks = caseResultRow ? buildCaseResultLinks(resolvedCaseId) : null;
+  const ctPreviewLinks = resolvedCaseId === PRIMARY_REAL_CASE_ID
+    ? {
+        ct_preview_axial_png: `/ct-preview/${PRIMARY_REAL_CASE_ID}/axial.png`,
+        ct_preview_sagittal_png: `/ct-preview/${PRIMARY_REAL_CASE_ID}/sagittal.png`,
+        ct_preview_coronal_png: `/ct-preview/${PRIMARY_REAL_CASE_ID}/coronal.png`,
+      }
+    : {};
   const downloadJsonLinks = [
     ...(Array.isArray(downloads.json) ? downloads.json : []),
     ...(caseResultMeasurements ? [{ label: "Measurements JSON", href: `/api/cases/${encodeURIComponent(resolvedCaseId)}/artifacts/measurements` }] : []),
@@ -2309,6 +2335,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     leaflet_geometry_summary: sanitizePublicValue(leafletGeometrySummary),
   });
 
+  const isPrimaryRealCase = resolvedCaseId === PRIMARY_REAL_CASE_ID;
   const payload = {
     build_version: getBuildVersion(),
     case_id: resolvedCaseId,
@@ -2318,11 +2345,16 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     status: caseGate.status,
     review_status: caseGate.review_status,
     pears_visual_ready: caseGate.pears_visual_ready,
-    display_name: {
-      "zh-CN": "最新真实病例",
-      en: "Latest Real Case",
-    },
-    case_role: ["latest", "legacy"],
+    display_name: isPrimaryRealCase
+      ? {
+          "zh-CN": "Mao 术前真实 CTA",
+          en: "Mao Preop Real CTA",
+        }
+      : {
+          "zh-CN": "最新真实病例",
+          en: "Latest Real Case",
+        },
+    case_role: isPrimaryRealCase ? ["primary_real_case", "pears_planning"] : ["latest", "legacy"],
     placeholder: false,
     not_real_cta: false,
     job,
@@ -2347,6 +2379,7 @@ async function getWorkstationCase(jobId: string, env: Env, request: Request): Pr
     links: {
       ...links,
       ...(caseLinks || {}),
+      ...ctPreviewLinks,
       workstation: `/workstation/cases/${encodeURIComponent(resolvedCaseId)}`,
     },
     downloads: {
@@ -3282,6 +3315,7 @@ function buildCaseResultLinks(caseId: string): Record<string, string> {
 
 async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersion: string): Promise<Record<string, unknown>> {
   const hydratedRow = await hydrateCaseResultRow(env, row.case_id, row.job_id, row) || row;
+  const isPrimary = hydratedRow.case_id === PRIMARY_REAL_CASE_ID;
   const artifactTypes = await getJobArtifactTypeSet(env, hydratedRow.job_id);
   const measurementsObject = parseJsonColumn(hydratedRow.measurements_json);
   const readiness = evaluateCaseDisplayReadiness({
@@ -3294,11 +3328,16 @@ async function buildCaseResultListEntry(env: Env, row: CaseResultRow, buildVersi
     id: hydratedRow.case_id,
     job_id: hydratedRow.job_id,
     case_id: hydratedRow.case_id,
-    display_name: {
-      "zh-CN": `结果病例 ${row.case_id}`,
-      en: `Result Case ${row.case_id}`,
-    },
-    case_role: ["latest", "derived_result"],
+    display_name: isPrimary
+      ? {
+          "zh-CN": "Mao 术前真实 CTA",
+          en: "Mao Preop Real CTA",
+        }
+      : {
+          "zh-CN": `结果病例 ${row.case_id}`,
+          en: `Result Case ${row.case_id}`,
+        },
+    case_role: isPrimary ? ["primary_real_case", "pears_planning"] : ["latest", "derived_result"],
     placeholder: false,
     not_real_cta: false,
     status: gate.status,

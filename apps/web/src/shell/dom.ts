@@ -58,6 +58,7 @@ export const DOM = {
   layoutGridButton: null as HTMLButtonElement | null,
   layoutSingleButton: null as HTMLButtonElement | null,
   toolButtons: [] as HTMLButtonElement[],
+  loadFullCtButton: null as HTMLButtonElement | null,
   windowPreset: null as HTMLSelectElement | null,
   cineToggle: null as HTMLButtonElement | null,
   cineSpeed: null as HTMLSelectElement | null,

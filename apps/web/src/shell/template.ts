@@ -7,34 +7,34 @@ export function renderShellHTML(): string {
       <header class="app-header">
         <div class="header-brand">
           <h1>AorticAI</h1>
-          <span>Structural Heart Workstation</span>
+          <span>PEARS Planning Workstation</span>
         </div>
 
         <div class="header-summary">
           <div class="header-case-row">
             <div class="header-case" id="header-case-info">
-              <span class="case-badge">Demo</span>
-              <span>Showcase Planning</span>
+              <span class="case-badge">Mao</span>
+              <span>Real CTA Planning</span>
             </div>
             <div class="header-status" id="header-status">Loading shell</div>
             <div class="data-source-banner hidden" id="data-source-banner"></div>
           </div>
           <div class="header-meta-row">
             <div class="header-meta-group" id="case-info-left">CTA Aortic Root</div>
-            <div class="header-meta-group" id="case-info-center">Clinical planning</div>
-            <div class="header-meta-group" id="case-info-right">Awaiting case</div>
+            <div class="header-meta-group" id="case-info-center">PEARS reconstruction</div>
+            <div class="header-meta-group" id="case-info-right">Loading Mao case</div>
           </div>
         </div>
 
         <div class="header-actions">
           <div class="mode-switch" aria-label="Case mode">
-            <a href="?case=showcase" id="load-showcase" class="mode-chip active">Showcase</a>
-            <a href="?case=latest" id="load-latest" class="mode-chip">Latest</a>
+            <a href="?case=mao_mianqiang_preop" id="load-showcase" class="mode-chip active">Mao CTA</a>
+            <a href="?case=mao_mianqiang_preop" id="load-latest" class="mode-chip">Refresh</a>
           </div>
-          <button type="button" id="submit-case" class="btn">Load Case</button>
-          <button type="button" id="run-annotation" class="btn">Auto Annotate</button>
+          <button type="button" id="submit-case" class="btn">Load</button>
+          <button type="button" id="run-annotation" class="btn">Rebuild</button>
           <button type="button" id="open-report" class="btn">Report</button>
-          <button type="button" id="open-annotate" class="btn btn-primary">Manual Review</button>
+          <button type="button" id="open-annotate" class="btn btn-primary">Review</button>
           <button type="button" class="locale-button" data-locale-switch="en">EN</button>
           <button type="button" class="locale-button" data-locale-switch="zh-CN">中文</button>
         </div>
@@ -49,17 +49,18 @@ export function renderShellHTML(): string {
 
       <div class="viewer-toolbar">
         <div class="toolbar-group">
-          <span class="toolbar-label">Window</span>
+          <span class="toolbar-label">CT</span>
           <select id="window-preset" class="tbar-select">
             <option value="softTissue" selected>Soft Tissue</option>
             <option value="ctaVessel">CTA Vessel</option>
             <option value="calcium">Calcium</option>
             <option value="wide">Wide</option>
           </select>
+          <button type="button" id="load-full-ct" class="btn btn-sm" title="Load full CT volume">Full CT</button>
         </div>
 
         <div class="toolbar-group">
-          <span class="toolbar-label">Slab</span>
+          <span class="toolbar-label">Slice</span>
           <button type="button" id="slab-mip-toggle" class="btn btn-icon" title="Toggle Slab MIP">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
               <rect x="2.5" y="5" width="13" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
@@ -76,7 +77,7 @@ export function renderShellHTML(): string {
         </div>
 
         <div class="toolbar-group">
-          <span class="toolbar-label">Cine</span>
+          <span class="toolbar-label">Play</span>
           <button type="button" id="cine-toggle" class="btn btn-sm">Off</button>
           <select id="cine-speed" class="tbar-select">
             <option value="8">8 fps</option>
@@ -86,7 +87,7 @@ export function renderShellHTML(): string {
         </div>
 
         <div class="toolbar-group">
-          <span class="toolbar-label">Aux</span>
+          <span class="toolbar-label">Plane</span>
           <select id="aux-mode" class="tbar-select">
             <option value="annulus">Annulus</option>
             <option value="stj">STJ</option>
@@ -262,7 +263,7 @@ export function renderShellHTML(): string {
         </div>
 
         <div class="viewport-card" data-viewport="three" id="viewport-card-three">
-          <div class="viewport-label">3D Preview</div>
+          <div class="viewport-label">3D Reconstruction</div>
           <div class="three-stage" id="three-root"></div>
           <div class="three-fallback hidden" id="three-fallback"></div>
           <div class="three-layer-controls" id="three-layer-controls">
@@ -285,7 +286,7 @@ export function renderShellHTML(): string {
               <label><input type="checkbox" data-three-mesh-toggle="leaflets" checked /> Leaflets</label>
               <label><input type="checkbox" data-three-mesh-toggle="ascending_aorta" checked /> Ascending</label>
               <label><input type="checkbox" data-three-mesh-toggle="annulus_ring" checked /> Annulus Ring</label>
-              <label><input type="checkbox" data-three-mesh-toggle="pears_outer_aorta" checked /> PEARS Aorta</label>
+              <label><input type="checkbox" data-three-mesh-toggle="pears_outer_aorta" checked /> Aorta Surface</label>
               <label><input type="checkbox" data-three-mesh-toggle="pears_support_sleeve" checked /> PEARS Sleeve</label>
             </div>
           </div>
@@ -302,9 +303,36 @@ export function renderShellHTML(): string {
           </svg>
         </button>
 
+        <div class="drawer-alerts">
+          <div class="banner banner-error hidden" id="data-quality-gate-banner" role="alert">
+            <span class="banner-icon">!</span>
+            <div>
+              <div class="banner-title">Quality review required</div>
+              <div class="banner-description">Sizing is locked until the listed checks are reviewed.</div>
+              <ul id="data-quality-reasons"></ul>
+            </div>
+          </div>
+
+          <div class="banner banner-warning hidden" id="coronary-review-banner">
+            <span class="banner-icon">!</span>
+            <div>
+              <div class="banner-title">Coronary windows need review</div>
+              <div class="banner-description">Manual confirmation is required before final PEARS planning.</div>
+              <button type="button" class="btn btn-primary" id="coronary-review-ack" style="margin-top:8px;">Acknowledged</button>
+            </div>
+          </div>
+        </div>
+
         <div class="drawer-content">
+          <div class="drawer-section" id="pears-panel">
+            <div class="drawer-section-header">PEARS Planning</div>
+            <div class="pears-content">
+              <div class="muted">PEARS planning data will appear here when available.</div>
+            </div>
+          </div>
+
           <div class="drawer-section">
-            <div class="drawer-section-header">Case Overview</div>
+            <div class="drawer-section-header">Mao Case</div>
             <div class="drawer-section-body">
               <div id="case-overview-summary"></div>
               <div id="case-info-card"></div>
@@ -312,7 +340,7 @@ export function renderShellHTML(): string {
           </div>
 
           <div class="drawer-section">
-            <div class="drawer-section-header">Workflow Focus</div>
+            <div class="drawer-section-header">Focus</div>
             <div class="step-grid">
               <div class="step-card">
                 <div class="step-card-head">
@@ -337,7 +365,7 @@ export function renderShellHTML(): string {
           </div>
 
           <div class="drawer-section">
-            <div class="drawer-section-header">Key Measurements</div>
+            <div class="drawer-section-header">Key Data</div>
             <div id="key-measurement-card">
               <div class="key-measurement skeleton-shimmer" id="skeleton-annulus">
                 <div class="key-measurement-label">Annulus Diameter</div>
@@ -348,14 +376,14 @@ export function renderShellHTML(): string {
 
           <div class="drawer-section">
             <div class="drawer-section-header">
-              Procedure & Planning
+              Planning
               <button type="button" class="btn btn-icon btn-sm" id="toggle-planning-panel" title="Toggle Planning">+</button>
             </div>
             <div id="planning-panel-section" class="drawer-section-body">
               <div class="proc-tabs">
-                <button type="button" class="btn btn-primary active" data-planning-tab="TAVI">TAVI</button>
+                <button type="button" class="btn" data-planning-tab="TAVI">TAVI</button>
                 <button type="button" class="btn" data-planning-tab="VSRR">VSRR</button>
-                <button type="button" class="btn" data-planning-tab="PEARS">PEARS</button>
+                <button type="button" class="btn btn-primary active" data-planning-tab="PEARS">PEARS</button>
               </div>
               <div id="planning-grid" class="planning-summary-content">
                 <div class="planning-item skeleton-shimmer">
@@ -369,7 +397,7 @@ export function renderShellHTML(): string {
 
           <div class="drawer-section">
             <div class="drawer-section-header">
-              All Measurements
+              Measurements
               <button type="button" class="btn btn-icon btn-sm" id="toggle-measurements-panel" title="Toggle Measurements">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M3.5 5.25l3.5 3.5 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -404,7 +432,7 @@ export function renderShellHTML(): string {
           </div>
 
           <div class="drawer-section">
-            <div class="drawer-section-header">Acceptance & QA</div>
+            <div class="drawer-section-header">Quality</div>
             <div id="acceptance-summary" class="muted">Awaiting acceptance review</div>
             <ul id="acceptance-list" class="acceptance-list"></ul>
             <div class="drawer-subsection">
@@ -422,17 +450,10 @@ export function renderShellHTML(): string {
           </div>
 
           <div class="drawer-section">
-            <div class="drawer-section-header">Auto Annotation</div>
+            <div class="drawer-section-header">Reconstruction</div>
             <div class="annotation-status-card">
               <div id="annotation-status" class="measurement-label">Auto annotation is ready</div>
               <div id="annotation-detail" class="muted">Root, annulus, sinus, STJ, coronary ostia, and leaflet geometry will be requested together.</div>
-            </div>
-          </div>
-
-          <div class="drawer-section" id="pears-panel">
-            <div class="drawer-section-header">PEARS Panel</div>
-            <div class="pears-content">
-              <div class="muted">PEARS planning data will appear here when available.</div>
             </div>
           </div>
 
@@ -459,7 +480,7 @@ export function renderShellHTML(): string {
       </aside>
 
       <div class="status-bar">
-        <div class="status-item"><strong id="status-patient">Demo Patient</strong></div>
+        <div class="status-item"><strong id="status-patient">Mao real CTA</strong></div>
         <div class="status-item"><span id="status-hu">HU: -</span></div>
         <div class="status-item"><span id="status-position">-</span></div>
         <div class="status-spacer"></div>
@@ -470,25 +491,7 @@ export function renderShellHTML(): string {
           <span><span class="kbd">R</span> Reset</span>
           <span><span class="kbd">F1</span> Annulus</span>
         </div>
-        <div class="status-item" style="color: rgba(194, 209, 223, 0.58);">For research use only</div>
-      </div>
-
-      <div class="banner banner-error hidden" id="data-quality-gate-banner" role="alert">
-        <span class="banner-icon">!</span>
-        <div>
-          <div class="banner-title">Data Quality Gate Failed</div>
-          <div class="banner-description">Sizing workflow locked. Review CT parameters.</div>
-          <ul id="data-quality-reasons"></ul>
-        </div>
-      </div>
-
-      <div class="banner banner-warning hidden" id="coronary-review-banner">
-        <span class="banner-icon">!</span>
-        <div>
-          <div class="banner-title">Coronary Ostia Requires Review</div>
-          <div class="banner-description">Manual verification required before surgical planning.</div>
-          <button type="button" class="btn btn-primary" id="coronary-review-ack" style="margin-top:8px;">Acknowledged</button>
-        </div>
+        <div class="status-item" style="color: rgba(194, 209, 223, 0.58);">Planning visualization</div>
       </div>
 
       <div class="boot-overlay hidden" id="boot-overlay">
@@ -499,7 +502,7 @@ export function renderShellHTML(): string {
             <div class="boot-progress-bar" id="boot-progress-fill" style="width:0%"></div>
           </div>
           <pre class="boot-overlay-detail hidden" id="boot-overlay-detail"></pre>
-          <button type="button" class="btn hidden" id="retry-latest" style="margin-top:16px;">Retry Latest Case</button>
+          <button type="button" class="btn hidden" id="retry-latest" style="margin-top:16px;">Retry Mao Case</button>
           <div style="margin-top:16px; font-size:12px; color:rgba(194, 209, 223, 0.6);">Build: ${escapeHtml(BUILD_VERSION)}</div>
           <div class="sr-only" id="boot-stage">loading_shell</div>
         </div>

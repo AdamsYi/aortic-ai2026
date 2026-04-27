@@ -300,6 +300,7 @@ export const BUILD_VERSION = (window as any).__AORTIC_BUILD_VERSION__ || 'dev';
 export const API_BASE = '/api';
 export const DEFAULT_CASE_API_PREFIX = `${API_BASE}/cases/default_clinical_case`;
 export const SHOWCASE_CASE_ID = 'default_clinical_case';
+export const PRIMARY_REAL_CASE_ID = 'mao_mianqiang_preop';
 export const DEFAULT_PRIMARY_TOOL: PrimaryToolMode = 'crosshair';
 export const DEFAULT_WINDOW_PRESET: WindowPresetId = 'softTissue';
 export const DEFAULT_CINE_FPS = 8;
