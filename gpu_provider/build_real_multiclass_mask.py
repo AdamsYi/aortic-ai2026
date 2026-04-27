@@ -559,7 +559,8 @@ def main() -> None:
 
         # CTA-derived leaflet proxy in annulus/root band.
         leaflets = np.zeros_like(aorta, dtype=bool)
-        if root.any():
+        use_intensity_leaflets = root.any() and not split_fallback_used
+        if use_intensity_leaflets:
             dist_in = ndimage.distance_transform_edt(aorta, sampling=spacing)
             root_area = build_area_profile(root)
             z_root = np.where(root_area > 0)[0]
@@ -608,7 +609,7 @@ def main() -> None:
                 if leaflets.any():
                     leaflets = keep_top_components(leaflets, top_k=6)
 
-        if not leaflets.any():
+        if not leaflets.any() and root.any():
             # Fallback: annulus-centered thin leaflet ring proxy.
             z_l_lo = int(np.clip(seed_z - direction * mm_to_vox_z(2.0, spacing), 0, nz - 1))
             z_l_hi = int(np.clip(seed_z + direction * mm_to_vox_z(12.0, spacing), 0, nz - 1))
