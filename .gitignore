@@ -37,8 +37,15 @@ cases/*/*.log
 cases/*/meshes/
 cases/*/artifacts/pipeline_result.json
 cases/*/artifacts/builder_meta.json
+cases/*/artifacts/measurements.json
+cases/*/artifacts/planning.json
+cases/*/artifacts/centerline.json
+cases/*/artifacts/annulus_plane.json
+cases/*/artifacts/aortic_root_model.json
+cases/*/artifacts/leaflet_model.json
 cases/*/artifacts/*.stl
 cases/*/artifacts/*.nii.gz
+cases/*/qa/
 gpu_provider/cta_run/
 gpu_provider/demo_pipeline_output/
 gpu_provider/imagecas_output/
