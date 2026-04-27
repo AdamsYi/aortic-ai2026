@@ -16,6 +16,7 @@
   "clinical_use": "pears_first_case_candidate",
   "status": "incomplete",
   "display_ready": false,
+  "review_status": "review_required",
   "note": "Raw CTA is stored in Cloudflare R2. Clinical-grade derived artifacts are pending Windows provider processing.",
   "build_version": "mao-r2-source-20260427",
   "last_modified": "2026-04-27T00:00:00Z",
@@ -49,11 +50,15 @@
     "reconstruction_kernel": "B"
   },
   "data_quality": {
-    "passes_sizing_gate": true,
-    "allowed_procedures": [
-      "PEARS"
+    "passes_sizing_gate": false,
+    "allowed_procedures": [],
+    "failure_reasons": [
+      "derived_artifacts_pending_provider_processing",
+      "mesh_qa_failed:aortic_root",
+      "mesh_qa_failed:ascending_aorta",
+      "mesh_qa_failed:annulus_ring",
+      "mesh_qa_failed:leaflets"
     ],
-    "failure_reasons": [],
     "advisories": [
       "derived_artifacts_pending_provider_processing",
       "clinical_review_required_before_sizing"
