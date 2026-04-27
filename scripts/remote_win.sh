@@ -204,6 +204,13 @@ case "$SUB" in
     fi
     BODY='{"command":"run_module","args":["gpu_provider.process_mao_from_r2"]}'
     ;;
+  export_mao_result_bundle)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 export_mao_result_bundle" >&2
+      exit 2
+    fi
+    BODY='{"command":"run_module","args":["gpu_provider.admin_export_mao_result_bundle"]}'
+    ;;
   list_case_files)
     if [[ $# -ne 2 || "$1" != "--case-id" ]]; then
       echo "Usage: $0 list_case_files --case-id <id>" >&2
