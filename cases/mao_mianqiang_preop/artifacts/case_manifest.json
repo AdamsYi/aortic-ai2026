@@ -17,11 +17,11 @@
   "status": "incomplete",
   "display_ready": false,
   "review_status": "review_required",
-  "note": "Raw CTA is stored in Cloudflare R2. Clinical-grade derived artifacts are pending Windows provider processing.",
+  "note": "Provider artifacts were generated on Windows, but the case remains locked because required outputs or mesh QA gates failed.",
   "build_version": "mao-r2-source-20260427",
-  "last_modified": "2026-04-27T00:00:00Z",
+  "last_modified": "2026-04-27T03:33:36Z",
   "scan_date": "2018-05-15",
-  "pipeline_version": "pending_windows_provider_run",
+  "pipeline_version": "aortic_geometry_pipeline_v3",
   "study_meta": {
     "slice_thickness_mm": 0.8,
     "voxel_spacing_mm": [
@@ -53,14 +53,13 @@
     "passes_sizing_gate": false,
     "allowed_procedures": [],
     "failure_reasons": [
-      "derived_artifacts_pending_provider_processing",
+      "missing_required_artifact:annulus_ring_stl",
       "mesh_qa_failed:aortic_root",
-      "mesh_qa_failed:ascending_aorta",
       "mesh_qa_failed:annulus_ring",
       "mesh_qa_failed:leaflets"
     ],
     "advisories": [
-      "derived_artifacts_pending_provider_processing",
+      "provider_artifacts_not_published",
       "clinical_review_required_before_sizing"
     ]
   },
@@ -80,69 +79,98 @@
   },
   "mesh_index": {},
   "report_index": {},
-  "qa_index": {},
+  "qa_index": {
+    "quality_gates": "qa/quality_gates.json",
+    "mesh_qa": "qa/mesh_qa.json"
+  },
   "capabilities": {
     "cpr": {
       "available": false,
       "inferred": false,
       "legacy": false,
       "source": "unavailable",
-      "reason": "provider_artifacts_pending"
+      "reason": "provider_artifacts_not_published"
     },
     "coronary_ostia": {
       "available": false,
       "inferred": false,
       "legacy": false,
       "source": "unavailable",
-      "reason": "provider_artifacts_pending"
+      "reason": "coronary_ostia_not_detected"
     },
     "leaflet_geometry": {
       "available": false,
       "inferred": false,
       "legacy": false,
       "source": "unavailable",
-      "reason": "provider_artifacts_pending"
+      "reason": "mesh_qa_failed"
     },
     "pears_geometry": {
       "available": false,
       "inferred": false,
       "legacy": false,
       "source": "unavailable",
-      "reason": "provider_artifacts_pending"
+      "reason": "mesh_qa_failed"
     }
   },
   "mesh_qa": {
     "aortic_root": {
-      "tri_count": 0,
+      "tri_count": 84182,
+      "non_manifold_edges": 1,
+      "watertight": true,
+      "aspect_ratio_p95": 2.755879502743175,
+      "mesh_kind": "tube_segment",
+      "boundary_loop_count": 0,
+      "boundary_loops_all_closed": true,
       "passes_gate": false,
       "failure_reasons": [
-        "provider_artifacts_pending"
+        "non_manifold_edges_detected"
       ]
     },
     "ascending_aorta": {
-      "tri_count": 0,
-      "passes_gate": false,
-      "failure_reasons": [
-        "provider_artifacts_pending"
-      ]
+      "tri_count": 85732,
+      "non_manifold_edges": 0,
+      "watertight": true,
+      "aspect_ratio_p95": 2.3516983691057747,
+      "mesh_kind": "tube_segment",
+      "boundary_loop_count": 0,
+      "boundary_loops_all_closed": true,
+      "passes_gate": true,
+      "failure_reasons": []
     },
     "annulus_ring": {
       "tri_count": 0,
+      "non_manifold_edges": null,
+      "watertight": null,
+      "aspect_ratio_p95": null,
+      "mesh_kind": "solid",
+      "boundary_loop_count": null,
+      "boundary_loops_all_closed": null,
       "passes_gate": false,
       "failure_reasons": [
-        "provider_artifacts_pending"
+        "mesh_file_missing:annulus_ring.stl"
       ]
     },
     "leaflets": {
-      "tri_count": 0,
+      "tri_count": 72,
+      "non_manifold_edges": 0,
+      "watertight": false,
+      "aspect_ratio_p95": 21.6265055711178,
+      "mesh_kind": "solid",
+      "boundary_loop_count": null,
+      "boundary_loops_all_closed": null,
       "passes_gate": false,
       "failure_reasons": [
-        "provider_artifacts_pending"
+        "tri_count_below_60000",
+        "aspect_ratio_p95_exceeds_8.0",
+        "mesh_not_watertight"
       ]
     }
   },
   "uncertainty_summary": {
     "clinician_review_required": true,
-    "pipeline_risk_flags": 1
+    "pipeline_risk_flags": 0,
+    "mesh_gate_all_pass": false,
+    "missing_required_count": 1
   }
 }

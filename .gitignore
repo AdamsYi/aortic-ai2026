@@ -30,6 +30,25 @@ cta true/
 paper/
 gpu_provider/demo_data/
 
+# Generated case pipeline outputs. Small QA JSON may be committed explicitly;
+# bulky meshes, logs, and temporary provider payloads are published elsewhere.
+cases/imagecas_*/
+cases/*/*.log
+cases/*/meshes/
+cases/*/artifacts/pipeline_result.json
+cases/*/artifacts/builder_meta.json
+cases/*/artifacts/*.stl
+cases/*/artifacts/*.nii.gz
+gpu_provider/cta_run/
+gpu_provider/demo_pipeline_output/
+gpu_provider/imagecas_output/
+gpu_provider/build_real_multiclass_mask_fix.py
+pipeline_out.log
+promote_out.log
+promote_case.bat
+resample_mask.py
+run_pipeline*.bat
+
 # One-off local/Windows debugging scripts generated during case bring-up.
 /run_mao*.bat
 /run_mao*.ps1
