@@ -682,16 +682,69 @@ def _cmd_status(_args: List[str]) -> tuple[List[str], Optional[Path]]:
         "print('platform=',platform.platform());"
         "print('gpu=',bool(shutil.which('nvidia-smi')));"
         "print('dcm2niix=',bool(shutil.which('dcm2niix')));"
+        "rb=subprocess.run(['git','rev-parse','--abbrev-ref','HEAD'],capture_output=True,text=True,encoding='utf-8',errors='replace');"
         "r1=subprocess.run(['git','rev-parse','--short','HEAD'],capture_output=True,text=True,encoding='utf-8',errors='replace');"
         "r2=subprocess.run(['git','log','-1','--pretty=%s'],capture_output=True,text=True,encoding='utf-8',errors='replace');"
+        "rs=subprocess.run(['git','status','--short'],capture_output=True,text=True,encoding='utf-8',errors='replace');"
+        "print('git_branch=',(rb.stdout or '').strip());"
         "print('git_head=',(r1.stdout or '').strip());"
-        "print('git_subject=',(r2.stdout or '').strip())"
+        "print('git_subject=',(r2.stdout or '').strip());"
+        "print('git_status=',(rs.stdout or '').strip() or 'clean')"
     )
     return [sys.executable, "-c", snippet], _REPO_ROOT
 
 
 def _cmd_git_pull(_args: List[str]) -> tuple[List[str], Optional[Path]]:
     return ["git", "pull", "--ff-only"], _REPO_ROOT
+
+
+def _cmd_git_switch(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    """Switch the Windows provider to a known remote branch and fast-forward it."""
+    if len(args) != 1:
+        raise HTTPException(status_code=400, detail="git_switch_requires_branch")
+    branch = args[0].strip()
+    if not re.fullmatch(r"(main|codex/[A-Za-z0-9._/-]+)", branch) or ".." in branch or branch.endswith(".lock"):
+        raise HTTPException(status_code=400, detail="git_switch_invalid_branch")
+
+    snippet = r'''
+import subprocess
+import sys
+from pathlib import Path
+
+branch = sys.argv[1]
+repo_root = Path(r"C:\AorticAI")
+tracked_provider_files = [
+    "gpu_provider/app.py",
+    "gpu_provider/pipeline_runner.py",
+    "gpu_provider/build_real_multiclass_mask.py",
+    "gpu_provider/process_mao_from_r2.py",
+]
+
+def run(cmd, check=True):
+    print("$ " + " ".join(cmd), flush=True)
+    result = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, encoding="utf-8", errors="replace")
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n")
+    if check and result.returncode != 0:
+        raise SystemExit(result.returncode)
+    return result
+
+print(f"Working directory: {repo_root}")
+run(["git", "status", "--short"], check=False)
+for rel in tracked_provider_files:
+    if (repo_root / rel).exists():
+        run(["git", "restore", "--", rel], check=False)
+run(["git", "fetch", "origin", branch])
+switched = run(["git", "switch", branch], check=False)
+if switched.returncode != 0:
+    run(["git", "switch", "-c", branch, "--track", f"origin/{branch}"])
+run(["git", "pull", "--ff-only"])
+run(["git", "log", "-1", "--oneline"])
+run(["git", "status", "--short"], check=False)
+'''
+    return [sys.executable, "-u", "-c", snippet, branch], _REPO_ROOT
 
 
 def _cmd_ingest(args: List[str]) -> tuple[List[str], Optional[Path]]:
@@ -1182,6 +1235,7 @@ def _cmd_diagnose_nme_seam(args: List[str]) -> tuple[List[str], Optional[Path]]:
 _ADMIN_WHITELIST = {
     "status": _cmd_status,
     "git_pull": _cmd_git_pull,
+    "git_switch": _cmd_git_switch,
     "pip_sync": _cmd_pip_sync,
     "ingest_imagecas": _cmd_ingest,
     "scan_imagecas_meshqa": _cmd_scan_imagecas_meshqa,
@@ -1563,7 +1617,7 @@ def _cmd_run_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]:
     This is a narrow, single-case pipeline runner:
     - Input: C:\\AorticAI\\cases\\mao_mianqiang_preop\\imaging_hidden\\ct_preop.nii.gz
     - Output: meshes/ and artifacts/ in the same case directory
-    - Fixed: --device cpu --quality high
+    - Fixed: --device gpu --quality high
     - No arguments accepted
 
     Features:
@@ -1578,6 +1632,7 @@ import sys
 import time
 import json
 import shutil
+import os
 from pathlib import Path
 
 # Fixed paths for mao_mianqiang_preop
@@ -1588,8 +1643,11 @@ OUTPUT_JSON = CASE_DIR / "artifacts" / "pipeline_result.json"
 OUTPUT_DIR = CASE_DIR / "meshes"
 LOG_FILE = CASE_DIR / "pipeline.log"
 
+DEVICE = os.getenv("AORTICAI_MAO_DEVICE", "gpu")
+QUALITY = os.getenv("AORTICAI_MAO_QUALITY", "high")
+
 # Backup existing outputs
-BACKUP_DIR = CASE_DIR / "meshes" / "_backup_" + time.strftime("%Y%m%d_%H%M%S")
+BACKUP_DIR = CASE_DIR / "meshes" / ("_backup_" + time.strftime("%Y%m%d_%H%M%S"))
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 backup_files = [
@@ -1628,8 +1686,8 @@ cmd = [
     "--output-mask", str(OUTPUT_MASK),
     "--output-json", str(OUTPUT_JSON),
     "--output-dir", str(OUTPUT_DIR),
-    "--device", "cpu",
-    "--quality", "high",
+    "--device", DEVICE,
+    "--quality", QUALITY,
     "--job-id", "mao_mianqiang_preop",
     "--study-id", "mao_mianqiang_preop",
 ]
@@ -1869,6 +1927,8 @@ print("\\n=== Discarding local changes in gpu_provider/ ===")
 files_to_reset = [
     "gpu_provider/app.py",
     "gpu_provider/pipeline_runner.py",
+    "gpu_provider/build_real_multiclass_mask.py",
+    "gpu_provider/process_mao_from_r2.py",
 ]
 for f in files_to_reset:
     full_path = repo_root / f

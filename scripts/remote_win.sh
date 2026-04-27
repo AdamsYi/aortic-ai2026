@@ -6,6 +6,7 @@
 #   ./scripts/remote_win.sh status
 #   ./scripts/remote_win.sh git_pull
 #   ./scripts/remote_win.sh git_reset
+#   ./scripts/remote_win.sh git_switch codex/cleanup-mao-first-case
 #   ./scripts/remote_win.sh pip_sync
 #   ./scripts/remote_win.sh ingest --dry-run --case-ids 1,2,3
 #   ./scripts/remote_win.sh ingest --case-ids 5
@@ -37,7 +38,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|git_reset|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam|run_mao_pipeline|run_mao_pipeline_http|run_mao_pipeline_r2|list_case_files> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|git_reset|git_switch|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam|run_mao_pipeline|run_mao_pipeline_http|run_mao_pipeline_r2|list_case_files> [args...]" >&2
   exit 2
 fi
 
@@ -48,6 +49,13 @@ case "$SUB" in
   status|git_pull|git_reset)
     COMMAND="$SUB"
     BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1], "args": []}))' "$COMMAND")
+    ;;
+  git_switch)
+    if [[ $# -ne 1 ]]; then
+      echo "Usage: $0 git_switch <branch>" >&2
+      exit 2
+    fi
+    BODY=$(python3 -c 'import json,sys; print(json.dumps({"command": "git_switch", "args": [sys.argv[1]]}))' "$1")
     ;;
   pip_sync)
     if [[ $# -ne 0 ]]; then
