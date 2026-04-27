@@ -1628,8 +1628,15 @@ def _cmd_run_mao_segmentation_only(args: List[str]) -> tuple[List[str], Optional
     return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "segmentation-only"], _REPO_ROOT
 
 
+def _cmd_start_mao_segmentation_only(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="start_mao_segmentation_only_takes_no_args")
+    return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "start-segmentation-only"], _REPO_ROOT
+
+
 _ADMIN_READONLY_WHITELIST["tail_mao_log"] = _cmd_tail_mao_log
 _ADMIN_WHITELIST["run_mao_segmentation_only"] = _cmd_run_mao_segmentation_only
+_ADMIN_WHITELIST["start_mao_segmentation_only"] = _cmd_start_mao_segmentation_only
 
 
 def _cmd_run_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]:
@@ -1928,7 +1935,14 @@ def _cmd_run_mao_pipeline_guarded(args: List[str]) -> tuple[List[str], Optional[
     return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "run-pipeline"], _REPO_ROOT
 
 
+def _cmd_start_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="start_mao_pipeline_takes_no_args")
+    return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "start-pipeline"], _REPO_ROOT
+
+
 _ADMIN_WHITELIST["run_mao_pipeline"] = _cmd_run_mao_pipeline_guarded
+_ADMIN_WHITELIST["start_mao_pipeline"] = _cmd_start_mao_pipeline
 
 
 def _cmd_git_reset(args: List[str]) -> tuple[List[str], Optional[Path]]:

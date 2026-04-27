@@ -34,6 +34,8 @@ OUTPUT_MASK = MESH_DIR / "segmentation.nii.gz"
 OUTPUT_JSON = ARTIFACTS_DIR / "pipeline_result.json"
 PIPELINE_LOG = CASE_DIR / "pipeline.log"
 SEGMENTATION_LOG = CASE_DIR / "segmentation_only.log"
+SEGMENTATION_SUPERVISOR_LOG = CASE_DIR / "segmentation_only_supervisor.log"
+PIPELINE_SUPERVISOR_LOG = CASE_DIR / "pipeline_supervisor.log"
 
 
 def managed_output_files() -> list[Path]:
@@ -288,12 +290,52 @@ def run_pipeline() -> None:
     print("pipeline_verification=passed", flush=True)
 
 
+def start_background(command: str) -> None:
+    ensure_case_dirs()
+    if command == "segmentation-only":
+        supervisor_log = SEGMENTATION_SUPERVISOR_LOG
+    elif command == "run-pipeline":
+        supervisor_log = PIPELINE_SUPERVISOR_LOG
+    else:
+        raise CommandFailed(f"unsupported_background_command:{command}")
+
+    cmd = [sys.executable, "-u", str(Path(__file__).resolve()), command]
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+    with supervisor_log.open("a", encoding="utf-8", errors="replace") as log:
+        log.write(f"\n=== start {command} {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        log.flush()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO_ROOT),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creationflags,
+        )
+
+    print(f"started_command={command}", flush=True)
+    print(f"pid={proc.pid}", flush=True)
+    print(f"supervisor_log={supervisor_log}", flush=True)
+
+
 def tail_log(lines: int) -> None:
     paths = [
         ("case_dir", CASE_DIR),
         ("input_ct", INPUT_CT),
         ("pipeline_log", PIPELINE_LOG),
         ("segmentation_log", SEGMENTATION_LOG),
+        ("pipeline_supervisor_log", PIPELINE_SUPERVISOR_LOG),
+        ("segmentation_supervisor_log", SEGMENTATION_SUPERVISOR_LOG),
         ("segmentation", OUTPUT_MASK),
         ("lumen_mask", MESH_DIR / "lumen_mask.nii.gz"),
         ("pipeline_result", OUTPUT_JSON),
@@ -308,7 +350,12 @@ def tail_log(lines: int) -> None:
         else:
             print(f"{label}={path} exists=false", flush=True)
 
-    for label, log_path in [("pipeline_log_tail", PIPELINE_LOG), ("segmentation_log_tail", SEGMENTATION_LOG)]:
+    for label, log_path in [
+        ("pipeline_supervisor_log_tail", PIPELINE_SUPERVISOR_LOG),
+        ("segmentation_supervisor_log_tail", SEGMENTATION_SUPERVISOR_LOG),
+        ("pipeline_log_tail", PIPELINE_LOG),
+        ("segmentation_log_tail", SEGMENTATION_LOG),
+    ]:
         if not log_path.exists():
             continue
         print(f"\n=== {label} last {lines} lines ===", flush=True)
@@ -319,7 +366,16 @@ def tail_log(lines: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["run-pipeline", "segmentation-only", "tail-log"])
+    parser.add_argument(
+        "command",
+        choices=[
+            "run-pipeline",
+            "segmentation-only",
+            "start-pipeline",
+            "start-segmentation-only",
+            "tail-log",
+        ],
+    )
     parser.add_argument("--lines", type=int, default=120)
     args = parser.parse_args()
 
@@ -327,6 +383,10 @@ def main() -> None:
         run_pipeline()
     elif args.command == "segmentation-only":
         run_segmentation_only()
+    elif args.command == "start-pipeline":
+        start_background("run-pipeline")
+    elif args.command == "start-segmentation-only":
+        start_background("segmentation-only")
     elif args.command == "tail-log":
         tail_log(max(20, min(1000, args.lines)))
 
