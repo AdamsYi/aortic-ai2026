@@ -1,8 +1,0 @@
-{
-  "study_id": "hqcta-full-ctacardio",
-  "session_id": "c6a01a55-a849-4960-967c-0d8513d54c42",
-  "object_key": "studies/hqcta-full-ctacardio/raw/1773212160103-CTACardio.nii.gz",
-  "expires_at": "2026-03-11T07:11:00.103Z",
-  "upload_url": "/upload/c6a01a55-a849-4960-967c-0d8513d54c42?token=23b2350a6d1e48c5b0d96fad6123beb811e06dd9775f49a18f042c0f9c08979a",
-  "method": "PUT"
-}

@@ -1,9 +1,0 @@
-{
-  "base_url": "https://aortic-ai-api.we085197.workers.dev",
-  "case_url": "https://huggingface.co/datasets/Angelou0516/totalsegmentator-cardiac/resolve/main/s0016/ct.nii.gz",
-  "study_id": "hfcardio-1773213611",
-  "job_id": "9d3ee040-b8f4-4db6-b7d1-76b11ac7ce9d",
-  "work_dir": "runs/hfcardio-1773213611",
-  "mask_meta": "runs/hfcardio-1773213611/mask_multiclass.meta.json",
-  "e2e_report": "runs/hfcardio-1773213611/e2e_report.json"
-}

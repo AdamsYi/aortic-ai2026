@@ -1,1 +1,0 @@
--rw-r--r--@ 1 adams  wheel   2.1M Mar 11 00:33 /tmp/openct-1773160390.nii.gz

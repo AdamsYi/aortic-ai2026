@@ -1,12 +1,15 @@
 node_modules
 .wrangler
+.venv/
 .DS_Store
 .env
+.claude/*.local.json
 __pycache__/
 *.py[cod]
 runs/
 data/
 .aorticai-work/
+build/
 dist/
 test-results/
 output/
@@ -15,3 +18,34 @@ gpu_provider/.venv/
 gpu_provider/__pycache__/
 src/generated/
 wrangler.toml
+
+# Local clinical source data must live outside ordinary Git.
+cases/*/imaging_hidden/
+cases/*/dicom/
+cases/*/dicoms/
+cases/*/DICOM/
+cases/*/raw/
+cases/*/raw_ct/
+cta true/
+paper/
+gpu_provider/demo_data/
+
+# One-off local/Windows debugging scripts generated during case bring-up.
+/run_mao*.bat
+/run_mao*.ps1
+/run_mao_mianqiang*.ps1
+/process_mao_mianqiang*.bat
+/cases/build_real_multiclass_mask.py
+/cases/process_mao_from_http.py
+/cases/run_mao*.bat
+/cases/run_pipeline_fixed.bat
+/cases/start_*.bat
+/gpu_provider/run_mao_gpu_fixed.bat
+/gpu_provider/start_gpu_service.bat
+/gpu_provider/start_server.bat
+/scripts/debug_*.py
+/scripts/run_geometry_mac.py
+/scripts/start_admin_api.bat
+/scripts/test_cuda*.py
+/scripts/test_lumen_fix.py
+/scripts/transfer_nifti_to_win.sh
