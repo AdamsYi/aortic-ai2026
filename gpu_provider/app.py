@@ -1233,7 +1233,6 @@ def _cmd_diagnose_nme_seam(args: List[str]) -> tuple[List[str], Optional[Path]]:
 
 
 _ADMIN_WHITELIST = {
-    "status": _cmd_status,
     "git_pull": _cmd_git_pull,
     "git_switch": _cmd_git_switch,
     "pip_sync": _cmd_pip_sync,
@@ -1249,6 +1248,7 @@ _ADMIN_WHITELIST = {
 }
 
 _ADMIN_READONLY_WHITELIST = {
+    "status": _cmd_status,
     "inspect_case": _cmd_inspect_case,
     "diagnose_nme_seam": _cmd_diagnose_nme_seam,
 }
@@ -1425,7 +1425,7 @@ def _cmd_list_case_files(args: List[str]) -> tuple[List[str], Optional[Path]]:
     # Map numeric ID to case slug
     case_slug = f"mao_mianqiang_preop" if case_id == "999" else f"case_{case_id}"
 
-    snippet = f'''
+    snippet = rf'''
 import os
 from pathlib import Path
 
@@ -1454,7 +1454,7 @@ for subdir in ["meshes", "artifacts", "imaging_hidden", "qa"]:
     return [sys.executable, "-u", "-c", snippet], _REPO_ROOT
 
 
-_ADMIN_WHITELIST["list_case_files"] = _cmd_list_case_files
+_ADMIN_READONLY_WHITELIST["list_case_files"] = _cmd_list_case_files
 
 
 def _cmd_diagnose_lumen(args: List[str]) -> tuple[List[str], Optional[Path]]:
@@ -1571,7 +1571,7 @@ else:
     return [sys.executable, "-u", "-c", snippet], Path(r"C:\AorticAI")
 
 
-_ADMIN_WHITELIST["diagnose_lumen"] = _cmd_diagnose_lumen
+_ADMIN_READONLY_WHITELIST["diagnose_lumen"] = _cmd_diagnose_lumen
 
 
 def _cmd_diagnose_segmentation(args: List[str]) -> tuple[List[str], Optional[Path]]:
@@ -1608,7 +1608,28 @@ else:
     return [sys.executable, "-u", "-c", snippet], _REPO_ROOT
 
 
-_ADMIN_WHITELIST["diagnose_segmentation"] = _cmd_diagnose_segmentation
+_ADMIN_READONLY_WHITELIST["diagnose_segmentation"] = _cmd_diagnose_segmentation
+
+
+def _cmd_tail_mao_log(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if len(args) not in {0, 2}:
+        raise HTTPException(status_code=400, detail="tail_mao_log_usage:--lines N")
+    clean: list[str] = ["tail-log"]
+    if args:
+        if args[0] != "--lines" or not _CASE_ID_RE.match(args[1]):
+            raise HTTPException(status_code=400, detail="tail_mao_log_usage:--lines N")
+        clean.extend(["--lines", args[1]])
+    return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", *clean], _REPO_ROOT
+
+
+def _cmd_run_mao_segmentation_only(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="run_mao_segmentation_only_takes_no_args")
+    return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "segmentation-only"], _REPO_ROOT
+
+
+_ADMIN_READONLY_WHITELIST["tail_mao_log"] = _cmd_tail_mao_log
+_ADMIN_WHITELIST["run_mao_segmentation_only"] = _cmd_run_mao_segmentation_only
 
 
 def _cmd_run_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]:
@@ -1899,6 +1920,15 @@ print("\\n=== ALL VERIFICATIONS PASSED ===")
 
 
 _ADMIN_WHITELIST["run_mao_pipeline"] = _cmd_run_mao_pipeline
+
+
+def _cmd_run_mao_pipeline_guarded(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="run_mao_pipeline_takes_no_args")
+    return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "run-pipeline"], _REPO_ROOT
+
+
+_ADMIN_WHITELIST["run_mao_pipeline"] = _cmd_run_mao_pipeline_guarded
 
 
 def _cmd_git_reset(args: List[str]) -> tuple[List[str], Optional[Path]]:
