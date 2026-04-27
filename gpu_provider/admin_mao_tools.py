@@ -45,12 +45,17 @@ def managed_output_files() -> list[Path]:
         MESH_DIR / "aortic_root.stl",
         MESH_DIR / "ascending_aorta.stl",
         MESH_DIR / "leaflets.stl",
+        MESH_DIR / "annulus_ring.stl",
+        MESH_DIR / "pears_outer_aorta.stl",
+        MESH_DIR / "pears_support_sleeve_preview.stl",
         MESH_DIR / "centerline.json",
         MESH_DIR / "annulus_plane.json",
         MESH_DIR / "aortic_root_model.json",
         MESH_DIR / "leaflet_model.json",
         MESH_DIR / "measurements.json",
         MESH_DIR / "planning_report.pdf",
+        ARTIFACTS_DIR / "pears_model.json",
+        ARTIFACTS_DIR / "pears_coronary_windows.json",
         ARTIFACTS_DIR / "pipeline_result.json",
     ]
 
@@ -246,10 +251,53 @@ def verify_pipeline_outputs() -> None:
     except Exception:
         print("trimesh_unavailable=true", flush=True)
         return
-    for name in ["aortic_root.stl", "ascending_aorta.stl", "leaflets.stl"]:
+    for name in ["aortic_root.stl", "ascending_aorta.stl", "leaflets.stl", "annulus_ring.stl", "pears_support_sleeve_preview.stl"]:
         path = MESH_DIR / name
         mesh = trimesh.load(str(path))
         print(f"{name}_triangles={len(mesh.faces)}", flush=True)
+
+
+def validate_manifest() -> None:
+    cmd = [sys.executable, "-u", "-m", "gpu_provider.admin_validate_mao_result"]
+    code = stream_process(cmd, cwd=REPO_ROOT, log_file=CASE_DIR / "validation.log", timeout=600)
+    if code != 0:
+        raise CommandFailed(f"validation_failed_exit_code_{code}")
+
+
+def build_pears_visual_only() -> None:
+    ensure_case_dirs()
+    required = [
+        MESH_DIR / "aortic_root.stl",
+        MESH_DIR / "ascending_aorta.stl",
+        MESH_DIR / "centerline.json",
+        MESH_DIR / "aortic_root_model.json",
+        MESH_DIR / "measurements.json",
+    ]
+    missing = [str(path) for path in required if not path.exists() or path.stat().st_size <= 0]
+    if missing:
+        raise CommandFailed("missing_pears_visual_inputs:" + json.dumps(missing))
+    from .geometry.pears_visual import build_pears_visual_artifacts
+
+    manifest_path = ARTIFACTS_DIR / "case_manifest.json"
+    study_meta: dict[str, object] = {}
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(manifest, dict) and isinstance(manifest.get("study_meta"), dict):
+                study_meta = manifest["study_meta"]
+        except Exception:
+            study_meta = {}
+    pears_model = build_pears_visual_artifacts(
+        output_dir=MESH_DIR,
+        artifacts_dir=ARTIFACTS_DIR,
+        study_meta=study_meta,
+        case_id=CASE_ID,
+    )
+    print("pears_visual_ready=" + str(bool(pears_model.get("visual_ready"))).lower(), flush=True)
+    print("manufacturing_ready=false", flush=True)
+    print("blockers=" + json.dumps(pears_model.get("blockers", []), ensure_ascii=False), flush=True)
+    verify_pipeline_outputs()
+    validate_manifest()
 
 
 def run_pipeline() -> None:
@@ -273,6 +321,7 @@ def run_pipeline() -> None:
         os.getenv("AORTICAI_MAO_DEVICE", "gpu"),
         "--quality",
         os.getenv("AORTICAI_MAO_QUALITY", "high"),
+        "--pears-visual",
         "--job-id",
         CASE_ID,
         "--study-id",
@@ -283,6 +332,7 @@ def run_pipeline() -> None:
         if code != 0:
             raise CommandFailed(f"pipeline_failed_exit_code_{code}")
         verify_pipeline_outputs()
+        validate_manifest()
     except Exception:
         print("rollback_initiated=true", flush=True)
         restore_backup(backup_dir)
@@ -334,6 +384,7 @@ def tail_log(lines: int) -> None:
         ("input_ct", INPUT_CT),
         ("pipeline_log", PIPELINE_LOG),
         ("segmentation_log", SEGMENTATION_LOG),
+        ("validation_log", CASE_DIR / "validation.log"),
         ("pipeline_supervisor_log", PIPELINE_SUPERVISOR_LOG),
         ("segmentation_supervisor_log", SEGMENTATION_SUPERVISOR_LOG),
         ("segmentation", OUTPUT_MASK),
@@ -342,6 +393,9 @@ def tail_log(lines: int) -> None:
         ("aortic_root_stl", MESH_DIR / "aortic_root.stl"),
         ("ascending_aorta_stl", MESH_DIR / "ascending_aorta.stl"),
         ("leaflets_stl", MESH_DIR / "leaflets.stl"),
+        ("annulus_ring_stl", MESH_DIR / "annulus_ring.stl"),
+        ("pears_outer_aorta_stl", MESH_DIR / "pears_outer_aorta.stl"),
+        ("pears_support_sleeve_stl", MESH_DIR / "pears_support_sleeve_preview.stl"),
     ]
     for label, path in paths:
         if path.exists():
@@ -355,6 +409,7 @@ def tail_log(lines: int) -> None:
         ("segmentation_supervisor_log_tail", SEGMENTATION_SUPERVISOR_LOG),
         ("pipeline_log_tail", PIPELINE_LOG),
         ("segmentation_log_tail", SEGMENTATION_LOG),
+        ("validation_log_tail", CASE_DIR / "validation.log"),
     ]:
         if not log_path.exists():
             continue
@@ -371,6 +426,7 @@ def main() -> None:
         choices=[
             "run-pipeline",
             "segmentation-only",
+            "build-pears-visual",
             "start-pipeline",
             "start-segmentation-only",
             "tail-log",
@@ -383,6 +439,8 @@ def main() -> None:
         run_pipeline()
     elif args.command == "segmentation-only":
         run_segmentation_only()
+    elif args.command == "build-pears-visual":
+        build_pears_visual_only()
     elif args.command == "start-pipeline":
         start_background("run-pipeline")
     elif args.command == "start-segmentation-only":

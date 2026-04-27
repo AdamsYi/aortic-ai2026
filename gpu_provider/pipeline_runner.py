@@ -50,6 +50,7 @@ try:
         _finalize_surface_mesh,
     )
     from .geometry.measurements import build_measurements
+    from .geometry.pears_visual import build_pears_visual_artifacts
     from .geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
     from .geometry.root_model import attach_digital_twin_simulation, attach_leaflet_geometry, build_aortic_root_model
 except ImportError:
@@ -67,6 +68,7 @@ except ImportError:
         _finalize_surface_mesh,
     )
     from geometry.measurements import build_measurements
+    from geometry.pears_visual import build_pears_visual_artifacts
     from geometry.profile_analysis import attach_arclength_to_sections, build_radius_profile, sample_cross_sections
     from geometry.root_model import attach_digital_twin_simulation, attach_leaflet_geometry, build_aortic_root_model
 
@@ -321,6 +323,11 @@ def _record_artifact(manifest: list[dict[str, Any]], artifact_type: str, filenam
             "path": str(path),
         }
     )
+
+
+def _record_artifact_path(manifest: list[dict[str, Any]], artifact_type: str, content_type: str, path: Path) -> None:
+    if path.exists() and path.stat().st_size > 0:
+        _record_artifact(manifest, artifact_type, path.name, content_type, path)
 
 
 def _flatten_measurements(measurements_payload: dict[str, Any]) -> dict[str, Any]:
@@ -885,6 +892,7 @@ def main() -> None:
     ap.add_argument("--study-id", default="")
     ap.add_argument("--skip-segmentation", action="store_true")
     ap.add_argument("--input-mask", default="")
+    ap.add_argument("--pears-visual", action="store_true", help="Generate PEARS visual-planning artifacts after the core geometry run")
     args = ap.parse_args()
 
     in_path = Path(args.input).resolve()
@@ -966,6 +974,40 @@ def main() -> None:
             job_id=args.job_id,
             study_id=args.study_id,
         )
+        if args.pears_visual:
+            _progress("planning", "starting PEARS visual planning artifacts")
+            pears_model = build_pears_visual_artifacts(
+                output_dir=output_dir,
+                artifacts_dir=out_json.parent,
+                study_meta={
+                    "slice_thickness_mm": float(nib.load(str(nifti_input)).header.get_zooms()[2]),
+                },
+                case_id=args.job_id or args.study_id or in_path.stem,
+            )
+            result_payload["pears_geometry"] = pears_model
+            if isinstance(result_payload.get("exports"), dict):
+                result_payload["exports"] = {
+                    **result_payload["exports"],
+                    "pears_model_json": "pears_model.json",
+                    "pears_coronary_windows_json": "pears_coronary_windows.json",
+                    "pears_outer_aorta_stl": "pears_outer_aorta.stl",
+                    "pears_support_sleeve_stl": "pears_support_sleeve_preview.stl",
+                    "annulus_ring_stl": "annulus_ring.stl",
+                }
+            if isinstance(result_payload.get("mesh"), dict):
+                result_payload["mesh"] = {
+                    **result_payload["mesh"],
+                    "pears_support_sleeve": pears_model.get("quality", {}).get("mesh", {}).get("pears_support_sleeve"),
+                    "pears_outer_aorta": pears_model.get("quality", {}).get("mesh", {}).get("pears_outer_aorta"),
+                    "annulus_ring": pears_model.get("quality", {}).get("mesh", {}).get("annulus_ring"),
+                }
+            _record_artifact_path(artifacts_meta, "annulus_ring_stl", "model/stl", output_dir / "annulus_ring.stl")
+            _record_artifact_path(artifacts_meta, "pears_outer_aorta_stl", "model/stl", output_dir / "pears_outer_aorta.stl")
+            _record_artifact_path(artifacts_meta, "pears_support_sleeve_stl", "model/stl", output_dir / "pears_support_sleeve_preview.stl")
+            _record_artifact_path(artifacts_meta, "pears_model_json", "application/json", out_json.parent / "pears_model.json")
+            _record_artifact_path(artifacts_meta, "pears_coronary_windows_json", "application/json", out_json.parent / "pears_coronary_windows.json")
+            _record_artifact_path(artifacts_meta, "pears_visual_qa_json", "application/json", output_dir.parent / "qa" / "pears_visual_qa.json")
+            _progress("planning", "done PEARS visual planning artifacts")
 
         elapsed = round(time.time() - t0, 4)
         pipeline_info = result_payload.get("pipeline", {})

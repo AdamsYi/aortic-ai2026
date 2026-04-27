@@ -91,9 +91,18 @@ declare -a FILES=(
   "aortic_root_stl|${MESH_DIR}/aortic_root.stl|model/stl"
   "ascending_aorta_stl|${MESH_DIR}/ascending_aorta.stl|model/stl"
   "leaflets_stl|${MESH_DIR}/leaflets.stl|model/stl"
+  "annulus_ring_stl|${MESH_DIR}/annulus_ring.stl|model/stl"
+  "pears_outer_aorta_stl|${MESH_DIR}/pears_outer_aorta.stl|model/stl"
+  "pears_support_sleeve_stl|${MESH_DIR}/pears_support_sleeve_preview.stl|model/stl"
   "aortic_root_model_json|${MESH_DIR}/aortic_root_model.json|application/json"
   "leaflet_model_json|${MESH_DIR}/leaflet_model.json|application/json"
+  "pears_model_json|${ARTIFACT_DIR}/pears_model.json|application/json"
+  "pears_coronary_windows_json|${ARTIFACT_DIR}/pears_coronary_windows.json|application/json"
   "result_json|${RESULT_JSON}|application/json"
+)
+
+declare -a OPTIONAL_FILES=(
+  "pears_visual_qa_json|${CASE_DIR}/qa/pears_visual_qa.json|application/json"
 )
 
 SQL_FILE="$(mktemp)"
@@ -116,6 +125,15 @@ for spec in "${FILES[@]}"; do
     rm -f "$SQL_FILE"
     echo "missing artifact file: $file" >&2
     exit 1
+  fi
+  key="studies/${STUDY_ID}/jobs/${JOB_ID}/$(basename "$file")"
+  put_object "$R2_MASK_BUCKET" "$key" "$file" "$ctype"
+  insert_artifact_sql "$type" "$key" "$file" >> "$SQL_FILE"
+done
+for spec in "${OPTIONAL_FILES[@]}"; do
+  IFS='|' read -r type file ctype <<< "$spec"
+  if [[ ! -f "$file" ]]; then
+    continue
   fi
   key="studies/${STUDY_ID}/jobs/${JOB_ID}/$(basename "$file")"
   put_object "$R2_MASK_BUCKET" "$key" "$file" "$ctype"

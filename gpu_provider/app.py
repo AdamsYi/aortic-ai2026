@@ -1941,8 +1941,15 @@ def _cmd_start_mao_pipeline(args: List[str]) -> tuple[List[str], Optional[Path]]
     return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "start-pipeline"], _REPO_ROOT
 
 
+def _cmd_run_mao_pears_visual(args: List[str]) -> tuple[List[str], Optional[Path]]:
+    if args:
+        raise HTTPException(status_code=400, detail="run_mao_pears_visual_takes_no_args")
+    return [sys.executable, "-u", "-m", "gpu_provider.admin_mao_tools", "build-pears-visual"], _REPO_ROOT
+
+
 _ADMIN_WHITELIST["run_mao_pipeline"] = _cmd_run_mao_pipeline_guarded
 _ADMIN_WHITELIST["start_mao_pipeline"] = _cmd_start_mao_pipeline
+_ADMIN_WHITELIST["run_mao_pears_visual"] = _cmd_run_mao_pears_visual
 
 
 def _cmd_git_reset(args: List[str]) -> tuple[List[str], Optional[Path]]:

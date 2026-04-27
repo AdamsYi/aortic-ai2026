@@ -28,6 +28,7 @@
 #   ./scripts/remote_win.sh run_mao_segmentation_only
 #   ./scripts/remote_win.sh start_mao_pipeline
 #   ./scripts/remote_win.sh run_mao_pipeline
+#   ./scripts/remote_win.sh run_mao_pears_visual
 #   ./scripts/remote_win.sh run_mao_pipeline_http
 #   ./scripts/remote_win.sh run_mao_pipeline_r2
 #   ./scripts/remote_win.sh list_case_files --case-id 999
@@ -42,7 +43,7 @@ BASE="${AORTICAI_WIN_BASE:-https://api.heartvalvepro.edu.kg}"
 SECRET="${PROVIDER_SECRET:-aorticai-internal-2026}"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <status|git_pull|git_reset|git_switch|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam|tail_mao_log|start_mao_segmentation_only|run_mao_segmentation_only|start_mao_pipeline|run_mao_pipeline|run_mao_pipeline_http|run_mao_pipeline_r2|list_case_files> [args...]" >&2
+  echo "Usage: $0 <status|git_pull|git_reset|git_switch|pip_sync|ingest|scan_imagecas_meshqa|ingest_zenodo|zenodo_inspect|tcia_probe|imagecas_probe|imagecas_extract_first_split|install_7zip|commit_case|inspect_case|diagnose_nme_seam|tail_mao_log|start_mao_segmentation_only|run_mao_segmentation_only|start_mao_pipeline|run_mao_pipeline|run_mao_pears_visual|run_mao_pipeline_http|run_mao_pipeline_r2|list_case_files> [args...]" >&2
   exit 2
 fi
 
@@ -181,6 +182,13 @@ case "$SUB" in
       exit 2
     fi
     BODY='{"command":"run_mao_pipeline","args":[]}'
+    ;;
+  run_mao_pears_visual)
+    if [[ $# -ne 0 ]]; then
+      echo "Usage: $0 run_mao_pears_visual" >&2
+      exit 2
+    fi
+    BODY='{"command":"run_mao_pears_visual","args":[]}'
     ;;
   run_mao_pipeline_http)
     if [[ $# -ne 0 ]]; then

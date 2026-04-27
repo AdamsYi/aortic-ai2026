@@ -285,6 +285,8 @@ export function renderShellHTML(): string {
               <label><input type="checkbox" data-three-mesh-toggle="leaflets" checked /> Leaflets</label>
               <label><input type="checkbox" data-three-mesh-toggle="ascending_aorta" checked /> Ascending</label>
               <label><input type="checkbox" data-three-mesh-toggle="annulus_ring" checked /> Annulus Ring</label>
+              <label><input type="checkbox" data-three-mesh-toggle="pears_outer_aorta" checked /> PEARS Aorta</label>
+              <label><input type="checkbox" data-three-mesh-toggle="pears_support_sleeve" checked /> PEARS Sleeve</label>
             </div>
           </div>
           <div class="viewport-corner-info" id="corner-info-three">

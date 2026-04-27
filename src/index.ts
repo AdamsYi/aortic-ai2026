@@ -722,10 +722,16 @@ async function buildJobLinks(jobId: string, studyId: string, env: Env): Promise<
     aortic_root_stl: `/jobs/${jobId}/artifacts/aortic_root_stl`,
     ascending_aorta_stl: `/jobs/${jobId}/artifacts/ascending_aorta_stl`,
     leaflets_stl: `/jobs/${jobId}/artifacts/leaflets_stl`,
+    annulus_ring_stl: `/jobs/${jobId}/artifacts/annulus_ring_stl`,
+    pears_outer_aorta_stl: `/jobs/${jobId}/artifacts/pears_outer_aorta_stl`,
+    pears_support_sleeve_stl: `/jobs/${jobId}/artifacts/pears_support_sleeve_stl`,
     centerline_json: `/jobs/${jobId}/artifacts/centerline_json`,
     annulus_plane_json: `/jobs/${jobId}/artifacts/annulus_plane_json`,
     aortic_root_model_json: `/jobs/${jobId}/artifacts/aortic_root_model_json`,
     leaflet_model_json: `/jobs/${jobId}/artifacts/leaflet_model_json`,
+    pears_model_json: `/jobs/${jobId}/artifacts/pears_model_json`,
+    pears_coronary_windows_json: `/jobs/${jobId}/artifacts/pears_coronary_windows_json`,
+    pears_visual_qa_json: `/jobs/${jobId}/artifacts/pears_visual_qa_json`,
     cpr_reference_json: `/jobs/${jobId}/artifacts/cpr_reference_json`,
     cpr_straightened_nifti: `/jobs/${jobId}/artifacts/cpr_straightened_nifti`,
     job_api: `/jobs/${jobId}`,
@@ -759,6 +765,12 @@ function buildLegacyDownloads(
   if (artifactTypes.has("leaflet_model_json") && links.leaflet_model_json) {
     json.push({ label: "Leaflet Model JSON", href: links.leaflet_model_json });
   }
+  if (artifactTypes.has("pears_model_json") && links.pears_model_json) {
+    json.push({ label: "PEARS Model JSON", href: links.pears_model_json });
+  }
+  if (artifactTypes.has("pears_coronary_windows_json") && links.pears_coronary_windows_json) {
+    json.push({ label: "PEARS Coronary Windows JSON", href: links.pears_coronary_windows_json });
+  }
   if (artifactTypes.has("result_json") && links.result_json) {
     json.push({ label: "Segmentation Result JSON", href: links.result_json });
   }
@@ -771,6 +783,15 @@ function buildLegacyDownloads(
   }
   if (artifactTypes.has("leaflets_stl") && links.leaflets_stl) {
     stl.push({ label: "Leaflets STL", href: links.leaflets_stl });
+  }
+  if (artifactTypes.has("annulus_ring_stl") && links.annulus_ring_stl) {
+    stl.push({ label: "Annulus Ring STL", href: links.annulus_ring_stl });
+  }
+  if (artifactTypes.has("pears_outer_aorta_stl") && links.pears_outer_aorta_stl) {
+    stl.push({ label: "PEARS Aorta Proxy STL", href: links.pears_outer_aorta_stl });
+  }
+  if (artifactTypes.has("pears_support_sleeve_stl") && links.pears_support_sleeve_stl) {
+    stl.push({ label: "PEARS Sleeve Preview STL", href: links.pears_support_sleeve_stl });
   }
 
   return {
@@ -3165,17 +3186,31 @@ async function getManualAnnotations(caseId: string, env: Env): Promise<Response>
 
 async function handleCaseResultArtifact(caseId: string, rawName: string, env: Env): Promise<Response> {
   const normalized = decodeURIComponent(rawName || "").trim().toLowerCase();
+  const jsonArtifactMap: Record<string, string> = {
+    "pears_model": "pears_model_json",
+    "pears_model.json": "pears_model_json",
+    "pears_coronary_windows": "pears_coronary_windows_json",
+    "pears_coronary_windows.json": "pears_coronary_windows_json",
+    "pears_visual_qa": "pears_visual_qa_json",
+    "pears_visual_qa.json": "pears_visual_qa_json",
+  };
   if (
     normalized !== "measurements"
     && normalized !== "measurements.json"
     && normalized !== "planning"
     && normalized !== "planning.json"
+    && !(normalized in jsonArtifactMap)
   ) {
     return json({ error: "artifact_not_found" }, 404);
   }
 
   const row = await hydrateCaseResultRow(env, caseId);
   if (!row) return json({ error: "case_not_found" }, 404);
+  if (normalized in jsonArtifactMap) {
+    const jobId = nullableString(row.job_id) || caseId;
+    const payload = await readArtifactJson(env, jobId, jsonArtifactMap[normalized]);
+    return payload ? json(payload) : json({ error: "artifact_not_found" }, 404);
+  }
   if (normalized === "measurements" || normalized === "measurements.json") {
     return json(parseJsonColumn(row.measurements_json) || {});
   }

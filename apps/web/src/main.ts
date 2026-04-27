@@ -3501,6 +3501,10 @@ function renderPearsPanel(casePayload: WorkstationCasePayload): void {
   const summary: string   = String(elig?.['summary'] || '');
   const criteriaArr       = Array.isArray(elig?.['criteria']) ? (elig!['criteria'] as Record<string, unknown>[]) : [];
   const riskFlags         = Array.isArray(elig?.['risk_flags']) ? (elig!['risk_flags'] as string[]) : [];
+  const blockers          = Array.isArray(pg['blockers']) ? (pg['blockers'] as string[]) : [];
+  const warnings          = Array.isArray(pg['warnings']) ? (pg['warnings'] as string[]) : [];
+  const intendedUse       = String(pg['intended_use'] || '');
+  const manufacturingReady = pg['manufacturing_ready'] === true;
 
   // ── Verdict CSS class ─────────────────────────────────────────────────────
   const verdictClass = eligible
@@ -3541,6 +3545,8 @@ function renderPearsPanel(casePayload: WorkstationCasePayload): void {
     if (!obj) return '<span class="badge-muted">—</span>';
     const st = String(obj['status'] || '');
     if (st === 'measured')              return '<span class="badge-ok">detected</span>';
+    if (st === 'detected')              return '<span class="badge-ok">detected</span>';
+    if (st === 'manual_required')       return '<span class="badge-warn">manual review</span>';
     if (st === 'estimated_statistical') return '<span class="badge-warn">estimated</span>';
     return '<span class="badge-muted">—</span>';
   };
@@ -3693,11 +3699,22 @@ function renderPearsPanel(casePayload: WorkstationCasePayload): void {
     : pearsCapability?.available === false
       ? `<div class="pears-unavailable muted">Dedicated PEARS artifact is not available for this case.</div>`
       : '';
+  const visualOnlyBanner = intendedUse === 'visual_planning_only' || !manufacturingReady
+    ? `<div class="pears-unavailable muted">PEARS planning visualization only. Not manufacturing-ready.</div>`
+    : '';
+  const blockerHtml = blockers.length || warnings.length ? `
+    <div class="pears-flags">
+      ${blockers.map((f) => `<span class="pears-flag">${escapeHtml(f.replace(/_/g, ' '))}</span>`).join('')}
+      ${warnings.map((f) => `<span class="pears-flag">${escapeHtml(f.replace(/_/g, ' '))}</span>`).join('')}
+    </div>
+  ` : '';
 
   // ── Assemble final HTML ───────────────────────────────────────────────────
   contentEl.innerHTML = `
     ${sourceBanner}
+    ${visualOnlyBanner}
     <div class="pears-verdict ${verdictClass}">${escapeHtml(verdict)}</div>
+    ${blockerHtml}
     ${flagsHtml}
     ${summary ? `<p class="pears-summary">${escapeHtml(summary)}</p>` : ''}
 
@@ -5423,6 +5440,8 @@ async function createThreeRuntime(container: HTMLDivElement): Promise<ThreeRunti
     leaflets: new THREE.Group(),
     ascending_aorta: new THREE.Group(),
     annulus_ring: new THREE.Group(),
+    pears_outer_aorta: new THREE.Group(),
+    pears_support_sleeve: new THREE.Group(),
   };
   Object.values(meshGroups).forEach((group) => rootGroup.add(group));
   const meshState = {
@@ -5430,6 +5449,8 @@ async function createThreeRuntime(container: HTMLDivElement): Promise<ThreeRunti
     leaflets: { visible: true, opacity: 0.8, label: 'Leaflets' },
     ascending_aorta: { visible: true, opacity: 0.4, label: 'Ascending' },
     annulus_ring: { visible: true, opacity: 1, label: 'Annulus ring' },
+    pears_outer_aorta: { visible: true, opacity: 0.25, label: 'PEARS aorta proxy' },
+    pears_support_sleeve: { visible: true, opacity: 0.36, label: 'PEARS sleeve preview' },
   };
 
   const raycaster = new THREE.Raycaster();
@@ -5516,6 +5537,8 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
     leaflets: new THREE.Group(),
     ascending_aorta: new THREE.Group(),
     annulus_ring: new THREE.Group(),
+    pears_outer_aorta: new THREE.Group(),
+    pears_support_sleeve: new THREE.Group(),
   };
   Object.values(runtime.layerGroups).forEach((group) => runtime.rootGroup.add(group));
   Object.values(runtime.meshGroups).forEach((group) => runtime.rootGroup.add(group));
@@ -5524,6 +5547,8 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
     leaflets: { visible: true, opacity: readMeshOpacityFromUi('leaflets', 0.8), label: 'Leaflets' },
     ascending_aorta: { visible: true, opacity: readMeshOpacityFromUi('ascending_aorta', 0.4), label: 'Ascending' },
     annulus_ring: { visible: true, opacity: readMeshOpacityFromUi('annulus_ring', 1), label: 'Annulus ring' },
+    pears_outer_aorta: { visible: true, opacity: readMeshOpacityFromUi('pears_outer_aorta', 0.25), label: 'PEARS aorta proxy' },
+    pears_support_sleeve: { visible: true, opacity: readMeshOpacityFromUi('pears_support_sleeve', 0.36), label: 'PEARS sleeve preview' },
   };
 
   const loadedRoot = await maybeLoadStlMesh(
@@ -5582,6 +5607,33 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
       runtime.meshGroups.annulus_ring
     )
     : false;
+  const loadedPearsOuterAorta = await maybeLoadStlMesh(
+    casePayload.links.pears_outer_aorta_stl,
+    loader,
+    new THREE.MeshStandardMaterial({
+      color: 0x8fd3ff,
+      transparent: true,
+      opacity: runtime.meshState.pears_outer_aorta.opacity,
+      roughness: 0.58,
+      metalness: 0.01,
+      side: THREE.DoubleSide,
+    }),
+    runtime.meshGroups.pears_outer_aorta
+  );
+  const loadedPearsSleeve = await maybeLoadStlMesh(
+    casePayload.links.pears_support_sleeve_stl,
+    loader,
+    new THREE.MeshStandardMaterial({
+      color: 0x57d7c6,
+      wireframe: true,
+      transparent: true,
+      opacity: runtime.meshState.pears_support_sleeve.opacity,
+      roughness: 0.42,
+      metalness: 0.02,
+      side: THREE.DoubleSide,
+    }),
+    runtime.meshGroups.pears_support_sleeve
+  );
 
   if (Array.isArray(casePayload.centerline?.points_world) && casePayload.centerline!.points_world!.length > 1) {
     const points = casePayload.centerline!.points_world!.map((point) => toPoint3(point));
@@ -5591,8 +5643,13 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
   }
 
   const annulusRing = pickObject(pickObject(casePayload.aortic_root_model)?.annulus_ring);
-  const annulusRingPoints = Array.isArray(annulusRing?.ring_points_world)
-    ? annulusRing.ring_points_world.map((point) => toPoint3(point))
+  const annulusRingSource = Array.isArray(annulusRing?.ring_points_world)
+    ? annulusRing.ring_points_world
+    : Array.isArray(annulusRing?.contour_world)
+      ? annulusRing.contour_world
+      : [];
+  const annulusRingPoints = Array.isArray(annulusRingSource)
+    ? annulusRingSource.map((point) => toPoint3(point))
     : [];
   if (annulusRingPoints.length > 2) {
     runtime.layerGroups.annulus.add(buildRingLine(annulusRingPoints, 0xf06c7f, 'annulus-ring'));
@@ -5656,12 +5713,18 @@ async function loadThreeCase(runtime: ThreeRuntime, casePayload: WorkstationCase
     if (!record?.point_world) return;
     runtime.layerGroups.coronary_ostia.add(buildMarker(toPoint3(record.point_world), index === 0 ? 0x4da6ff : 0xff8f7b, 1.2, `coronary-${key}`));
   });
+  const pearsWindows = pickObject(pickObject(casePayload.pears_geometry)?.coronary_windows);
+  ['left', 'right'].forEach((key, index) => {
+    const record = pickObject(pearsWindows?.[key]);
+    if (!record?.ostium_world) return;
+    runtime.layerGroups.coronary_ostia.add(buildMarker(toPoint3(record.ostium_world), index === 0 ? 0x4da6ff : 0xff8f7b, 1.35, `pears-coronary-${key}`));
+  });
 
   positionThreeCameraForCase(runtime, casePayload);
   updateThreeMeshFromUi();
   updateThreeLayerVisibility();
   updateThreePlaneHighlights();
-  if (!loadedRoot && !loadedLeaflets && !loadedAscending && !loadedAnnulusRing && DOM.threeFallback) {
+  if (!loadedRoot && !loadedLeaflets && !loadedAscending && !loadedAnnulusRing && !loadedPearsOuterAorta && !loadedPearsSleeve && DOM.threeFallback) {
     DOM.threeFallback.innerHTML = '<div class="three-fallback-card"><h3>3D model unavailable</h3><p>⚠ Data unavailable</p></div>';
     DOM.threeFallback.classList.remove('hidden');
   }
@@ -5897,7 +5960,9 @@ function updateThreeMeshFromUi(): void {
     const toggle = DOM.threeMeshToggles.find((entry) => entry.dataset.threeMeshToggle === key);
     const slider = DOM.threeMeshOpacity.find((entry) => entry.dataset.threeMeshOpacity === key);
     const visible = toggle ? toggle.checked : true;
-    const opacity = slider ? Math.max(0, Math.min(1, (Number.parseInt(slider.value, 10) || 0) / 100)) : 1;
+    const opacity = slider
+      ? Math.max(0, Math.min(1, (Number.parseInt(slider.value, 10) || 0) / 100))
+      : runtime.meshState[key]?.opacity ?? 1;
     runtime.meshState[key] = {
       ...(runtime.meshState[key] || { label: key }),
       visible,

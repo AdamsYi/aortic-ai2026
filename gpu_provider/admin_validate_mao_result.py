@@ -67,6 +67,7 @@ def export_json_artifacts(result: dict[str, Any]) -> dict[str, str]:
             first_dict(result.get("aortic_root_model"), result.get("aortic_root_computational_model")),
         ),
         ("leaflet_model", "leaflet_model.json", first_dict(result.get("leaflet_model"))),
+        ("pears_model", "pears_model.json", first_dict(result.get("pears_geometry"))),
     ]
 
     for key, filename, payload in direct_exports:
@@ -78,6 +79,9 @@ def export_json_artifacts(result: dict[str, Any]) -> dict[str, str]:
             write_json(target, payload)
         if target.exists() and target.stat().st_size > 0:
             exported[key] = f"artifacts/{filename}"
+    coronary_path = ARTIFACTS_DIR / "pears_coronary_windows.json"
+    if coronary_path.exists() and coronary_path.stat().st_size > 0:
+        exported["pears_coronary_windows"] = "artifacts/pears_coronary_windows.json"
 
     return exported
 
@@ -140,7 +144,13 @@ def update_manifest(
         for item in data_quality.get("failure_reasons", [])
         if isinstance(item, str) and not str(item).startswith(stale_prefixes)
     ]
-    for reason in [*missing_required, *mesh_failure_reasons(mesh_report)]:
+    study_meta = manifest.get("study_meta") if isinstance(manifest.get("study_meta"), dict) else {}
+    slice_thickness = study_meta.get("slice_thickness_mm") if isinstance(study_meta, dict) else None
+    slice_reason = []
+    if isinstance(slice_thickness, (int, float)) and float(slice_thickness) > 0.75:
+        slice_reason.append("pears_slice_thickness_above_0_75mm")
+
+    for reason in [*missing_required, *mesh_failure_reasons(mesh_report), *slice_reason]:
         if reason not in failure_reasons:
             failure_reasons.append(reason)
 
@@ -173,12 +183,30 @@ def update_manifest(
         "quality_gates": "qa/quality_gates.json",
         "mesh_qa": "qa/mesh_qa.json",
     }
+    if (QA_DIR / "pears_visual_qa.json").exists():
+        manifest["qa_index"]["pears_visual_qa"] = "qa/pears_visual_qa.json"
     manifest["mesh_qa"] = mesh_report
+    pears_model = read_json(ARTIFACTS_DIR / "pears_model.json")
+    pears_visual_ready = bool(pears_model.get("visual_ready"))
+    manifest["pears_visual_ready"] = pears_visual_ready
+    if pears_model:
+        manifest["pears_model_summary"] = {
+            "intended_use": pears_model.get("intended_use"),
+            "manufacturing_ready": bool(pears_model.get("manufacturing_ready")),
+            "visual_ready": pears_visual_ready,
+            "blockers": pears_model.get("blockers", []),
+        }
     manifest["capabilities"] = {
         "cpr": capability("centerline" in artifact_index, "centerline" if "centerline" in artifact_index else "missing_centerline"),
         "coronary_ostia": capability(False, "coronary_ostia_not_detected"),
         "leaflet_geometry": capability(mesh_gate_all_pass and "leaflet_model" in artifact_index, "mesh_qa_failed" if not mesh_gate_all_pass else "leaflet_model"),
-        "pears_geometry": capability(mesh_gate_all_pass and "aortic_root_model" in artifact_index, "mesh_qa_failed" if not mesh_gate_all_pass else "aortic_root_model"),
+        "pears_geometry": {
+            "available": pears_visual_ready,
+            "inferred": False,
+            "legacy": False,
+            "source": "pears_model" if pears_visual_ready else "unavailable",
+            "reason": None if pears_visual_ready else "pears_visual_artifact_missing_or_failed",
+        },
     }
     manifest["uncertainty_summary"] = {
         "clinician_review_required": not display_ready,
@@ -233,6 +261,8 @@ def main() -> None:
             ("ascending_aorta_stl", MESH_DIR / "ascending_aorta.stl", "meshes/ascending_aorta.stl"),
             ("leaflets_stl", MESH_DIR / "leaflets.stl", "meshes/leaflets.stl"),
             ("annulus_ring_stl", MESH_DIR / "annulus_ring.stl", "meshes/annulus_ring.stl"),
+            ("pears_outer_aorta_stl", MESH_DIR / "pears_outer_aorta.stl", "meshes/pears_outer_aorta.stl"),
+            ("pears_support_sleeve_stl", MESH_DIR / "pears_support_sleeve_preview.stl", "meshes/pears_support_sleeve_preview.stl"),
         ]
     )
     report_index = existing_index(
@@ -249,8 +279,12 @@ def main() -> None:
         "ascending_aorta_stl": mesh_index.get("ascending_aorta_stl"),
         "leaflets_stl": mesh_index.get("leaflets_stl"),
         "annulus_ring_stl": mesh_index.get("annulus_ring_stl"),
+        "pears_outer_aorta_stl": mesh_index.get("pears_outer_aorta_stl"),
+        "pears_support_sleeve_stl": mesh_index.get("pears_support_sleeve_stl"),
         "measurements": artifact_index.get("measurements"),
         "planning": artifact_index.get("planning"),
+        "pears_model": artifact_index.get("pears_model"),
+        "pears_coronary_windows": artifact_index.get("pears_coronary_windows"),
         "centerline": artifact_index.get("centerline"),
         "annulus_plane": artifact_index.get("annulus_plane"),
         "aortic_root_model": artifact_index.get("aortic_root_model"),
@@ -267,6 +301,8 @@ def main() -> None:
         "display_ready": not missing_required and mesh_gate_all_pass,
         "mesh_qa": mesh_report,
     }
+    if (QA_DIR / "pears_visual_qa.json").exists():
+        quality_gates["pears_visual_qa"] = "qa/pears_visual_qa.json"
     write_json(QA_DIR / "mesh_qa.json", mesh_report)
     write_json(QA_DIR / "quality_gates.json", quality_gates)
 

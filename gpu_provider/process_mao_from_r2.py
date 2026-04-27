@@ -79,6 +79,7 @@ def run_pipeline() -> None:
         DEVICE,
         "--quality",
         QUALITY,
+        "--pears-visual",
         "--job-id",
         CASE_ID,
         "--study-id",
@@ -98,12 +99,17 @@ def verify_outputs() -> None:
         CASE_DIR / "meshes" / "aortic_root.stl",
         CASE_DIR / "meshes" / "ascending_aorta.stl",
         CASE_DIR / "meshes" / "leaflets.stl",
+        CASE_DIR / "meshes" / "annulus_ring.stl",
+        CASE_DIR / "meshes" / "pears_outer_aorta.stl",
+        CASE_DIR / "meshes" / "pears_support_sleeve_preview.stl",
         CASE_DIR / "meshes" / "centerline.json",
         CASE_DIR / "meshes" / "annulus_plane.json",
         CASE_DIR / "meshes" / "aortic_root_model.json",
         CASE_DIR / "meshes" / "leaflet_model.json",
         CASE_DIR / "meshes" / "measurements.json",
         CASE_DIR / "meshes" / "planning_report.pdf",
+        CASE_DIR / "artifacts" / "pears_model.json",
+        CASE_DIR / "artifacts" / "pears_coronary_windows.json",
         CASE_DIR / "artifacts" / "pipeline_result.json",
     ]
     missing = [str(path) for path in required if not path.exists() or path.stat().st_size <= 0]
@@ -116,10 +122,21 @@ def verify_outputs() -> None:
         print("trimesh unavailable; skipping STL triangle count")
         return
 
-    for name in ["aortic_root.stl", "ascending_aorta.stl", "leaflets.stl"]:
+    for name in ["aortic_root.stl", "ascending_aorta.stl", "leaflets.stl", "annulus_ring.stl", "pears_support_sleeve_preview.stl"]:
         path = CASE_DIR / "meshes" / name
         mesh = trimesh.load(str(path))
         print(f"{name}: {len(mesh.faces):,} tris")
+
+
+def validate_manifest() -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    cmd = [sys.executable, "-u", "-m", "gpu_provider.admin_validate_mao_result"]
+    print("Validating manifest and QA:")
+    print(" ".join(cmd))
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env)
+    if result.returncode != 0:
+        raise RuntimeError(f"Validation failed with code {result.returncode}")
 
 def main():
     print(f"=== Processing {CASE_ID} ===")
@@ -142,6 +159,7 @@ def main():
     print(f"Downloaded: {NIFTI_DEST.stat().st_size / (1024*1024):.1f} MB")
     run_pipeline()
     verify_outputs()
+    validate_manifest()
     print("=== Processing complete ===")
 
 if __name__ == "__main__":
